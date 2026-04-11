@@ -1,4 +1,4 @@
-import styles from "navbar.module.css"
+import styles from "./navbar.module.css"
 export default function Navbar() {
     return <div className={styles.navbarContainer}>
         <header className={styles.navbar}>
@@ -8,7 +8,7 @@ export default function Navbar() {
                 </div>
             </div>
             <nav className={styles.navRight}>
-                <ul>
+                <ul className={styles.navList}>
                     <li>
                         <a href="/editor">Editor</a>
                     </li>
@@ -16,7 +16,7 @@ export default function Navbar() {
                         <a href="/about">About</a>
                     </li>
                     <li>
-                        <a href="/signup">Sign Up</a>
+                        <a href="/signup">Create</a>
                     </li>
                 </ul>
             </nav>

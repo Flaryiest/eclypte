@@ -173,3 +173,8 @@ button {
   overflow-x: hidden;
   margin-top: 30px;
 }
+
+a {
+  text-decoration: none;
+  color: black;
+}

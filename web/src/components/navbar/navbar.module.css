@@ -1,0 +1,36 @@
+.navbarContainer {
+    display: flex;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0rem 2rem;
+}
+
+.navbar {
+    display: flex;
+    width: 100%;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.navLeft {
+    display: flex;
+    gap: 1rem;
+}
+
+.logo {
+    font-size: 1.3rem;
+    font-weight: 500;
+}
+
+.navRight {
+    display: flex;
+    gap: 1rem;
+    flex-direction: row;
+}
+
+.navList {
+    display: flex;
+    gap: 2rem;
+    flex-direction: row;
+}
