@@ -8,8 +8,11 @@ export default function Home() {
       <main className={styles.main}>
         <section className={styles.heroContainer}>
           <HeroLayers />
-          <h1 className={styles.heroText}>Building Dreams.</h1>
-          <h2 className={styles.heroDescription}>Creation is what makes us human. The ability to evoke emotion.</h2>
+          <div className={styles.heroTextContainer}>
+            <h1 className={styles.heroText}>Building Dreams.</h1>
+            <h2 className={styles.heroDescription}>Creation is what makes us human. The ability to evoke emotion.</h2>
+          </div>
+
         </section>
         <section className={styles.features}>
           <h2 className={styles.featuresTitle}>The future of creation is here.</h2>

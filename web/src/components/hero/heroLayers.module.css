@@ -30,42 +30,40 @@
 /* ── Midground layer (atmospheric orbs) ── */
 .layerMid {
     z-index: 2;
-    mix-blend-mode: screen;
-    opacity: 0.4;
     transform: translate3d(0, 0, 0) scale(1.1);
 }
 
 .orb {
     position: absolute;
     border-radius: 50%;
-    filter: blur(80px);
+    filter: blur(60px);
 }
 
 .orb1 {
-    width: 400px;
-    height: 400px;
-    background: radial-gradient(circle, rgba(100, 60, 180, 0.5), transparent 70%);
-    top: 10%;
-    left: 20%;
-    animation: float1 12s ease-in-out infinite;
+    width: 500px;
+    height: 500px;
+    background: radial-gradient(circle, rgba(120, 60, 220, 0.35), transparent 70%);
+    top: 5%;
+    left: 15%;
+    animation: float1 14s ease-in-out infinite;
 }
 
 .orb2 {
-    width: 300px;
-    height: 300px;
-    background: radial-gradient(circle, rgba(40, 100, 200, 0.4), transparent 70%);
-    top: 40%;
-    right: 15%;
-    animation: float2 15s ease-in-out infinite;
+    width: 400px;
+    height: 400px;
+    background: radial-gradient(circle, rgba(30, 120, 255, 0.3), transparent 70%);
+    top: 35%;
+    right: 10%;
+    animation: float2 18s ease-in-out infinite;
 }
 
 .orb3 {
-    width: 250px;
-    height: 250px;
-    background: radial-gradient(circle, rgba(150, 50, 100, 0.3), transparent 70%);
-    bottom: 20%;
-    left: 40%;
-    animation: float3 10s ease-in-out infinite;
+    width: 350px;
+    height: 350px;
+    background: radial-gradient(circle, rgba(200, 50, 120, 0.25), transparent 70%);
+    bottom: 15%;
+    left: 35%;
+    animation: float3 12s ease-in-out infinite;
 }
 
 /* ── Foreground layer (particles + shooting stars) ── */
@@ -75,45 +73,105 @@
     transform: translate3d(0, 0, 0) scale(1.12);
 }
 
+/* ── Particles ── */
 .particle {
     position: absolute;
-    width: 2px;
-    height: 2px;
-    background: rgba(255, 255, 255, 0.6);
+    background: white;
     border-radius: 50%;
     animation: drift 8s ease-in-out infinite;
 }
 
-.particle:nth-child(1) { top: 15%; left: 25%; animation-delay: 0s; animation-duration: 7s; }
-.particle:nth-child(2) { top: 35%; left: 60%; animation-delay: -2s; animation-duration: 9s; }
-.particle:nth-child(3) { top: 55%; left: 40%; animation-delay: -4s; animation-duration: 6s; }
-.particle:nth-child(4) { top: 70%; left: 75%; animation-delay: -1s; animation-duration: 11s; }
-.particle:nth-child(5) { top: 25%; left: 85%; animation-delay: -3s; animation-duration: 8s; }
-.particle:nth-child(6) { top: 80%; left: 15%; animation-delay: -5s; animation-duration: 10s; }
-.particle:nth-child(7) { top: 45%; left: 10%; animation-delay: -1.5s; animation-duration: 7.5s; }
+.particle:nth-child(1) { width: 3px; height: 3px; top: 12%; left: 22%; animation-delay: 0s; animation-duration: 7s; }
+.particle:nth-child(2) { width: 2px; height: 2px; top: 30%; left: 58%; animation-delay: -2s; animation-duration: 9s; }
+.particle:nth-child(3) { width: 3px; height: 3px; top: 50%; left: 38%; animation-delay: -4s; animation-duration: 6s; }
+.particle:nth-child(4) { width: 2px; height: 2px; top: 65%; left: 72%; animation-delay: -1s; animation-duration: 11s; }
+.particle:nth-child(5) { width: 4px; height: 4px; top: 20%; left: 82%; animation-delay: -3s; animation-duration: 8s; }
+.particle:nth-child(6) { width: 2px; height: 2px; top: 75%; left: 12%; animation-delay: -5s; animation-duration: 10s; }
+.particle:nth-child(7) { width: 3px; height: 3px; top: 42%; left: 8%; animation-delay: -1.5s; animation-duration: 7.5s; }
 
-.shootingStar {
+/* ── Shooting stars ── */
+.shootingStar,
+.shootingStar2,
+.shootingStar3,
+.shootingStar4,
+.shootingStar5 {
     position: absolute;
-    width: 80px;
     height: 1px;
-    background: linear-gradient(90deg, rgba(255, 255, 255, 0.8), transparent);
-    top: 12%;
-    left: -80px;
-    transform: rotate(-35deg);
-    animation: shoot 6s ease-in 3s infinite;
     opacity: 0;
 }
 
-.shootingStar2 {
+/* Bright head dot on each star */
+.shootingStar::before,
+.shootingStar2::before,
+.shootingStar3::before,
+.shootingStar4::before,
+.shootingStar5::before {
+    content: "";
     position: absolute;
+    right: -2px;
+    top: 50%;
+    translate: 0 -50%;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: white;
+    box-shadow: 0 0 8px 3px rgba(255, 255, 255, 0.6), 0 0 16px 6px rgba(255, 255, 255, 0.2);
+}
+
+.shootingStar {
+    width: 80px;
+    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.6) 100%);
+    top: 6%;
+    left: -5%;
+    animation: shoot1 7s ease-out 1s infinite;
+}
+
+.shootingStar2 {
     width: 60px;
-    height: 1px;
-    background: linear-gradient(90deg, rgba(255, 255, 255, 0.6), transparent);
-    top: 28%;
-    left: -60px;
-    transform: rotate(-30deg);
-    animation: shoot2 8s ease-in 7s infinite;
-    opacity: 0;
+    background: linear-gradient(90deg, transparent 0%, rgba(210, 225, 255, 0.5) 100%);
+    top: 14%;
+    left: 3%;
+    animation: shoot2 8s ease-out 4s infinite;
+}
+
+.shootingStar2::before {
+    box-shadow: 0 0 7px 2px rgba(210, 225, 255, 0.5), 0 0 14px 5px rgba(210, 225, 255, 0.15);
+}
+
+.shootingStar3 {
+    width: 50px;
+    background: linear-gradient(90deg, transparent 0%, rgba(255, 240, 220, 0.45) 100%);
+    top: 9%;
+    left: 8%;
+    animation: shoot3 9s ease-out 7s infinite;
+}
+
+.shootingStar3::before {
+    box-shadow: 0 0 6px 2px rgba(255, 240, 220, 0.45), 0 0 12px 4px rgba(255, 240, 220, 0.12);
+}
+
+.shootingStar4 {
+    width: 70px;
+    background: linear-gradient(90deg, transparent 0%, rgba(230, 220, 255, 0.5) 100%);
+    top: 4%;
+    left: 0%;
+    animation: shoot4 8s ease-out 10s infinite;
+}
+
+.shootingStar4::before {
+    box-shadow: 0 0 7px 2px rgba(230, 220, 255, 0.45), 0 0 14px 5px rgba(230, 220, 255, 0.12);
+}
+
+.shootingStar5 {
+    width: 55px;
+    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 240, 0.45) 100%);
+    top: 18%;
+    left: -2%;
+    animation: shoot5 9s ease-out 14s infinite;
+}
+
+.shootingStar5::before {
+    box-shadow: 0 0 6px 2px rgba(255, 255, 240, 0.4), 0 0 12px 4px rgba(255, 255, 240, 0.1);
 }
 
 /* ── Film grain overlay ── */
@@ -162,36 +220,62 @@
 /* ── Keyframes ── */
 @keyframes float1 {
     0%, 100% { transform: translate(0, 0); }
-    50% { transform: translate(30px, -20px); }
+    33% { transform: translate(40px, -25px); }
+    66% { transform: translate(-20px, 15px); }
 }
 
 @keyframes float2 {
     0%, 100% { transform: translate(0, 0); }
-    50% { transform: translate(-25px, 15px); }
+    33% { transform: translate(-30px, 20px); }
+    66% { transform: translate(25px, -10px); }
 }
 
 @keyframes float3 {
     0%, 100% { transform: translate(0, 0); }
-    50% { transform: translate(20px, 25px); }
+    33% { transform: translate(20px, 30px); }
+    66% { transform: translate(-15px, -20px); }
 }
 
 @keyframes drift {
-    0%, 100% { transform: translate(0, 0); opacity: 0.3; }
-    50% { transform: translate(10px, -15px); opacity: 0.8; }
+    0%, 100% { transform: translate(0, 0); opacity: 0.2; }
+    25% { opacity: 0.8; }
+    50% { transform: translate(12px, -18px); opacity: 0.5; }
+    75% { opacity: 0.9; }
 }
 
-@keyframes shoot {
-    0% { opacity: 0; transform: rotate(-35deg) translateX(0); }
-    3% { opacity: 1; }
-    12% { opacity: 0; transform: rotate(-35deg) translateX(600px); }
-    100% { opacity: 0; transform: rotate(-35deg) translateX(600px); }
+@keyframes shoot1 {
+    0% { opacity: 0; transform: rotate(12deg) translateX(0); }
+    1% { opacity: 1; }
+    25% { opacity: 0; transform: rotate(12deg) translateX(1800px); }
+    100% { opacity: 0; transform: rotate(12deg) translateX(1800px); }
 }
 
 @keyframes shoot2 {
-    0% { opacity: 0; transform: rotate(-30deg) translateX(0); }
-    3% { opacity: 0.8; }
-    12% { opacity: 0; transform: rotate(-30deg) translateX(500px); }
-    100% { opacity: 0; transform: rotate(-30deg) translateX(500px); }
+    0% { opacity: 0; transform: rotate(8deg) translateX(0); }
+    1% { opacity: 0.9; }
+    22% { opacity: 0; transform: rotate(8deg) translateX(1500px); }
+    100% { opacity: 0; transform: rotate(8deg) translateX(1500px); }
+}
+
+@keyframes shoot3 {
+    0% { opacity: 0; transform: rotate(15deg) translateX(0); }
+    1% { opacity: 0.85; }
+    20% { opacity: 0; transform: rotate(15deg) translateX(1300px); }
+    100% { opacity: 0; transform: rotate(15deg) translateX(1300px); }
+}
+
+@keyframes shoot4 {
+    0% { opacity: 0; transform: rotate(10deg) translateX(0); }
+    1% { opacity: 0.9; }
+    22% { opacity: 0; transform: rotate(10deg) translateX(1600px); }
+    100% { opacity: 0; transform: rotate(10deg) translateX(1600px); }
+}
+
+@keyframes shoot5 {
+    0% { opacity: 0; transform: rotate(13deg) translateX(0); }
+    1% { opacity: 0.8; }
+    18% { opacity: 0; transform: rotate(13deg) translateX(1400px); }
+    100% { opacity: 0; transform: rotate(13deg) translateX(1400px); }
 }
 
 @keyframes grainShift {
@@ -207,7 +291,7 @@
 @media (prefers-reduced-motion: reduce) {
     .orb1, .orb2, .orb3,
     .particle,
-    .shootingStar, .shootingStar2,
+    .shootingStar, .shootingStar2, .shootingStar3, .shootingStar4, .shootingStar5,
     .grain {
         animation: none;
     }

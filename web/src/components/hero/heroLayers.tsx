@@ -116,6 +116,9 @@ export default function HeroLayers() {
                 <div className={styles.particle} />
                 <div className={styles.shootingStar} />
                 <div className={styles.shootingStar2} />
+                <div className={styles.shootingStar3} />
+                <div className={styles.shootingStar4} />
+                <div className={styles.shootingStar5} />
             </div>
 
             {/* Film grain */}
