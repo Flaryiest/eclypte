@@ -1,5 +1,6 @@
 import Navbar from "@components/navbar/navbar";
 import styles from "./page.module.css";
+import { ThemeProvider } from 'next-themes'
 export default function Home() {
   return (
     <div className={styles.page}>

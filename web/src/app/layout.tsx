@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, Inter_Tight } from "next/font/google";
+import {ThemeProvider } from 'next-themes'
 import "./globals.css";
 
 const inter = Inter({
@@ -23,8 +24,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${inter.variable} ${interTight.variable}`}>{children}</body>
+    <html suppressHydrationWarning lang="en">
+
+      <body className={`${inter.variable} ${interTight.variable}`}>
+        <ThemeProvider attribute="data-theme" defaultTheme="dark" enableSystem={false}>
+            {children}
+          </ThemeProvider>      
+        </body>
     </html>
   );
 }

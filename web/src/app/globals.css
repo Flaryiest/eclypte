@@ -131,6 +131,14 @@ table {
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  --color-background: #ffffff;
+  --color-primary: #000000;
+}
+
+
+[data-theme="dark"] {
+  --color-background: #000000;
+  --color-primary: #ffffff;
 }
 
 body {
@@ -139,17 +147,11 @@ body {
   min-width: 200px;
   min-height: 100dvh;
   max-width: 100dvw;
+  background-color: var(--color-background);
+  color: var(--color-primary);
   font-family:
     var(--font-inter-tight),  var(--font-inter),  system-ui,
     Helvetica, Arial, sans-serif;
-}
-
-#root {
-  margin: 0 0;
-  max-width: 100dvw;
-  width: 100%;
-  box-sizing: border-box;
-  height: 100dvh;
 }
 
 a {
@@ -176,5 +178,5 @@ button {
 
 a {
   text-decoration: none;
-  color: black;
+  color: var(--color-primary);
 }
