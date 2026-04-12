@@ -90,7 +90,7 @@ video {
 html {
   scrollbar-gutter: stable;
 }
-
+a
 article,
 aside,
 details,
@@ -133,6 +133,7 @@ table {
   -moz-osx-font-smoothing: grayscale;
   --color-background: #ffffff;
   --color-primary: #000000;
+  --color-secondary: #cacaca;
 }
 
 
@@ -150,7 +151,7 @@ body {
   background-color: var(--color-background);
   color: var(--color-primary);
   font-family:
-    var(--font-inter-tight),  var(--font-inter),  system-ui,
+    var(--font-neue), var(--font-eiko), var(--font-outfit), var(--font-inter-tight),  var(--font-inter),  system-ui,
     Helvetica, Arial, sans-serif;
 }
 

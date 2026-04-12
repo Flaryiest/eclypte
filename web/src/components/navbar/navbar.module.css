@@ -3,11 +3,13 @@
     width: 100%;
     box-sizing: border-box;
     padding: 0rem 2rem;
+    align-items: center;
+    justify-content: center;
 }
 
 .navbar {
     display: flex;
-    width: 100%;
+    width: 80%;
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
@@ -21,6 +23,7 @@
 .logo {
     font-size: 1.3rem;
     font-weight: 500;
+    font-family: var(--font-eiko);
 }
 
 .navRight {
@@ -31,6 +34,13 @@
 
 .navList {
     display: flex;
-    gap: 2rem;
-    flex-direction: row;
+    gap: 4rem;
+    flex-direction: row;   
+}
+
+.navLink {
+    color: var(--color-secondary);
+    font-weight: 500;
+    font-size: 1rem;
+    font-family: var(--font-neue);
 }

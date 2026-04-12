@@ -1,22 +1,25 @@
+import Link from "next/link"
 import styles from "./navbar.module.css"
 export default function Navbar() {
     return <div className={styles.navbarContainer}>
         <header className={styles.navbar}>
             <div className={styles.navLeft}>
-                <div className={styles.logo}>
+                <Link className={styles.logo} href="/">
                     Eclypte
-                </div>
+                </Link>
             </div>
             <nav className={styles.navRight}>
                 <ul className={styles.navList}>
                     <li>
-                        <a href="/editor">Editor</a>
+                        <Link className={styles.navLink} href="/editor">Editor</Link>
                     </li>
                     <li>
-                        <a href="/about">About</a>
+                        <Link className={styles.navLink} href="/about">About</Link>
                     </li>
                     <li>
-                        <a href="/signup">Create</a>
+                        <Link className={styles.navLink} href="/signup">
+                            Create
+                        </Link>
                     </li>
                 </ul>
             </nav>
