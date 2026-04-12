@@ -133,13 +133,14 @@ table {
   -moz-osx-font-smoothing: grayscale;
   --color-background: #ffffff;
   --color-primary: #000000;
-  --color-secondary: #cacaca;
+  --color-secondary: #272727;
 }
 
 
 [data-theme="dark"] {
   --color-background: #000000;
   --color-primary: #ffffff;
+  --color-secondary: #cacaca;
 }
 
 body {
@@ -181,3 +182,4 @@ a {
   text-decoration: none;
   color: var(--color-primary);
 }
+

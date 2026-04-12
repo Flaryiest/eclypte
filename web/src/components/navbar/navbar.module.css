@@ -2,9 +2,22 @@
     display: flex;
     width: 100%;
     box-sizing: border-box;
-    padding: 0rem 2rem;
+    padding: 1.5rem 2rem;
     align-items: center;
     justify-content: center;
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 50;
+    background: transparent;
+    backdrop-filter: none;
+    transition: background 0.3s ease, backdrop-filter 0.3s ease;
+}
+
+.scrolled {
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
 }
 
 .navbar {
@@ -40,7 +53,12 @@
 
 .navLink {
     color: var(--color-secondary);
-    font-weight: 500;
+    font-weight: 400;
     font-size: 1rem;
     font-family: var(--font-neue);
+    transition: color 0.2s ease-in-out;
+}
+
+.navLink:hover {
+    color: var(--color-primary);   
 }

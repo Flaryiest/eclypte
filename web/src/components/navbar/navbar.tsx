@@ -1,7 +1,19 @@
+"use client"
+
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import styles from "./navbar.module.css"
+
 export default function Navbar() {
-    return <div className={styles.navbarContainer}>
+    const [scrolled, setScrolled] = useState(false)
+
+    useEffect(() => {
+        const onScroll = () => setScrolled(window.scrollY > 50)
+        window.addEventListener("scroll", onScroll, { passive: true })
+        return () => window.removeEventListener("scroll", onScroll)
+    }, [])
+
+    return <div className={`${styles.navbarContainer} ${scrolled ? styles.scrolled : ""}`}>
         <header className={styles.navbar}>
             <div className={styles.navLeft}>
                 <Link className={styles.logo} href="/">
@@ -14,7 +26,7 @@ export default function Navbar() {
                         <Link className={styles.navLink} href="/editor">Editor</Link>
                     </li>
                     <li>
-                        <Link className={styles.navLink} href="/about">About</Link>
+                        <Link className={styles.navLink} href="/pricing">Pricing</Link>
                     </li>
                     <li>
                         <Link className={styles.navLink} href="/signup">
