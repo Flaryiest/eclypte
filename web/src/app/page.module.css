@@ -2,6 +2,7 @@
     width: 100%;
     min-height: 100%;
     overflow-x: hidden;
+    min-height: 300dvh; /*  Remove later */
 }
 
 .main {
@@ -22,6 +23,20 @@
     justify-content: center;
     align-items: center;
     padding-right: 10rem;
+}
+
+.heroTextContainer {
+    position: relative;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    align-items: flex-start;
+    width: 100%;
+    max-width: 1200px;
+    margin-bottom: 10rem;
+    box-sizing: content-box;
+    margin-left: 4rem;
 }
 
 .heroText {
@@ -52,20 +67,6 @@
     text-shadow: 0 2px 20px rgba(0, 0, 0, 0.9), 0 0 50px rgba(0, 0, 0, 0.6), 0 0 80px rgba(0, 0, 0, 0.3);
 }
 
-.heroTextContainer {
-    position: relative;
-    z-index: 10000;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    align-items: flex-start;
-    width: 100%;
-    max-width: 1200px;
-    margin-bottom: 10rem;
-    box-sizing: content-box;
-    margin-left: 4rem;
-}
-
 @keyframes fadeInUp {
     to {
         opacity: 1;
@@ -73,7 +74,102 @@
     }
 }
 
+.stepsContainer {
+    display: flex;
+    flex-direction: column;
+    gap: 4rem;
+    width: 100%;
+    max-width: 100dvw;
+    margin: 0 auto;
+    padding-top: 2rem;
+    justify-content: center;
+    align-items: center;
+}
 
-.features {
-    min-height: 800px;
+.stepsTextContainer {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    width: 100%;
+    max-width: 100dvw;
+    border-radius: 20px;
+    box-sizing: border-box;
+    padding: 4rem;
+}
+
+.stepsTitle {
+    font-family: var(--font-eiko);
+    font-size: 2.5rem;
+    font-weight: 500;
+    color: var(--color-highlight);
+}
+
+.stepsDescription {
+    font-family: var(--font-neue);
+    font-size: 1.3rem;
+    color: var(--color-primary);
+    width: 70ch;
+}
+
+.stepsGrid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2rem;
+    width: 100%;
+    max-width: 1200px;
+    padding: 0 2rem;
+    box-sizing: border-box;
+}
+
+.stepCard {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 2.5rem 2rem;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    position: relative;
+    overflow: hidden;
+}
+
+.stepCard::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, #d4607a, var(--color-highlight));
+}
+
+.stepNumber {
+    font-family: var(--font-eiko);
+    font-size: 3rem;
+    font-weight: 800;
+    color: var(--color-highlight);
+    line-height: 1;
+}
+
+.stepCardTitle {
+    font-family: var(--font-eiko);
+    font-size: 1.3rem;
+    font-weight: 500;
+    color: var(--color-primary);
+}
+
+.stepCardDescription {
+    font-family: var(--font-neue);
+    font-size: 1rem;
+    color: var(--color-secondary);
+    line-height: 1.6;
+}
+
+@media (max-width: 768px) {
+    .stepsGrid {
+        grid-template-columns: 1fr;
+    }
 }

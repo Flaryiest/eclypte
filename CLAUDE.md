@@ -33,7 +33,13 @@ Before writing or modifying anything touching Next.js (routing, data fetching, `
 
 - **App Router** — pages live in `web/src/app/`. Components use CSS Modules (`.module.css` co-located with each component).
 - **Path aliases** — `@/*` maps to `web/src/*` and `@components/*` maps to `web/src/components/*` (configured in `web/tsconfig.json`).
-- **Components** — shared UI lives in `web/src/components/` (e.g. `navbar/`).
-- **Theming** — `next-themes` with `attribute="data-theme"` on `<ThemeProvider>`. CSS variables `--color-background` and `--color-primary` are defined in `:root` and overridden via `[data-theme="dark"]` in `globals.css`. Default theme is dark.
-- **Fonts** — Inter, Inter Tight, and Outfit are loaded via `next/font/google` in `web/src/app/layout.tsx` and exposed as CSS variables `--font-inter`, `--font-inter-tight`, and `--font-outfit`. Local fonts (PP Eiko, PP Neue Montreal) are available in `web/public/fonts/`. The bootstrapped `web/README.md`'s mention of Geist is stale — ignore it.
-- **Global styles** — `web/src/app/globals.css` includes a CSS reset, theme variables, and base element styles. Do not use `#root` selectors — Next.js has no `#root` element.
+- **Components** — shared UI lives in `web/src/components/` (e.g. `navbar/`, `hero/`). Each component is a directory with a `.tsx` file and a co-located `.module.css` file.
+- **Page layout** — the root layout (`layout.tsx`) provides fonts and the `ThemeProvider` but no shared navigation. Each page imports `<Navbar />` individually — there is no global layout-level nav.
+- **Theming** — `next-themes` with `attribute="data-theme"` on `<ThemeProvider>`. Default theme is dark. CSS variables defined in `:root` and overridden via `[data-theme="dark"]` in `globals.css`:
+  - `--color-background`, `--color-primary`, `--color-secondary`, `--color-subtitle`
+- **Fonts** — loaded in `web/src/app/layout.tsx` and applied to `<body>` as CSS variable classes:
+  - Google fonts: `--font-inter`, `--font-inter-tight`, `--font-outfit`
+  - Local fonts (from `web/public/fonts/`): `--font-neue` (PP Neue Montreal), `--font-eiko` (PP Eiko)
+  - The bootstrapped `web/README.md`'s mention of Geist is stale — ignore it.
+- **Global styles** — `web/src/app/globals.css` includes a CSS reset, theme variables, and base element styles. A `.page` utility class provides a centered full-width page wrapper. Do not use `#root` selectors — Next.js has no `#root` element.
+- **Static assets** — images live in `web/public/assets/` (e.g. `hero/` subdirectory).
