@@ -60,5 +60,27 @@
 }
 
 .navLink:hover {
-    color: var(--color-primary);   
+    color: var(--color-primary);
+}
+
+@media (max-width: 768px) {
+    .navbarContainer {
+        padding: 1rem 1rem;
+    }
+
+    .navbar {
+        width: 100%;
+    }
+
+    .navList {
+        gap: 1.5rem;
+    }
+
+    .logo {
+        font-size: 1.1rem;
+    }
+
+    .navLink {
+        font-size: 0.9rem;
+    }
 }

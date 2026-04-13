@@ -287,6 +287,37 @@
     100% { transform: translate(0, 0); }
 }
 
+/* ── Mobile ── */
+@media (max-width: 768px) {
+    .orb1 {
+        width: 250px;
+        height: 250px;
+    }
+
+    .orb2 {
+        width: 200px;
+        height: 200px;
+    }
+
+    .orb3 {
+        width: 180px;
+        height: 180px;
+    }
+
+    .orb {
+        filter: blur(40px);
+    }
+
+    .particle:nth-child(n+5) {
+        display: none;
+    }
+
+    .shootingStar4,
+    .shootingStar5 {
+        display: none;
+    }
+}
+
 /* ── Reduced motion ── */
 @media (prefers-reduced-motion: reduce) {
     .orb1, .orb2, .orb3,

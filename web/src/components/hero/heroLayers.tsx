@@ -90,12 +90,18 @@ export default function HeroLayers() {
         >
             {/* Background: hero image */}
             <div ref={bgRef} className={styles.layerBg}>
-                <img
-                    src="/assets/hero/one.webp"
-                    className={styles.heroImage}
-                    alt=""
-                    draggable={false}
-                />
+                <picture>
+                    <source
+                        media="(max-width: 768px)"
+                        srcSet="/assets/hero/one-mobile.webp"
+                    />
+                    <img
+                        src="/assets/hero/one.webp"
+                        className={styles.heroImage}
+                        alt=""
+                        draggable={false}
+                    />
+                </picture>
             </div>
 
             {/* Midground: atmospheric orbs */}

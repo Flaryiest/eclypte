@@ -111,7 +111,7 @@
     font-family: var(--font-neue);
     font-size: 1.3rem;
     color: var(--color-primary);
-    width: 70ch;
+    max-width: 70ch;
 }
 
 .stepsGrid {
@@ -169,7 +169,39 @@
 }
 
 @media (max-width: 768px) {
+    .heroContainer {
+        padding-right: 0;
+    }
+
+    .heroTextContainer {
+        margin-left: 0;
+        margin-bottom: 4rem;
+        padding: 0 1.5rem;
+        box-sizing: border-box;
+    }
+
+    .heroText {
+        font-size: 2.2rem;
+    }
+
+    .heroDescription {
+        font-size: 1.1rem;
+    }
+
+    .stepsTitle {
+        font-size: 1.8rem;
+    }
+
+    .stepsDescription {
+        font-size: 1.1rem;
+    }
+
+    .stepsTextContainer {
+        padding: 2rem 1.5rem;
+    }
+
     .stepsGrid {
         grid-template-columns: 1fr;
+        padding: 0 1.5rem;
     }
 }
