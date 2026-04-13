@@ -1,13 +1,15 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import styles from "./heroLayers.module.css"
 
 export default function HeroLayers() {
+    const [loaded, setLoaded] = useState(false)
     const containerRef = useRef<HTMLDivElement>(null)
     const bgRef = useRef<HTMLDivElement>(null)
     const midRef = useRef<HTMLDivElement>(null)
     const fgRef = useRef<HTMLDivElement>(null)
+    const imgRef = useRef<HTMLImageElement>(null)
     const rafRef = useRef<number>(0)
     const scrollRef = useRef(0)
     const mouseRef = useRef({ x: 0, y: 0 })
@@ -73,6 +75,9 @@ export default function HeroLayers() {
             }
         }
 
+        // Handle cached images where onLoad already fired
+        if (imgRef.current?.complete) setLoaded(true)
+
         window.addEventListener("scroll", onScroll, { passive: true })
         window.addEventListener("mousemove", onMouseMove, { passive: true })
 
@@ -93,21 +98,27 @@ export default function HeroLayers() {
                 <picture>
                     <source
                         media="(max-width: 768px)"
-                        srcSet="/assets/hero/one-mobile.webp"
+                        srcSet="/assets/hero/one-sm.webp"
                     />
                     <source
                         media="(max-width: 1280px)"
-                        srcSet="/assets/hero/one-tablet.webp"
+                        srcSet="/assets/hero/one-md.webp"
                     />
                     <source
-                        media="(min-width: 1281px)"
-                        srcSet="/assets/hero/one-desktop.webp"
+                        media="(max-width: 1920px)"
+                        srcSet="/assets/hero/one-lg.webp"
+                    />
+                    <source
+                        media="(min-width: 1921px)"
+                        srcSet="/assets/hero/one-xl.webp"
                     />
                     <img
+                        ref={imgRef}
                         src="/assets/hero/one.webp"
                         className={styles.heroImage}
                         alt=""
                         draggable={false}
+                        onLoad={() => setLoaded(true)}
                     />
                 </picture>
             </div>
@@ -142,6 +153,9 @@ export default function HeroLayers() {
             <div className={styles.vignette} />
             <div className={styles.bottomFade} />
             <div className={styles.topFade} />
+
+            {/* Reveal overlay — dissolves once hero image loads */}
+            <div className={`${styles.revealOverlay}${loaded ? ` ${styles.revealed}` : ''}`} />
         </div>
     )
 }

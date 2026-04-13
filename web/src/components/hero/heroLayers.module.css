@@ -1,3 +1,28 @@
+/* ── Animated custom properties for reveal mask ── */
+@property --reveal {
+    syntax: '<percentage>';
+    inherits: false;
+    initial-value: -60%;
+}
+
+@property --blob1 {
+    syntax: '<percentage>';
+    inherits: false;
+    initial-value: -30%;
+}
+
+@property --blob2 {
+    syntax: '<percentage>';
+    inherits: false;
+    initial-value: -35%;
+}
+
+@property --blob3 {
+    syntax: '<percentage>';
+    inherits: false;
+    initial-value: -25%;
+}
+
 /* ── Container ── */
 .container {
     position: absolute;
@@ -217,6 +242,57 @@
     z-index: 5;
 }
 
+/* ── Reveal overlay ── */
+.revealOverlay {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: var(--color-background);
+    pointer-events: none;
+
+    mask-image:
+        radial-gradient(circle at 10% 90%, transparent var(--blob1), white calc(var(--blob1) + 25%)),
+        radial-gradient(circle at 35% 70%, transparent var(--blob2), white calc(var(--blob2) + 30%)),
+        radial-gradient(circle at 5% 55%,  transparent var(--blob3), white calc(var(--blob3) + 20%)),
+        linear-gradient(45deg, transparent var(--reveal), white calc(var(--reveal) + 35%));
+    mask-composite: intersect, intersect, intersect;
+
+    -webkit-mask-image:
+        radial-gradient(circle at 10% 90%, transparent var(--blob1), white calc(var(--blob1) + 25%)),
+        radial-gradient(circle at 35% 70%, transparent var(--blob2), white calc(var(--blob2) + 30%)),
+        radial-gradient(circle at 5% 55%,  transparent var(--blob3), white calc(var(--blob3) + 20%)),
+        linear-gradient(45deg, transparent var(--reveal), white calc(var(--reveal) + 35%));
+    -webkit-mask-composite: source-in, source-in, source-in;
+}
+
+.revealed {
+    animation: revealWipe 2.2s cubic-bezier(0.16, 1, 0.3, 1) 0.15s forwards;
+}
+
+@keyframes revealWipe {
+    0% {
+        --reveal: -60%;
+        --blob1: -30%;
+        --blob2: -35%;
+        --blob3: -25%;
+        visibility: visible;
+    }
+    15% {
+        --blob2: -35%;
+        --blob3: -25%;
+    }
+    30% {
+        --blob3: -25%;
+    }
+    100% {
+        --reveal: 130%;
+        --blob1: 180%;
+        --blob2: 160%;
+        --blob3: 170%;
+        visibility: hidden;
+    }
+}
+
 /* ── Keyframes ── */
 @keyframes float1 {
     0%, 100% { transform: translate(0, 0); }
@@ -325,5 +401,9 @@
     .shootingStar, .shootingStar2, .shootingStar3, .shootingStar4, .shootingStar5,
     .grain {
         animation: none;
+    }
+
+    .revealOverlay {
+        display: none;
     }
 }
