@@ -68,7 +68,7 @@ export default function HeroLayers() {
             }
 
             if (containerRef.current) {
-                const opacity = Math.max(0, 1 - scroll / 700)
+                const opacity = Math.max(0, 1 - scroll / 900)
                 containerRef.current.style.opacity = String(opacity)
             }
         }

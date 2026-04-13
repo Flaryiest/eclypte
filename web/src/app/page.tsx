@@ -37,6 +37,10 @@ export default function Home() {
             </div>
           </div>
         </section>
+        <section className={styles.aboutContainer}>
+          <h2 className={styles.aboutTitle}>Crafted for Creators, by Creators</h2>
+          <p className={styles.aboutDescription}>Eclypte was born from a passion for anime and a desire to empower creators. We understand the love and effort that goes into every cut, every beat. Our mission is to make AMV creation accessible, intuitive, and fun for everyone.</p>
+        </section>
       </main>
     </div>
   );

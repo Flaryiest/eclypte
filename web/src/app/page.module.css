@@ -168,6 +168,38 @@
     line-height: 1.6;
 }
 
+.aboutContainer {
+    display: flex;
+    flex-direction: row;
+    gap: 4rem;
+    width: 100%;
+    max-width: 100dvw;
+    margin: 0 auto;
+    padding: 0 2rem;
+    box-sizing: border-box;
+    justify-content: center;
+    padding-top: 10rem;
+    padding-right: 10rem;
+
+}
+
+.aboutTitle {
+    flex: 1;
+    text-align: center;
+    min-height: 100%;
+    font-size: 2.4rem;
+    font-family: var(--font-outfit);
+}
+
+.aboutDescription {
+    flex: 1.4;
+    font-family: var(--font-neue);
+    font-size: 1.2rem;
+    color: var(--color-primary);
+    line-height: 1.6;
+    box-sizing: border-box;
+}
+
 @media (max-width: 768px) {
     .heroContainer {
         padding-right: 0;
