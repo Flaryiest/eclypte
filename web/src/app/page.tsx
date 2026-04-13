@@ -1,6 +1,9 @@
 import Navbar from "@components/navbar/navbar";
 import styles from "./page.module.css";
 import HeroLayers from "@/components/hero/heroLayers";
+import StepCard from "@components/stepCard/stepCard";
+import Reveal from "@components/reveal/reveal";
+
 export default function Home() {
   return (
     <div className={styles.page}>
@@ -15,27 +18,27 @@ export default function Home() {
 
         </section>
         <section className={styles.stepsContainer}>
-          <div className={styles.stepsTextContainer}>
+          <Reveal className={styles.stepsTextContainer}>
             <h2 className={styles.stepsTitle}>Get your content in front of your audience</h2>
             <p className={styles.stepsDescription}>We help you reach your audience through transforming snippets of your work into engaging experiences. From movies to music to literature, we help with all.</p>
-          </div>
-          <div className={styles.stepsGrid}>
-            <div className={styles.stepCard}>
-              <span className={styles.stepNumber}>01</span>
-              <h3 className={styles.stepCardTitle}>Upload Your Clips</h3>
-              <p className={styles.stepCardDescription}>Import your raw footage, anime clips, or any video content. We handle all formats so you can focus on the creative.</p>
-            </div>
-            <div className={styles.stepCard}>
-              <span className={styles.stepNumber}>02</span>
-              <h3 className={styles.stepCardTitle}>Choose Your Style</h3>
-              <p className={styles.stepCardDescription}>Pick a mood, genre, and song. Our AI analyzes rhythm and emotion to match cuts with the music.</p>
-            </div>
-            <div className={styles.stepCard}>
-              <span className={styles.stepNumber}>03</span>
-              <h3 className={styles.stepCardTitle}>Export & Share</h3>
-              <p className={styles.stepCardDescription}>Render your AMV in cinematic quality. Share directly to YouTube, TikTok, or download for your portfolio.</p>
-            </div>
-          </div>
+          </Reveal>
+          <Reveal className={styles.stepsGrid}>
+            <StepCard
+              number="01"
+              title="Upload Your Clips"
+              description="Import your raw footage, anime clips, or any video content. We handle all formats so you can focus on the creative."
+            />
+            <StepCard
+              number="02"
+              title="Choose Your Style"
+              description="Pick a mood, genre, and song. Our AI analyzes rhythm and emotion to match cuts with the music."
+            />
+            <StepCard
+              number="03"
+              title="Export & Share"
+              description="Render your AMV in cinematic quality. Share directly to YouTube, TikTok, or download for your portfolio."
+            />
+          </Reveal>
         </section>
         <section className={styles.aboutContainer}>
           <h2 className={styles.aboutTitle}>Crafted for Creators, by Creators</h2>

@@ -1,7 +1,7 @@
 .page {
     width: 100%;
     min-height: 100%;
-    overflow-x: hidden;
+    overflow-x: clip;
     min-height: 300dvh; /*  Remove later */
 }
 
@@ -105,6 +105,20 @@
     font-size: 2.5rem;
     font-weight: 500;
     color: var(--color-highlight);
+    transform-origin: 0% 50%;
+    opacity: 0;
+    transform: translateY(30px) rotate(5deg);
+    filter: blur(8px);
+    transition:
+        opacity 1.3s cubic-bezier(0.16, 1, 0.3, 1),
+        transform 1.3s cubic-bezier(0.16, 1, 0.3, 1),
+        filter 1.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+[data-revealed] .stepsTitle {
+    opacity: 1;
+    transform: translateY(0) rotate(0);
+    filter: blur(0);
 }
 
 .stepsDescription {
@@ -122,50 +136,6 @@
     max-width: 1200px;
     padding: 0 2rem;
     box-sizing: border-box;
-}
-
-.stepCard {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    padding: 2.5rem 2rem;
-    border-radius: 16px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    position: relative;
-    overflow: hidden;
-}
-
-.stepCard::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: linear-gradient(90deg, #d4607a, var(--color-highlight));
-}
-
-.stepNumber {
-    font-family: var(--font-eiko);
-    font-size: 3rem;
-    font-weight: 800;
-    color: var(--color-highlight);
-    line-height: 1;
-}
-
-.stepCardTitle {
-    font-family: var(--font-eiko);
-    font-size: 1.3rem;
-    font-weight: 500;
-    color: var(--color-primary);
-}
-
-.stepCardDescription {
-    font-family: var(--font-neue);
-    font-size: 1rem;
-    color: var(--color-secondary);
-    line-height: 1.6;
 }
 
 .aboutContainer {
@@ -235,5 +205,14 @@
     .stepsGrid {
         grid-template-columns: 1fr;
         padding: 0 1.5rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .stepsTitle {
+        opacity: 1;
+        transform: none;
+        filter: none;
+        transition: none;
     }
 }
