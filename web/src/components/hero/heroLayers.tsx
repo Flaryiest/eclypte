@@ -95,6 +95,14 @@ export default function HeroLayers() {
                         media="(max-width: 768px)"
                         srcSet="/assets/hero/one-mobile.webp"
                     />
+                    <source
+                        media="(max-width: 1280px)"
+                        srcSet="/assets/hero/one-tablet.webp"
+                    />
+                    <source
+                        media="(min-width: 1281px)"
+                        srcSet="/assets/hero/one-desktop.webp"
+                    />
                     <img
                         src="/assets/hero/one.webp"
                         className={styles.heroImage}
