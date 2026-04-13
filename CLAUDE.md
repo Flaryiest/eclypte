@@ -36,10 +36,14 @@ Before writing or modifying anything touching Next.js (routing, data fetching, `
 - **Components** — shared UI lives in `web/src/components/` (e.g. `navbar/`, `hero/`). Each component is a directory with a `.tsx` file and a co-located `.module.css` file.
 - **Page layout** — the root layout (`layout.tsx`) provides fonts and the `ThemeProvider` but no shared navigation. Each page imports `<Navbar />` individually — there is no global layout-level nav.
 - **Theming** — `next-themes` with `attribute="data-theme"` on `<ThemeProvider>`. Default theme is dark. CSS variables defined in `:root` and overridden via `[data-theme="dark"]` in `globals.css`:
-  - `--color-background`, `--color-primary`, `--color-secondary`, `--color-subtitle`
+  - `--color-background`, `--color-primary`, `--color-secondary`, `--color-subtitle`, `--color-highlight` (gold accent, #e8a838)
 - **Fonts** — loaded in `web/src/app/layout.tsx` and applied to `<body>` as CSS variable classes:
   - Google fonts: `--font-inter`, `--font-inter-tight`, `--font-outfit`
   - Local fonts (from `web/public/fonts/`): `--font-neue` (PP Neue Montreal), `--font-eiko` (PP Eiko)
   - The bootstrapped `web/README.md`'s mention of Geist is stale — ignore it.
 - **Global styles** — `web/src/app/globals.css` includes a CSS reset, theme variables, and base element styles. A `.page` utility class provides a centered full-width page wrapper. Do not use `#root` selectors — Next.js has no `#root` element.
+- **Images** — uses native `<picture>`/`<source>` elements, not `next/image`. This is intentional; do not migrate to `<Image>`.
 - **Static assets** — images live in `web/public/assets/` (e.g. `hero/` subdirectory).
+- **Z-index hierarchy** — navbar sits at 50000, hero layers at 1–10000, page content at default. New components should respect this stacking order.
+- **Responsive breakpoint** — 768px (`max-width`) is the standard mobile breakpoint used throughout the CSS Modules.
+- **Reduced motion** — animations respect `@media (prefers-reduced-motion: reduce)`. New animations must do the same.

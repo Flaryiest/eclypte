@@ -90,7 +90,6 @@ video {
 html {
   scrollbar-gutter: stable;
 }
-a
 article,
 aside,
 details,
@@ -131,9 +130,10 @@ table {
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --color-background: #ffffff;
-  --color-primary: #000000;
-  --color-secondary: #272727;
+  --color-background: #000000;
+  --color-primary: #ffffff;
+  --color-subtitle: #f0f0f0;
+  --color-secondary: #cacaca;
   --color-highlight: #e8a838;
 }
 
