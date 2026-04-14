@@ -4,5 +4,10 @@ pytubefix
 ffmpeg
 ffprobe
 pydub
-
 syncedlyrics
+allin1
+madmom @ git+https://github.com/CPJKU/madmom.git@main
+torch
+cython
+numpy
+soundfile
