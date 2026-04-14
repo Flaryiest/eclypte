@@ -143,31 +143,31 @@
     flex-direction: row;
     gap: 4rem;
     width: 100%;
-    max-width: 100dvw;
+    max-width: 1400px;
     margin: 0 auto;
     padding: 0 2rem;
     box-sizing: border-box;
     justify-content: center;
     padding-top: 10rem;
-    padding-right: 10rem;
 
 }
 
 .aboutTitle {
     flex: 1;
     text-align: center;
-    min-height: 100%;
-    font-size: 2.4rem;
-    font-family: var(--font-outfit);
+    font-size: 3.2rem;
+    font-family: var(--font-eiko);
 }
 
 .aboutDescription {
     flex: 1.4;
     font-family: var(--font-neue);
-    font-size: 1.2rem;
+    font-size: 1.5rem;
     color: var(--color-primary);
     line-height: 1.6;
     box-sizing: border-box;
+    margin-left: 4rem;
+    margin-top: 1rem;
 }
 
 @media (max-width: 768px) {
@@ -205,6 +205,17 @@
     .stepsGrid {
         grid-template-columns: 1fr;
         padding: 0 1.5rem;
+    }
+
+    .aboutContainer {
+        flex-direction: column;
+        padding: 0 1.5rem;
+    }
+
+    .aboutDescription {
+        margin-left: 0;
+        margin-top: 0rem;
+        padding: 3rem;
     }
 }
 

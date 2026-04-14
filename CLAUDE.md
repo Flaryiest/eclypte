@@ -7,11 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Eclypte is an AMV (Anime Music Video) creator. Monorepo layout:
 
 - **`web/`** — Next.js 16 frontend (React 19, TypeScript, App Router)
-- **`api/`** — Python backend (scaffold; `main.py` currently empty)
+- **`api/`** — Python backend. `api/main.py` is still an empty FastAPI stub; real work lives in `api/prototyping/` (see Audio Pipeline below).
 
 ## Development Commands
 
-All web commands run from the `web/` directory:
+Web (run from `web/`):
 
 ```bash
 cd web
@@ -21,7 +21,28 @@ npm run start    # Production server
 npm run lint     # ESLint (flat config: core-web-vitals + typescript)
 ```
 
+API (run from `api/`):
+
+```bash
+pip install -r requirements.txt   # first allin1 run downloads ~400MB of model weights
+cd prototyping
+python main.py                     # end-to-end: download → analyze → lyrics
+python analysis.py                 # analyze ./content/output.wav standalone
+```
+
 No test runner is configured yet.
+
+## Audio Pipeline (`api/prototyping/`)
+
+MVP audio analysis lives in the prototyping sandbox. Scripts are wired together by [api/prototyping/main.py](api/prototyping/main.py):
+
+- **[ytdownload.py](api/prototyping/ytdownload.py)** — `main(video_url) -> title`. Downloads YouTube audio via `pytubefix` to `content/output.m4a`, transcodes to `content/output.wav` via `pydub`. The URL is currently a module-level `url` constant.
+- **[analysis.py](api/prototyping/analysis.py)** — `analyze(audio_path, out_path=None) -> dict`. Produces the "song map" JSON (`schema_version: 1`) with tempo, beats, downbeats, a 10Hz normalized energy curve, and structural segments. Uses `allin1` (PyTorch model) as the single source of truth for beats/downbeats/segments; `librosa` only for audio loading and RMS. All timestamps use the `_sec` suffix — no frame indices escape the module.
+- **[lyrics.py](api/prototyping/lyrics.py)** — `main(query)`. Uses `syncedlyrics` to fetch an LRC, writes `content/lyrics.txt`. Intentionally separate from `song_analysis.json` (different source, optional).
+
+Song-map consumers read `content/output.json`. Schema details and design decisions are in the approved plan at `.claude/plans/glistening-enchanting-bumblebee.md` (if present) — timestamps are seconds, `downbeats_sec` is a subset of `beats_sec`, `segments.label` passes through allin1's vocabulary unchanged.
+
+Deferred to v2 (bump `schema_version` when adding): onsets, per-band energy (low/mid/high), key & mode.
 
 ## Next.js 16 — READ BEFORE WRITING CODE
 
