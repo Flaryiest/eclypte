@@ -1,0 +1,28 @@
+# Heavy ML stack installed into the Modal image (Linux, Python 3.12, CUDA 12.4).
+# Local dev does NOT install these — see requirements.txt for the local deps.
+# natten is installed separately in analysis_modal.py via run_commands because
+# its wheel URL is torch/CUDA/Python-specific and can't live in a requirements file.
+
+# Analysis stack (allin1 requires these exact versions).
+# cython + numpy are installed before this file by the image's .pip_install()
+# step because madmom's git build needs them present first.
+torch==2.5.0
+torchaudio==2.5.0
+torchvision==0.20.0
+allin1
+madmom @ git+https://github.com/CPJKU/madmom.git@main
+soundfile
+librosa
+
+# allin1 undeclared transitive deps
+demucs
+huggingface-hub
+hydra-core
+omegaconf
+matplotlib
+pandas
+scipy
+scikit-learn
+timm
+tqdm
+mido
