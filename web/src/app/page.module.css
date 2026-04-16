@@ -2,7 +2,7 @@
     width: 100%;
     min-height: 100%;
     overflow-x: clip;
-    min-height: 300dvh; /*  Remove later */
+    /* min-height: 300dvh;  Remove later */
 }
 
 .main {
