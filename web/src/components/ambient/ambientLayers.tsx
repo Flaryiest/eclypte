@@ -3,18 +3,30 @@
 import { useEffect, useRef } from "react";
 import styles from "./ambientLayers.module.css";
 
-export default function AmbientLayers() {
+type Props = {
+    targetId: string;
+    fadeDistance?: number;
+    exitOffset?: number;
+};
+
+export default function AmbientLayers({ targetId, fadeDistance = 200, exitOffset = 600 }: Props) {
     const containerRef = useRef<HTMLDivElement>(null);
     const rafRef = useRef<number>(0);
 
     useEffect(() => {
+        const target = document.getElementById(targetId);
+        if (!target) return;
+
         let pending = false;
 
         const update = () => {
             pending = false;
             if (!containerRef.current) return;
-            const opacity = Math.min(window.scrollY / 900, 1);
-            containerRef.current.style.opacity = String(opacity);
+            const rect = target.getBoundingClientRect();
+            const vh = window.innerHeight;
+            const enter = Math.min(Math.max((vh - rect.top) / fadeDistance, 0), 1);
+            const exit = Math.min(Math.max((rect.bottom - exitOffset) / fadeDistance, 0), 1);
+            containerRef.current.style.opacity = String(Math.min(enter, exit));
         };
 
         const onScroll = () => {
@@ -24,13 +36,15 @@ export default function AmbientLayers() {
         };
 
         window.addEventListener("scroll", onScroll, { passive: true });
+        window.addEventListener("resize", onScroll);
         update();
 
         return () => {
             window.removeEventListener("scroll", onScroll);
+            window.removeEventListener("resize", onScroll);
             cancelAnimationFrame(rafRef.current);
         };
-    }, []);
+    }, [targetId, fadeDistance, exitOffset]);
 
     return (
         <div

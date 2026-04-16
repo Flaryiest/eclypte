@@ -8,7 +8,7 @@ import AmbientLayers from "@components/ambient/ambientLayers";
 export default function Home() {
   return (
     <div className={styles.page}>
-      <AmbientLayers />
+      <AmbientLayers targetId="steps" />
       <Navbar />
       <main className={styles.main}>
         <section className={styles.heroContainer}>
@@ -19,7 +19,7 @@ export default function Home() {
           </div>
 
         </section>
-        <section className={styles.stepsContainer}>
+        <section id="steps" className={styles.stepsContainer}>
           <Reveal className={styles.stepsTextContainer}>
             <h2 className={styles.stepsTitle}>Get your content in front of your audience</h2>
             <p className={styles.stepsDescription}>We help you reach your audience through transforming snippets of your work into engaging experiences. From movies to music to literature, we help with all.</p>
@@ -42,9 +42,11 @@ export default function Home() {
             />
           </Reveal>
         </section>
-        <section className={styles.aboutContainer}>
-          <h2 className={styles.aboutTitle}>Crafted for Creators, by Creators</h2>
-          <p className={styles.aboutDescription}>Eclypte was born from a passion for anime and a desire to empower creators. We understand the love and effort that goes into every cut, every beat. Our mission is to make AMV creation accessible, intuitive, and fun for everyone.</p>
+        <section className={styles.aboutBand}>
+          <div className={styles.aboutContainer}>
+            <h2 className={styles.aboutTitle}>Crafted for Creators, by Creators</h2>
+            <p className={styles.aboutDescription}>Eclypte was born from a passion for anime and a desire to empower creators. We understand the love and effort that goes into every cut, every beat. Our mission is to make AMV creation accessible, intuitive, and fun for everyone.</p>
+          </div>
         </section>
       </main>
     </div>

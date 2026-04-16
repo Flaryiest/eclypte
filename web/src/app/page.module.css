@@ -138,6 +138,36 @@
     box-sizing: border-box;
 }
 
+.aboutBand {
+    position: relative;
+    width: 100%;
+    padding: 8rem 0;
+    margin-top: 4rem;
+    background:
+        radial-gradient(ellipse 80% 60% at 50% 50%, rgba(232, 168, 56, 0.08), transparent 70%),
+        linear-gradient(180deg, rgba(232, 168, 56, 0.02) 0%, rgba(0, 0, 0, 0.35) 50%, rgba(232, 168, 56, 0.02) 100%);
+    isolation: isolate;
+}
+
+.aboutBand::before,
+.aboutBand::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(232, 168, 56, 0.5), transparent);
+    pointer-events: none;
+}
+
+.aboutBand::before {
+    top: 0;
+}
+
+.aboutBand::after {
+    bottom: 0;
+}
+
 .aboutContainer {
     display: flex;
     flex-direction: row;
@@ -148,8 +178,6 @@
     padding: 0 2rem;
     box-sizing: border-box;
     justify-content: center;
-    padding-top: 10rem;
-
 }
 
 .aboutTitle {
@@ -205,6 +233,10 @@
     .stepsGrid {
         grid-template-columns: 1fr;
         padding: 0 1.5rem;
+    }
+
+    .aboutBand {
+        padding: 4rem 0;
     }
 
     .aboutContainer {

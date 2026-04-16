@@ -6,3 +6,5 @@ modal
 pytubefix
 pydub
 syncedlyrics
+opencv-python
+scenedetect

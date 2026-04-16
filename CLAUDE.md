@@ -136,6 +136,81 @@ Song-map consumers read `content/output.json`. Schema details and design decisio
 
 Deferred to v2 (bump `schema_version` when adding): onsets, per-band energy (low/mid/high), key & mode.
 
+## Video Pipeline (`api/prototyping/video/`)
+
+Deterministic (non-AI) video analysis — scenes, motion, impacts — producing
+a JSON "clip map" keyed by `schema_version: 1`. Consumed downstream by the AI
+editing agent to sync cuts to music. Two runtimes share the same output shape:
+
+- **Local CPU** — [api/prototyping/video/main.py](api/prototyping/video/main.py)
+  `main()` → `analyze(clip, out_path)` from
+  [analysis.py](api/prototyping/video/analysis.py). Uses
+  `cv2.calcOpticalFlowFarneback` on the CPU. Fine for <2 min clips; ~30 fps
+  throughput at 640×360.
+- **Modal GPU** — `main_remote(filename)` → `analyze_remote.remote(filename)`
+  from [analysis_modal.py](api/prototyping/video/analysis_modal.py) →
+  [analysis_cuda.py](api/prototyping/video/analysis_cuda.py) using
+  `cv2.cuda.FarnebackOpticalFlow`. For multi-hour footage. ~6–15× faster on
+  the flow kernel; single-pass decode, no per-scene seeking.
+
+**Modules** (all under `api/prototyping/video/`):
+
+- **[scenes.py](api/prototyping/video/scenes.py)** — `detect_scenes(video_path, duration_sec) -> [(start_sec, end_sec)]`. PySceneDetect ContentDetector, threshold 27.0. Returns a single whole-clip scene if nothing detected.
+- **[motion.py](api/prototyping/video/motion.py)** — two entry points: `motion_per_scene(video_path, scene, fps_hz)` (CPU, opens capture + seeks) and `build_motion_dict(mags, vxs, vys, rads, diffs, start_sec, fps_hz)` (pure; reused by both CPU and GPU paths). Also exposes `flow_stats(flow)` and `to_gray_small(frame)` as shared helpers. Returns normalized motion curve, camera-movement class (`static`/`pan`/`tilt`/`whip_pan`/`zoom`/`handheld`), stability score, and underscore-prefixed raw signals consumed by `impact.py`.
+- **[impact.py](api/prototyping/video/impact.py)** — `impacts_per_scene(scene, motion, fps_hz)`. Adaptive-threshold impact detection: `median + K*MAD` on a combined flow+frame-diff visual-energy signal. Classifies `flash` / `motion_spike` / `combined`. Also emits stillness points and the full `visual_energy` curve.
+- **[analysis.py](api/prototyping/video/analysis.py)** — CPU orchestrator. `analyze(video_path, out_path=None) -> dict`. Must stay pure (no `import modal`) — loaded into the Modal image via `add_local_python_source`.
+- **[analysis_cuda.py](api/prototyping/video/analysis_cuda.py)** — GPU orchestrator. Opens the video once, streams frames sequentially, dispatches per-frame signals to the scene they belong to via a `_SceneAccumulator`. Resets `prev_gpu`/`prev_gray` at scene boundaries so flow never crosses cuts.
+- **[analysis_modal.py](api/prototyping/video/analysis_modal.py)** — Modal image build + wrappers. `analyze_remote(filename)` reads from the `eclypte-video-input` Volume at `/input/{filename}`; `analyze_remote_bytes(video_bytes, filename)` writes to a tempfile for small test clips.
+
+All timestamps use the `_sec` suffix. `fps_hz` is the canonical sampling rate. Same `schema_version: 1` convention as the audio pipeline.
+
+### Video — Modal setup (serverless GPU)
+
+**Why Modal for video too:** `cv2.cuda.FarnebackOpticalFlow` needs OpenCV built
+with CUDA support. There are no prebuilt OpenCV-CUDA wheels on any platform —
+you must compile from source against a matching CUDA toolkit. That's fragile
+locally (same class of pain as `natten` for audio). The Modal image builds
+OpenCV 4.10.0 from source once, then caches the layer; subsequent runs skip
+straight to GPU inference.
+
+**Pinned versions (inside the Modal image):**
+
+| Package | Version | Why |
+|---|---|---|
+| CUDA base | `nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04` | Matches T4 driver compatibility. Same CUDA 12.1 as the audio image. |
+| OpenCV | 4.10.0 | Stable `cv2.cuda.FarnebackOpticalFlow` API. Built with `-DWITH_CUDA=ON -DWITH_CUDNN=ON -DOPENCV_DNN_CUDA=OFF`. |
+| `CUDA_ARCH_BIN` | 7.5 | T4 compute capability. If switching to A10/A10G, extend to `7.5,8.6`. |
+| Python | 3.11 | Added to the CUDA base via `add_python="3.11"`. |
+| scenedetect | (unpinned) | Pure-Python, low risk. |
+
+Do not bump `CUDA_ARCH_BIN` away from T4's 7.5 without also changing the `gpu="T4"` argument on the Modal function, or the compiled kernels won't match the device.
+
+**One-time upload of source video to a Modal Volume:**
+
+```bash
+modal volume put eclypte-video-input ./content/movie.mp4
+```
+
+**Running:**
+
+```bash
+cd api/prototyping/video
+
+# Local CPU path (small clips):
+python main.py
+
+# Modal GPU path (hours of footage):
+modal run analysis_modal.py --filename movie.mp4
+```
+
+First remote call builds OpenCV-CUDA inside the image (~20–40 min). The layer is cached; subsequent runs skip straight to GPU inference. A 10 h video takes ~20–40 min end-to-end post-build (GPU flow pass + CPU scene detection).
+
+**Costs:** T4 ≈ $0.60/hr. A 10 h video ≈ ~$0.30. Modal's free tier covers many dozens of feature-length analyses.
+
+### Video — fallback: 16 vCPU CPU container
+
+If the OpenCV-CUDA image build becomes intractable on some future CUDA/driver bump, the fallback is a Modal CPU container with `modal.Image.debian_slim() + pip install opencv-python scenedetect` and `ProcessPoolExecutor(max_workers=16)` fanning out `cv2.calcOpticalFlowFarneback` over scenes. Expected ~12–15× speedup over the single-threaded local CPU path, ~$0.30 per 10 h job at Modal's CPU pricing — similar cost, simpler infra. Output schema is unchanged, so `analysis.py` and every consumer stay as-is.
+
 ## Next.js 16 — READ BEFORE WRITING CODE
 
 This project uses **Next.js 16.2.3** with **React 19.2**. These versions postdate common training data and have breaking API/convention changes from Next.js 13–15. Do not assume APIs from memory.
