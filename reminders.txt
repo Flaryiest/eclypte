@@ -1,0 +1,53 @@
+Eclypte API — Modal setup & run reminders
+===========================================
+
+First-time setup (native Windows, no WSL):
+------------------------------------------
+  cd api
+  python -m venv .venv
+  .venv\Scripts\activate
+  pip install -r requirements.txt
+  modal token new        # browser auth, writes ~/.modal.toml
+
+
+Verification:
+-------------
+  cd api/prototyping
+
+  # Layer 1: Modal-only sanity check (needs an existing output.wav)
+  modal run analysis_modal.py::main --wav ./content/output.wav
+
+  # Layer 2: full pipeline (download -> Modal analyze -> lyrics)
+  python main.py
+
+
+Timings:
+--------
+  First remote call: ~2-3 min  (image build + ~400MB allin1 model download)
+  Subsequent calls:  ~15-25s   (GPU inference only; image + weights cached)
+
+
+Run flow:
+---------
+  python main.py
+    |-- ytdownload.main(url)          -> content/output.wav   [local]
+    |-- analyze_remote.remote(bytes)  -> dict                 [Modal T4]
+    |     '-- writes content/output.json
+    '-- lyrics.main(title)            -> content/lyrics.txt   [local]
+
+
+File layout:
+------------
+  api/requirements.txt         - local deps: modal, pytubefix, pydub, syncedlyrics
+  api/requirements-modal.txt   - heavy ML stack (installed into Modal image)
+  api/prototyping/analysis.py          - pure analyze(path) -> dict (no modal import)
+  api/prototyping/analysis_modal.py    - Modal image + analyze_remote wrapper
+  api/prototyping/main.py              - orchestrator
+  api/prototyping/ytdownload.py        - YouTube -> wav
+  api/prototyping/lyrics.py            - syncedlyrics -> lyrics.txt
+
+
+Costs:
+------
+  T4 GPU ~ $0.60/hr. Per-song cost ~ $0.005.
+  Modal free tier (~$30/mo credit) covers thousands of songs.

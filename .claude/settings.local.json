@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:shi-labs.com)",
+      "Bash(curl -sk \"https://shi-labs.com/natten/wheels/\")"
+    ]
+  }
+}

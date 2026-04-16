@@ -3,12 +3,10 @@ import styles from "./page.module.css";
 import HeroLayers from "@/components/hero/heroLayers";
 import StepCard from "@components/stepCard/stepCard";
 import Reveal from "@components/reveal/reveal";
-import AmbientLayers from "@components/ambient/ambientLayers";
 
 export default function Home() {
   return (
     <div className={styles.page}>
-      <AmbientLayers targetId="steps" />
       <Navbar />
       <main className={styles.main}>
         <section className={styles.heroContainer}>

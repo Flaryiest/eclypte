@@ -1,0 +1,154 @@
+<h2>How should the post-hero sections feel?</h2>
+<p class="subtitle">The hero is atmospheric (parallax image, orbs, particles, grain). After it, the page drops to flat <code>#000</code>. Which direction should we take to bridge that?</p>
+
+<style>
+  .preview {
+    height: 200px;
+    border-radius: 10px;
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 14px;
+    background: #000;
+  }
+  .preview .content-bar {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 70%;
+    text-align: center;
+  }
+  .preview .content-bar .t {
+    display: block;
+    height: 10px;
+    background: rgba(255,255,255,0.85);
+    border-radius: 2px;
+    margin-bottom: 8px;
+  }
+  .preview .content-bar .d {
+    display: block;
+    height: 6px;
+    background: rgba(255,255,255,0.35);
+    border-radius: 2px;
+    margin-bottom: 4px;
+  }
+
+  /* A: Continued atmosphere — orbs + grain persist */
+  .prev-a {
+    background:
+      radial-gradient(circle at 80% 30%, rgba(232,168,56,0.18), transparent 40%),
+      radial-gradient(circle at 15% 75%, rgba(120,90,200,0.22), transparent 45%),
+      #000;
+  }
+  .prev-a::before {
+    content: '';
+    position: absolute; inset: 0;
+    background-image: radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1px);
+    background-size: 3px 3px;
+    opacity: 0.6;
+  }
+
+  /* B: Vertical gradient with color warmth */
+  .prev-b {
+    background: linear-gradient(180deg, #000 0%, #0a0612 45%, #140a08 100%);
+  }
+  .prev-b::after {
+    content: '';
+    position: absolute; left: 50%; bottom: -40%;
+    width: 140%; height: 90%;
+    transform: translateX(-50%);
+    background: radial-gradient(ellipse at center, rgba(232,168,56,0.15), transparent 60%);
+  }
+
+  /* C: Spotlight / section glows */
+  .prev-c {
+    background: #000;
+  }
+  .prev-c::before {
+    content: '';
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 60% 50% at 50% 40%, rgba(232,168,56,0.22), transparent 70%),
+      radial-gradient(ellipse 40% 30% at 20% 90%, rgba(120,90,200,0.18), transparent 70%);
+  }
+
+  /* D: Texture / hairline grid + grain */
+  .prev-d {
+    background:
+      linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px) 0 0 / 100% 40px,
+      linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px) 0 0 / 80px 100%,
+      #050505;
+  }
+  .prev-d::after {
+    content: '';
+    position: absolute; inset: 0;
+    background-image: radial-gradient(rgba(255,255,255,0.08) 1px, transparent 1px);
+    background-size: 2px 2px;
+    opacity: 0.35;
+    mix-blend-mode: overlay;
+  }
+</style>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="preview prev-a">
+        <div class="content-bar">
+          <span class="t"></span>
+          <span class="d"></span><span class="d" style="width:80%;margin:0 auto"></span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — Continued atmosphere</h3>
+      <p>Keep faint orbs, particles, and grain drifting through the whole page so the hero never really "ends." Most cohesive, highest effort.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="preview prev-b">
+        <div class="content-bar">
+          <span class="t"></span>
+          <span class="d"></span><span class="d" style="width:80%;margin:0 auto"></span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Deep gradient backdrop</h3>
+      <p>Shift from pure black into a very dark tinted gradient (warm gold or cool purple), with a soft bloom near section breaks. Cheap, subtle.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="preview prev-c">
+        <div class="content-bar">
+          <span class="t"></span>
+          <span class="d"></span><span class="d" style="width:80%;margin:0 auto"></span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C — Spotlight glows per section</h3>
+      <p>Large, soft radial glows behind each section heading — like stage lighting. Black stays black, but each section has a presence.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="d" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="preview prev-d">
+        <div class="content-bar">
+          <span class="t"></span>
+          <span class="d"></span><span class="d" style="width:80%;margin:0 auto"></span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>D — Texture: hairline grid + grain</h3>
+      <p>A very faint editorial grid and persistent film grain give the surface "tooth" without color. Feels like print/editorial design.</p>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:24px">These aren't exclusive — we can combine (e.g., B+C). Pick the one closest to the vibe you want, or tell me in the terminal.</p>

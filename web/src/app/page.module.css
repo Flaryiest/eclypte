@@ -84,6 +84,8 @@
     padding-top: 2rem;
     justify-content: center;
     align-items: center;
+    margin: 8rem 0;
+    margin-top: 4rem;
 }
 
 .stepsTextContainer {
@@ -101,10 +103,10 @@
 }
 
 .stepsTitle {
-    font-family: var(--font-eiko);
-    font-size: 2.5rem;
-    font-weight: 500;
-    color: var(--color-highlight);
+    font-family: var(--font-neue);
+    font-size: 3rem;
+    font-weight: 400;
+    color: var(--color-primary);
     transform-origin: 0% 50%;
     opacity: 0;
     transform: translateY(30px) rotate(5deg);
@@ -141,7 +143,7 @@
 .aboutBand {
     position: relative;
     width: 100%;
-    padding: 8rem 0;
+    padding: 11rem 0;
     margin-top: 4rem;
     background:
         radial-gradient(ellipse 80% 60% at 50% 50%, rgba(232, 168, 56, 0.08), transparent 70%),
