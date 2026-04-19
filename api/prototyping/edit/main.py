@@ -24,12 +24,15 @@ import argparse
 import json
 from pathlib import Path
 
+from .patterns import registry
+from .reference.annotations import parse_annotations
 from .synthesis.planner import plan
 from .synthesis.timeline_schema import Timeline
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 DEFAULT_CONTENT_DIR = PACKAGE_DIR / "content"
 DEFAULT_TIMELINE_OUT = DEFAULT_CONTENT_DIR / "timeline.json"
+DEFAULT_ANNOTATIONS_PATH = PACKAGE_DIR / "knowledge" / "references.md"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -41,12 +44,33 @@ def main(argv: list[str] | None = None) -> int:
     song = json.loads(Path(song_json).read_text(encoding="utf-8"))
     video = json.loads(Path(video_json).read_text(encoding="utf-8"))
 
+    patterns = None
+    patterns_path = args.patterns
+    if args.use_annotations:
+        patterns = registry.load(args.patterns)
+        multipliers = parse_annotations(
+            args.annotations_path,
+            known_pattern_ids=registry.ids(patterns),
+        )
+        if multipliers:
+            patterns = [
+                p.model_copy(update={"weight": p.weight * multipliers[p.id]})
+                if p.id in multipliers else p
+                for p in patterns
+            ]
+            print(f"applied {len(multipliers)} annotation multipliers "
+                  f"from {args.annotations_path}")
+        else:
+            print(f"no annotations found at {args.annotations_path} (weights unchanged)")
+        patterns_path = None
+
     timeline = plan(
         song=song,
         video=video,
         source_video_path=str(args.source),
         audio_path=str(args.song),
-        patterns_path=args.patterns,
+        patterns=patterns,
+        patterns_path=patterns_path,
         output_size=(args.width, args.height),
         output_fps=args.fps,
         max_duration_sec=args.max_duration,
@@ -75,6 +99,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--fps", type=int, default=30)
     p.add_argument("--max-duration", type=float, default=None,
                    help="clip timeline to this length in seconds (optional)")
+    p.add_argument("--use-annotations", action="store_true",
+                   help="apply weight multipliers from references.md "
+                        "(Phase-2 Weighted Annotations section)")
+    p.add_argument("--annotations-path", type=Path, default=DEFAULT_ANNOTATIONS_PATH,
+                   help="path to references.md (default: knowledge/references.md)")
     return p.parse_args(argv)
 
 

@@ -4,6 +4,7 @@
 
 modal
 pytubefix
+yt-dlp
 pydub
 syncedlyrics
 opencv-python

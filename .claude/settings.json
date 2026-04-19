@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(api/.venv/Scripts/python.exe -m api.prototyping.edit.main --song \"api/prototyping/music/content/output.wav\" --source \"api/prototyping/video/content/Project Hail Mary.mp4\" --song-analysis \"api/prototyping/music/content/output.json\" --source-analysis \"api/prototyping/video/content/Project Hail Mary.json\" --out /tmp/timeline_no_annot.json)",
+      "Bash(./api/.venv/Scripts/python.exe -m api.prototyping.edit.main --song \"api/prototyping/music/content/output.wav\" --source \"api/prototyping/video/content/Project Hail Mary.mp4\" --song-analysis \"api/prototyping/music/content/output.json\" --source-analysis \"api/prototyping/video/content/Project Hail Mary.json\" --out /tmp/timeline_no_annot.json)",
+      "Bash(./api/.venv/Scripts/python.exe -m api.prototyping.edit.main --song \"api/prototyping/music/content/output.wav\" --source \"api/prototyping/video/content/Project Hail Mary.mp4\" --song-analysis \"api/prototyping/music/content/output.json\" --source-analysis \"api/prototyping/video/content/Project Hail Mary.json\" --use-annotations --out /tmp/timeline_with_annot.json)",
+      "Read(//tmp/**)",
+      "Bash(./api/.venv/Scripts/python.exe -c ' *)",
+      "Bash(\"c:/Users/ericm/Documents/GitHub/eclypte/api/.venv/Scripts/python.exe\" -c \"import yt_dlp; print\\('yt_dlp version:', yt_dlp.version.__version__\\)\")",
+      "Bash(\"c:/Users/ericm/Documents/GitHub/eclypte/api/.venv/Scripts/python.exe\" -m pip show yt-dlp)",
+      "Bash(\"c:/Users/ericm/Documents/GitHub/eclypte/api/.venv/Scripts/python.exe\" -c \"from api.prototyping.edit.reference.download import download_reference\")",
+      "Bash(\"c:/Users/ericm/Documents/GitHub/eclypte/api/.venv/Scripts/pip.exe\" install *)",
+      "Bash(./api/.venv/Scripts/python.exe -c \"from api.prototyping.edit.reference.download import download_reference; from api.prototyping.edit.reference.ingest import ingest, _probe_ref_id; print\\('import OK'\\)\")",
+      "Bash(./api/.venv/Scripts/python.exe -m api.prototyping.edit.reference --help)",
+      "Bash(./api/.venv/Scripts/python.exe -m api.prototyping.edit.reference ingest --url 'https://www.instagram.com/reels/DWxo7S4jFKf/')",
+      "Bash(./api/.venv/Scripts/python.exe -c \"from api.prototyping.music.analysis_modal import analyze_remote; from api.prototyping.video.analysis_modal import analyze_remote_bytes; print\\('imports OK'\\)\")",
+      "Bash(\"c:/Users/ericm/Documents/GitHub/eclypte/api/.venv/Scripts/python.exe\" -m modal deploy music/analysis_modal.py)",
+      "Bash(\"c:/Users/ericm/Documents/GitHub/eclypte/api/.venv/Scripts/python.exe\" -m modal app list)",
+      "Bash(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 \"c:/Users/ericm/Documents/GitHub/eclypte/api/.venv/Scripts/python.exe\" -m modal deploy music/analysis_modal.py)",
+      "Bash(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 \"c:/Users/ericm/Documents/GitHub/eclypte/api/.venv/Scripts/python.exe\" -m modal deploy video/analysis_modal.py)",
+      "Bash(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 ./api/.venv/Scripts/python.exe -m api.prototyping.edit.reference ingest --url 'https://www.instagram.com/reels/DWxo7S4jFKf/')",
+      "Bash(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 ./api/.venv/Scripts/python.exe -m api.prototyping.edit.reference show DWxo7S4jFKf)",
+      "Bash(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 ./api/.venv/Scripts/python.exe -m api.prototyping.edit.reference list)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
+    ]
+  }
+}

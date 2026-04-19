@@ -1,7 +1,7 @@
 from pathlib import Path
 import modal
 
-REQUIREMENTS = Path(__file__).parent.parent / "requirements-modal.txt"
+REQUIREMENTS = Path(__file__).parent.parent.parent / "requirements-modal.txt"
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
