@@ -63,6 +63,11 @@
     color: var(--color-primary);
 }
 
+.navButton {
+    background: transparent;
+    border-radius: 0.5rem;
+}
+
 @media (max-width: 768px) {
     .navbarContainer {
         padding: 1rem 1rem;

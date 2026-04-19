@@ -19,7 +19,7 @@ image = (
         "https://github.com/opencv/opencv_contrib.git /opt/opencv_contrib",
         "mkdir /opt/opencv/build && cd /opt/opencv/build && cmake "
         "-DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local "
-        "-DWITH_CUDA=ON -DWITH_CUDNN=ON -DCUDA_ARCH_BIN=7.5 "
+        "-DWITH_CUDA=ON -DWITH_CUDNN=ON -DCUDA_ARCH_BIN=\"7.5;8.0;8.6;9.0\" "
         "-DOPENCV_EXTRA_MODULES_PATH=/opt/opencv_contrib/modules "
         "-DPYTHON3_EXECUTABLE=$(which python3) "
         "-DOPENCV_PYTHON3_INSTALL_PATH=$(python3 -c 'import sysconfig;print(sysconfig.get_paths()[\"purelib\"])') "
@@ -37,15 +37,17 @@ app = modal.App("eclypte-video")
 input_volume = modal.Volume.from_name("eclypte-video-input", create_if_missing=True)
 
 
-@app.function(
+@app.cls(
     image=image,
     gpu="T4",
-    timeout=3600,
+    timeout=14400,
     volumes={"/input": input_volume},
 )
-def analyze_remote(filename: str) -> dict:
-    from analysis_cuda import analyze_cuda
-    return analyze_cuda(f"/input/{filename}")
+class VideoAnalyzer:
+    @modal.method()
+    def analyze(self, filename: str) -> dict:
+        from analysis_cuda import analyze_cuda
+        return analyze_cuda(f"/input/{filename}")
 
 
 @app.function(image=image, gpu="T4", timeout=1800)
@@ -65,13 +67,13 @@ def analyze_remote_bytes(video_bytes: bytes, filename: str = "clip.mp4") -> dict
 
 
 @app.local_entrypoint()
-def main(filename: str = "movie.mp4", out: str = None):
+def main(filename: str = "movie.mp4", out: str = None, gpu: str = "T4"):
     import json
 
-    result = analyze_remote.remote(filename)
+    result = VideoAnalyzer.with_options(gpu=gpu)().analyze.remote(filename)
     if out is None:
         out = f"./content/{Path(filename).stem}.json"
     Path(out).write_text(json.dumps(result, indent=2))
     scenes = len(result["scenes"])
     impacts = sum(len(s["impacts"]["impact_frames"]) for s in result["scenes"])
-    print(f"wrote {out}  ({scenes} scenes, {impacts} impacts)")
+    print(f"wrote {out}  ({scenes} scenes, {impacts} impacts, gpu={gpu})")

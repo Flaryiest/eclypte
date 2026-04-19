@@ -4,6 +4,7 @@ import HeroLayers from "@/components/hero/heroLayers";
 import StepCard from "@components/stepCard/stepCard";
 import StatCard from "@components/statCard/statCard";
 import Reveal from "@components/reveal/reveal";
+import CtaShapes from "@components/ctaShapes/ctaShapes";
 
 export default function Home() {
   return (
@@ -48,14 +49,30 @@ export default function Home() {
           </div>
         </section>
         <section className={styles.statsContainer}>
-          <h2 className={styles.statsTitle}>Growth in days, not years</h2>
-          <div className={styles.statsGrid}>
-            <StatCard value="10k+" label="AMVs Created" description="Creators have produced thousands of AMVs using our AI-powered editing pipeline." />
-            <StatCard value="250k+" label="Followers Gained" description="Our creators have grown their audiences across YouTube, TikTok, and beyond." />
-            <StatCard value="5M+" label="Video Views" description="Eclypte-made videos have captured millions of views worldwide." />
+          <div className={styles.steps}>
+            <div className={styles.statsLeft}>
+              <img className={styles.statsImage} src="/assets/product-placeholder.svg" alt="Product placeholder" />
+            </div>
+            
+            <div className={styles.statsRight}>
+              <h2 className={styles.statsTitle}>Growth in days, not years</h2>
+              <div className={styles.statsCardContainer}>
+                <StatCard value="10k+" label="AMVs Created" description="Creators have produced thousands of AMVs using our AI-powered editing pipeline." />
+                <StatCard value="250k+" label="Followers Gained" description="Our creators have grown their audiences across YouTube, TikTok, and beyond." />
+                <StatCard value="5M+" label="Video Views" description="Eclypte-made videos have captured millions of views worldwide." />
+              </div>
+            </div>
           </div>
         </section>
-        <section className={styles.ctaContainer}></section>
+        <section className={styles.ctaContainer}>
+          <Reveal className={styles.cta}>
+            <CtaShapes>
+              <button className={styles.ctaButton}>
+                Get Started for Free
+              </button>
+            </CtaShapes>
+          </Reveal>
+        </section>
       </main>
     </div>
   );

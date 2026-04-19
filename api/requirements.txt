@@ -8,3 +8,5 @@ pydub
 syncedlyrics
 opencv-python
 scenedetect
+openai
+python-dotenv

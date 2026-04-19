@@ -1,0 +1,171 @@
+.root {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 520px;
+}
+
+/* ---------- shared shape base ---------- */
+.shape {
+    position: absolute;
+    pointer-events: none;
+    opacity: 0;
+    transform: translate3d(0, 12px, 0);
+    transition:
+        opacity 1s cubic-bezier(0.16, 1, 0.3, 1),
+        transform 1s cubic-bezier(0.2, 0.8, 0.2, 1);
+    will-change: transform, opacity;
+}
+
+/* ---------- variant: frame (film cell with sprocket holes) ---------- */
+.frame {
+    width: 70px;
+    height: 48px;
+    border: 1.5px solid rgba(232, 168, 56, 0.5);
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+
+.frame::before,
+.frame::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    width: 6px;
+    height: 70%;
+    transform: translateY(-50%);
+    background-image: radial-gradient(circle, rgba(232, 168, 56, 0.5) 2px, transparent 2.5px);
+    background-size: 6px 10px;
+}
+
+.frame::before { left: -10px; }
+.frame::after  { right: -10px; }
+
+/* ---------- variant: play triangle ---------- */
+.play {
+    width: 0;
+    height: 0;
+    border-left: 36px solid rgba(232, 168, 56, 0.45);
+    border-top: 22px solid transparent;
+    border-bottom: 22px solid transparent;
+    filter: drop-shadow(0 4px 12px rgba(232, 168, 56, 0.15));
+}
+
+/* ---------- variant: audio bars ---------- */
+.bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    width: 40px;
+    height: 40px;
+}
+
+.bars > span {
+    width: 5px;
+    background: rgba(232, 168, 56, 0.5);
+    border-radius: 1px;
+}
+
+.bars > span:nth-child(1) { height: 30%; }
+.bars > span:nth-child(2) { height: 75%; }
+.bars > span:nth-child(3) { height: 50%; }
+.bars > span:nth-child(4) { height: 90%; }
+
+/* ---------- idle drift keyframes ---------- */
+@keyframes drift1 { 0%, 100% { translate: 0 0; } 50% { translate: -8px -10px; } }
+@keyframes drift2 { 0%, 100% { translate: 0 0; } 50% { translate: 10px -8px; } }
+@keyframes drift3 { 0%, 100% { translate: 0 0; } 50% { translate: -6px 10px; } }
+@keyframes drift4 { 0%, 100% { translate: 0 0; } 50% { translate: 8px 6px; } }
+
+/* ---------- placement: 8 shapes, balanced asymmetric ---------- */
+/* Each shape has: position, isometric tilt, opacity, idle drift */
+/* Reveal state brings opacity + clears the 12px offset */
+
+/* Asymmetric scatter: 3 in upper-left cluster (s1, s5, s6), 2 in lower-left (s3, s4),
+   1 far upper-right (s7), 2 on the right with s2 close to the button and s8 far BR.
+   No shape mirrors another — sizes, distances, and tilts all vary. */
+
+.s1 { top: 6%;     left: 3%;   opacity: 0; transform: rotateX(50deg) rotateZ(-28deg) translate3d(0, 12px, 0); width: 92px; height: 62px; }
+.s2 { bottom: 34%; right: 18%; opacity: 0; transform: rotateX(55deg) rotateZ(-42deg) translate3d(0, 12px, 0); }
+.s3 { bottom: 16%; left: 8%;   opacity: 0; transform: rotateX(50deg) rotateZ(-35deg) translate3d(0, 12px, 0); }
+.s4 { bottom: 9%;  left: 28%;  opacity: 0; transform: rotateX(50deg) rotateZ(-22deg) translate3d(0, 12px, 0); width: 52px; height: 34px; }
+.s5 { top: 20%;    left: 20%;  opacity: 0; transform: rotateX(55deg) rotateZ(-14deg) translate3d(0, 12px, 0); border-left-width: 24px; border-top-width: 14px; border-bottom-width: 14px; }
+.s6 { top: 11%;    left: 34%;  opacity: 0; transform: rotateX(50deg) rotateZ(-48deg) translate3d(0, 12px, 0); width: 38px; height: 26px; }
+.s7 { top: 12%;    right: 8%;  opacity: 0; transform: rotateX(50deg) rotateZ(-30deg) translate3d(0, 12px, 0); height: 32px; width: 28px; }
+.s8 { bottom: 10%; right: 14%; opacity: 0; transform: rotateX(50deg) rotateZ(-38deg) translate3d(0, 12px, 0); width: 46px; height: 32px; }
+
+/* ---------- Reveal: fade in and drift idles start ---------- */
+/* [data-revealed] is set by <Reveal> on its wrapper div */
+
+[data-revealed] .s1 { opacity: 0.8;  transform: rotateX(50deg) rotateZ(-28deg); animation: drift1 7s ease-in-out infinite; }
+[data-revealed] .s2 { opacity: 0.85; transform: rotateX(55deg) rotateZ(-42deg); animation: drift2 8.5s ease-in-out infinite; }
+[data-revealed] .s3 { opacity: 0.7;  transform: rotateX(50deg) rotateZ(-35deg); animation: drift3 9s ease-in-out infinite; }
+[data-revealed] .s4 { opacity: 0.65; transform: rotateX(50deg) rotateZ(-22deg); animation: drift4 10s ease-in-out infinite; }
+[data-revealed] .s5 { opacity: 0.7;  transform: rotateX(55deg) rotateZ(-14deg); animation: drift2 11s ease-in-out infinite; }
+[data-revealed] .s6 { opacity: 0.55; transform: rotateX(50deg) rotateZ(-48deg); animation: drift4 12s ease-in-out infinite; }
+[data-revealed] .s7 { opacity: 0.65; transform: rotateX(50deg) rotateZ(-30deg); animation: drift3 8s ease-in-out infinite; }
+[data-revealed] .s8 { opacity: 0.75; transform: rotateX(50deg) rotateZ(-38deg); animation: drift1 9.5s ease-in-out infinite; }
+
+/* ---------- hover: shapes push outward ---------- */
+/* :has() resolves the button hover up to .root, then pushes each shape outward in its quadrant. */
+/* Transition on .shape already handles easing; we override transform here. */
+/* animation stays on so the drift keeps running underneath — but the transform override wins during transition. */
+
+/* Each hover target pushes the shape outward from button center (50%, 50%)
+   in its own quadrant. Close shapes push farther; corner shapes push less since
+   they're already near the edge. */
+
+.root:has(button:hover) .s1 { transform: rotateX(50deg) rotateZ(-52deg) translate3d(-40px, -26px, 0) scale(1.1); }
+.root:has(button:hover) .s2 { transform: rotateX(55deg) rotateZ(-62deg) translate3d(60px,  22px, 0) scale(1.18); }
+.root:has(button:hover) .s3 { transform: rotateX(50deg) rotateZ(-58deg) translate3d(-42px, 30px, 0) scale(1.12); }
+.root:has(button:hover) .s4 { transform: rotateX(50deg) rotateZ(-42deg) translate3d(-22px, 32px, 0) scale(1.18); }
+.root:has(button:hover) .s5 { transform: rotateX(55deg) rotateZ(-34deg) translate3d(-55px, -22px, 0) scale(1.22); }
+.root:has(button:hover) .s6 { transform: rotateX(50deg) rotateZ(-70deg) translate3d(-30px, -32px, 0) scale(1.25); }
+.root:has(button:hover) .s7 { transform: rotateX(50deg) rotateZ(-48deg) translate3d(40px, -28px, 0) scale(1.2); }
+.root:has(button:hover) .s8 { transform: rotateX(50deg) rotateZ(-58deg) translate3d(36px,  30px, 0) scale(1.15); }
+
+/* ---------- responsive ---------- */
+@media (max-width: 768px) {
+    .root { min-height: 360px; }
+
+    .s5, .s6, .s7, .s8 { display: none; }
+
+    [data-revealed] .s1 { transform: rotateX(50deg) rotateZ(-28deg) scale(0.75); }
+    [data-revealed] .s2 { transform: rotateX(55deg) rotateZ(-42deg) scale(0.75); }
+    [data-revealed] .s3 { transform: rotateX(50deg) rotateZ(-35deg) scale(0.75); }
+    [data-revealed] .s4 { transform: rotateX(50deg) rotateZ(-22deg) scale(0.75); }
+
+    .root:has(button:hover) .s1 { transform: rotateX(50deg) rotateZ(-48deg) translate3d(-20px, -14px, 0) scale(0.85); }
+    .root:has(button:hover) .s2 { transform: rotateX(55deg) rotateZ(-58deg) translate3d(28px, 12px, 0) scale(0.9); }
+    .root:has(button:hover) .s3 { transform: rotateX(50deg) rotateZ(-55deg) translate3d(-20px, 16px, 0) scale(0.85); }
+    .root:has(button:hover) .s4 { transform: rotateX(50deg) rotateZ(-38deg) translate3d(-10px, 18px, 0) scale(0.9); }
+}
+
+/* ---------- reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+    .shape {
+        transition: opacity 0.4s ease;
+    }
+
+    [data-revealed] .s1,
+    [data-revealed] .s2,
+    [data-revealed] .s3,
+    [data-revealed] .s4,
+    [data-revealed] .s5,
+    [data-revealed] .s6,
+    [data-revealed] .s7,
+    [data-revealed] .s8 {
+        animation: none;
+    }
+
+    .root:has(button:hover) .s1 { transform: rotateX(50deg) rotateZ(-28deg); }
+    .root:has(button:hover) .s2 { transform: rotateX(55deg) rotateZ(-42deg); }
+    .root:has(button:hover) .s3 { transform: rotateX(50deg) rotateZ(-35deg); }
+    .root:has(button:hover) .s4 { transform: rotateX(50deg) rotateZ(-22deg); }
+    .root:has(button:hover) .s5 { transform: rotateX(55deg) rotateZ(-14deg); }
+    .root:has(button:hover) .s6 { transform: rotateX(50deg) rotateZ(-48deg); }
+    .root:has(button:hover) .s7 { transform: rotateX(50deg) rotateZ(-30deg); }
+    .root:has(button:hover) .s8 { transform: rotateX(50deg) rotateZ(-38deg); }
+}

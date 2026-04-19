@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { Inter, Inter_Tight, Outfit } from "next/font/google";
 import localFont from "next/font/local";
-import {ThemeProvider } from 'next-themes'
+import { ThemeProvider } from 'next-themes'
+import { ClerkProvider } from '@clerk/nextjs'
 import "./globals.css";
 
 const inter = Inter({
@@ -54,11 +55,12 @@ export default function RootLayout({
 }>) {
   return (
     <html suppressHydrationWarning lang="en">
-
       <body className={`${inter.variable} ${interTight.variable} ${outfit.variable} ${neueMontreal.variable} ${eiko.variable}`}>
-        <ThemeProvider attribute="data-theme" defaultTheme="dark" enableSystem={false}>
-            {children}
-          </ThemeProvider>      
+        <ClerkProvider>
+          <ThemeProvider attribute="data-theme" defaultTheme="dark" enableSystem={false}>
+              {children}
+          </ThemeProvider>     
+        </ClerkProvider> 
         </body>
     </html>
   );

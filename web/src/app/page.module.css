@@ -85,7 +85,7 @@
     justify-content: center;
     align-items: center;
     margin: 8rem 0;
-    margin-top: 4rem;
+    margin-top: 1rem;
 }
 
 .stepsTextContainer {
@@ -125,7 +125,7 @@
 
 .stepsDescription {
     font-family: var(--font-neue);
-    font-size: 1.3rem;
+    font-size: 1.4rem;
     color: var(--color-primary);
     max-width: 70ch;
 }
@@ -199,6 +199,104 @@
     margin-left: 4rem;
     margin-top: 1rem;
 }
+
+.statsContainer {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 2rem;
+    margin-top: 6rem;
+}
+
+.steps {
+    max-width: 1400px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 2rem;
+    display: flex;
+    justify-content: space-between;
+
+}
+
+.statsLeft {
+    flex: 1;
+}
+
+.statsImage {
+    height: 640px;
+    width: 400px;
+}
+
+.statsRight {
+    flex: 1.4;
+    display: flex;
+    flex-direction: column;
+    gap: 4rem;
+}
+
+.statsCardContainer {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4rem;
+}
+
+
+.statsTitle {
+    font-family: "Outfit";
+    font-size: 2.8rem;
+    text-align: center;
+}
+
+.ctaContainer {
+    min-height: 720px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    max-width: 100dvw;
+}
+
+.cta {
+    display: flex;
+    max-width: 1400px;
+    flex: 1;
+    justify-content: center;
+    align-items: center;
+}
+
+.ctaButton {
+    font-family: "outfit";
+    font-size: 3rem;
+    background: rgb(240, 240, 240);
+    color: black;
+    border-radius: 1rem;
+    padding: 1rem 2rem;
+    font-weight: 600;
+    box-shadow: 0px 2px 40px 10px rgba(232, 168, 56, 0.22);
+    border: none;
+    cursor: pointer;
+    position: relative;
+    z-index: 5;
+    transition:
+        transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+        box-shadow 0.3s ease;
+}
+
+.ctaButton:hover {
+    transform: scale(1.03);
+    box-shadow: 0px 2px 50px 14px rgba(232, 168, 56, 0.35);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ctaButton {
+        transition: box-shadow 0.3s ease;
+    }
+
+    .ctaButton:hover {
+        transform: none;
+    }
+}
+
 
 @media (max-width: 768px) {
     .heroContainer {

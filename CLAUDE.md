@@ -6,8 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Eclypte is an AMV (Anime Music Video) creator. Monorepo layout:
 
-- **`web/`** — Next.js 16 frontend (React 19, TypeScript, App Router)
+- **`web/`** — Next.js 16 frontend (React 19, TypeScript, App Router). [web/CLAUDE.md](web/CLAUDE.md) re-exports [web/AGENTS.md](web/AGENTS.md) — the Next.js 16 warning applies to anything under `web/`.
 - **`api/`** — Python backend. `api/main.py` is still an empty FastAPI stub; real work lives in `api/prototyping/` (see Audio Pipeline below).
+
+The audio pipeline emits `song_analysis.json` and the video pipeline emits a "clip map" JSON — both use `schema_version: 1` and the `_sec` suffix for timestamps. The (not-yet-built) AI editing agent will consume both, so keep their timestamp conventions aligned (seconds, not frames) when extending either side.
 
 ## Development Commands
 
@@ -38,7 +40,7 @@ rest of the pipeline (`ytdownload`, `lyrics`, `main.py`) native.
   allin1 transitive deps). Installed into the Modal image once, then cached.
 
 `natten` is not in either file — it's installed via `run_commands` inside
-[api/prototyping/analysis_modal.py](api/prototyping/analysis_modal.py) because
+[api/prototyping/music/analysis_modal.py](api/prototyping/music/analysis_modal.py) because
 its wheel URL is torch/CUDA/Python-specific (`natten==0.17.4+torch250cu121`
 from `https://shi-labs.com/natten/wheels/cu121/torch2.5.0/`, via
 `--trusted-host shi-labs.com` because their SSL cert is intermittently expired).
@@ -73,7 +75,7 @@ modal token new      # browser-based auth; writes ~/.modal.toml
 **Running:**
 
 ```bash
-cd api/prototyping
+cd api/prototyping/music
 
 # End-to-end: download → Modal analyze → lyrics
 python main.py
@@ -123,14 +125,16 @@ definition in `analysis_modal.py` maps directly to a Dockerfile: same Linux
 base, same apt packages, same pip installs, same natten wheel. No code
 changes expected.
 
-## Audio Pipeline (`api/prototyping/`)
+## Audio Pipeline (`api/prototyping/music/`)
 
-MVP audio analysis lives in the prototyping sandbox. Scripts are wired together by [api/prototyping/main.py](api/prototyping/main.py):
+MVP audio analysis lives in the prototyping sandbox. Scripts are wired together by [api/prototyping/music/main.py](api/prototyping/music/main.py).
 
-- **[ytdownload.py](api/prototyping/ytdownload.py)** — `main(video_url) -> title`. Downloads YouTube audio via `pytubefix` to `content/output.m4a`, transcodes to `content/output.wav` via `pydub`. The URL is currently a module-level `url` constant.
-- **[analysis.py](api/prototyping/analysis.py)** — `analyze(audio_path, out_path=None) -> dict`. Pure function producing the "song map" JSON (`schema_version: 1`) with tempo, beats, downbeats, a 10Hz normalized energy curve, and structural segments. Uses `allin1` (PyTorch model) as the single source of truth for beats/downbeats/segments; `librosa` only for audio loading and RMS. All timestamps use the `_sec` suffix — no frame indices escape the module. **Does not import `modal`** — it runs inside the Modal container via `add_local_python_source`.
-- **[analysis_modal.py](api/prototyping/analysis_modal.py)** — Modal image definition + `analyze_remote(audio_bytes, filename) -> dict`. Thin wrapper: writes bytes to a tempfile in-container, calls `analysis.analyze()`, returns the dict. One round-trip, stateless. T4 GPU, 600s timeout, `allin1-cache` Volume mounted at `/root/.cache`.
-- **[lyrics.py](api/prototyping/lyrics.py)** — `main(query)`. Uses `syncedlyrics` to fetch an LRC, writes `content/lyrics.txt`. Intentionally separate from `song_analysis.json` (different source, optional).
+Note the name collision: [api/prototyping/music.py](api/prototyping/music.py) (a top-level file, not the `music/` directory) is an unused 10-line librosa `beat_track` scratch — ignore it when tracing the pipeline.
+
+- **[ytdownload.py](api/prototyping/music/ytdownload.py)** — `main(video_url) -> title`. Downloads YouTube audio via `pytubefix` to `content/output.m4a`, transcodes to `content/output.wav` via `pydub`. The URL is currently a module-level `url` constant.
+- **[analysis.py](api/prototyping/music/analysis.py)** — `analyze(audio_path, out_path=None) -> dict`. Pure function producing the "song map" JSON (`schema_version: 1`) with tempo, beats, downbeats, a 10Hz normalized energy curve, and structural segments. Uses `allin1` (PyTorch model) as the single source of truth for beats/downbeats/segments; `librosa` only for audio loading and RMS. All timestamps use the `_sec` suffix — no frame indices escape the module. **Does not import `modal`** — it runs inside the Modal container via `add_local_python_source`.
+- **[analysis_modal.py](api/prototyping/music/analysis_modal.py)** — Modal image definition + `analyze_remote(audio_bytes, filename) -> dict`. Thin wrapper: writes bytes to a tempfile in-container, calls `analysis.analyze()`, returns the dict. One round-trip, stateless. T4 GPU, 600s timeout, `allin1-cache` Volume mounted at `/root/.cache`.
+- **[lyrics.py](api/prototyping/music/lyrics.py)** — `main(query)`. Uses `syncedlyrics` to fetch an LRC, writes `content/lyrics.txt`. Intentionally separate from `song_analysis.json` (different source, optional).
 
 Song-map consumers read `content/output.json`. Schema details and design decisions are in the approved plan at `.claude/plans/glistening-enchanting-bumblebee.md` (if present) — timestamps are seconds, `downbeats_sec` is a subset of `beats_sec`, `segments.label` passes through allin1's vocabulary unchanged.
 
@@ -147,7 +151,7 @@ editing agent to sync cuts to music. Two runtimes share the same output shape:
   [analysis.py](api/prototyping/video/analysis.py). Uses
   `cv2.calcOpticalFlowFarneback` on the CPU. Fine for <2 min clips; ~30 fps
   throughput at 640×360.
-- **Modal GPU** — `main_remote(filename)` → `analyze_remote.remote(filename)`
+- **Modal GPU** — `main_remote(filename)` → `VideoAnalyzer().analyze.remote(filename)`
   from [analysis_modal.py](api/prototyping/video/analysis_modal.py) →
   [analysis_cuda.py](api/prototyping/video/analysis_cuda.py) using
   `cv2.cuda.FarnebackOpticalFlow`. For multi-hour footage. ~6–15× faster on
@@ -160,7 +164,7 @@ editing agent to sync cuts to music. Two runtimes share the same output shape:
 - **[impact.py](api/prototyping/video/impact.py)** — `impacts_per_scene(scene, motion, fps_hz)`. Adaptive-threshold impact detection: `median + K*MAD` on a combined flow+frame-diff visual-energy signal. Classifies `flash` / `motion_spike` / `combined`. Also emits stillness points and the full `visual_energy` curve.
 - **[analysis.py](api/prototyping/video/analysis.py)** — CPU orchestrator. `analyze(video_path, out_path=None) -> dict`. Must stay pure (no `import modal`) — loaded into the Modal image via `add_local_python_source`.
 - **[analysis_cuda.py](api/prototyping/video/analysis_cuda.py)** — GPU orchestrator. Opens the video once, streams frames sequentially, dispatches per-frame signals to the scene they belong to via a `_SceneAccumulator`. Resets `prev_gpu`/`prev_gray` at scene boundaries so flow never crosses cuts.
-- **[analysis_modal.py](api/prototyping/video/analysis_modal.py)** — Modal image build + wrappers. `analyze_remote(filename)` reads from the `eclypte-video-input` Volume at `/input/{filename}`; `analyze_remote_bytes(video_bytes, filename)` writes to a tempfile for small test clips.
+- **[analysis_modal.py](api/prototyping/video/analysis_modal.py)** — Modal image build + wrappers. `VideoAnalyzer.analyze(filename)` (a `modal.Cls` method) reads from the `eclypte-video-input` Volume at `/input/{filename}`; `analyze_remote_bytes(video_bytes, filename)` writes to a tempfile for small test clips. The class shape exists so `with_options(gpu=...)` can override the T4 default at call time — a knob `modal.Function` does not expose.
 
 All timestamps use the `_sec` suffix. `fps_hz` is the canonical sampling rate. Same `schema_version: 1` convention as the audio pipeline.
 
@@ -179,11 +183,11 @@ straight to GPU inference.
 |---|---|---|
 | CUDA base | `nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04` | Matches T4 driver compatibility. Same CUDA 12.1 as the audio image. |
 | OpenCV | 4.10.0 | Stable `cv2.cuda.FarnebackOpticalFlow` API. Built with `-DWITH_CUDA=ON -DWITH_CUDNN=ON -DOPENCV_DNN_CUDA=OFF`. |
-| `CUDA_ARCH_BIN` | 7.5 | T4 compute capability. If switching to A10/A10G, extend to `7.5,8.6`. |
+| `CUDA_ARCH_BIN` | 7.5;8.0;8.6;9.0 | Fat binary covering T4 (7.5), A100 (8.0), A10G/A10 (8.6), H100/H200 (9.0). Use **semicolons**, not commas — commas silently fail on some cmake versions. |
 | Python | 3.11 | Added to the CUDA base via `add_python="3.11"`. |
 | scenedetect | (unpinned) | Pure-Python, low risk. |
 
-Do not bump `CUDA_ARCH_BIN` away from T4's 7.5 without also changing the `gpu="T4"` argument on the Modal function, or the compiled kernels won't match the device.
+The image is multi-arch, so `gpu=` is a free knob. Override at call time via `VideoAnalyzer.with_options(gpu="A100")().analyze.remote(...)`, or pass `--gpu A100` to the [local entrypoint](api/prototyping/video/analysis_modal.py). Adding a new arch (e.g. L4's 8.9) requires editing `CUDA_ARCH_BIN` and triggering a one-time OpenCV rebuild (~20–40 min).
 
 **One-time upload of source video to a Modal Volume:**
 
@@ -217,12 +221,17 @@ This project uses **Next.js 16.2.3** with **React 19.2**. These versions postdat
 
 Before writing or modifying anything touching Next.js (routing, data fetching, `headers()`/`cookies()`/`params`, caching, config, metadata, middleware, server actions, etc.), consult `web/node_modules/next/dist/docs/` and heed any deprecation notices you find there. See also [web/AGENTS.md](web/AGENTS.md).
 
+Middleware lives at [web/src/proxy.ts](web/src/proxy.ts) (not `middleware.ts`) — Next.js 16's renamed convention. Export a default function and a `config.matcher`; the filename is what the framework recognizes.
+
 ## Architecture Notes
 
 - **App Router** — pages live in `web/src/app/`. Components use CSS Modules (`.module.css` co-located with each component).
 - **Path aliases** — `@/*` maps to `web/src/*` and `@components/*` maps to `web/src/components/*` (configured in `web/tsconfig.json`).
-- **Components** — shared UI lives in `web/src/components/` (e.g. `navbar/`, `hero/`). Each component is a directory with a `.tsx` file and a co-located `.module.css` file.
+- **Components** — shared UI lives in `web/src/components/` (e.g. `navbar/`, `hero/`, `stepCard/`, `statCard/`, `reveal/`, `login/`). Each component is a directory with a `.tsx` file and a co-located `.module.css` file.
 - **Page layout** — the root layout (`layout.tsx`) provides fonts and the `ThemeProvider` but no shared navigation. Each page imports `<Navbar />` individually — there is no global layout-level nav.
+- **Home page (`web/src/app/page.tsx`)** — section order, top to bottom: hero (`<HeroLayers />` + tagline) → `#steps` (3× `<StepCard>` in a grid) → about band → stats (placeholder image + 3× `<StatCard>`) → CTA button. All section styles live in [web/src/app/page.module.css](web/src/app/page.module.css).
+- **Scroll-reveal animations** — wrap a section in [`<Reveal>`](web/src/components/reveal/reveal.tsx) to get a `data-revealed` attribute set once it enters the viewport (IntersectionObserver, threshold 0.2, fires once then disconnects). Children opt in via `[data-revealed] .yourClass { ... }` selectors in the parent's CSS module — see `.stepsTitle` in `page.module.css`. Always pair with a `@media (prefers-reduced-motion: reduce)` override.
+- **Presentational cards** — [`<StepCard>`](web/src/components/stepCard/stepCard.tsx) (`number` / `title` / `description`) and [`<StatCard>`](web/src/components/statCard/statCard.tsx) (`value` / `label` / `description`) are pure prop-driven components with no state. Reuse before adding new card variants.
 - **Theming** — `next-themes` with `attribute="data-theme"` on `<ThemeProvider>`. Default theme is dark. CSS variables defined in `:root` and overridden via `[data-theme="dark"]` in `globals.css`:
   - `--color-background`, `--color-primary`, `--color-secondary`, `--color-subtitle`, `--color-highlight` (gold accent, #e8a838)
 - **Fonts** — loaded in `web/src/app/layout.tsx` and applied to `<body>` as CSS variable classes:

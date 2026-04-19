@@ -2,7 +2,16 @@
   "permissions": {
     "allow": [
       "WebFetch(domain:shi-labs.com)",
-      "Bash(curl -sk \"https://shi-labs.com/natten/wheels/\")"
+      "Bash(curl -sk \"https://shi-labs.com/natten/wheels/\")",
+      "Bash(.venv/Scripts/python.exe -c \"import modal; print\\(modal.__version__\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import modal; f = modal.Function; print\\([m for m in dir\\(f\\) if not m.startswith\\('_'\\)]\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import modal; help\\(modal.Function.clone\\)\")",
+      "WebFetch(domain:modal.com)",
+      "WebSearch",
+      "Bash(.venv/Scripts/python.exe -c \"import modal; print\\([m for m in dir\\(modal.Cls\\) if not m.startswith\\('_'\\)]\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import modal; help\\(modal.Cls.with_options\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import modal; help\\(modal.App.cls\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import modal; print\\('method:', hasattr\\(modal, 'method'\\)\\); help\\(modal.method\\)\")"
     ]
   }
 }

@@ -1,0 +1,31 @@
+.card {
+    display: flex;
+    flex-direction: row;
+
+}
+
+.value {
+    flex: 0 0 240px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 2rem;
+}
+
+.cardText {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.label {
+    font-size: 1.6rem;
+
+    
+}
+
+.description {
+    font-size: 1.2rem;
+    color: var(--color-secondary);
+
+}
