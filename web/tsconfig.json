@@ -20,7 +20,8 @@
     ],
     "paths": {
       "@/*": ["./src/*"],
-      "@components/*": ["./src/components/*"]
+      "@components/*": ["./src/components/*"],
+      "@dbcomponents/*": ["./src/components/dashboard/*"]
     }
   },
   "include": [
