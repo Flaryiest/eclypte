@@ -23,24 +23,36 @@ def _load_model():
         _model = CLIPModel.from_pretrained(model_id).to(_device)
         _processor = CLIPProcessor.from_pretrained(model_id)
 
-def embed_frames(frames: List[np.ndarray]) -> np.ndarray:
+def embed_frames(frames: List[np.ndarray], batch_size: int = 32) -> np.ndarray:
     """
     Embed a list of BGR numpy frames (from cv2) using CLIP ViT-L/14.
     Returns an array of shape (N, 768) for ViT-L/14.
+    
+    Processes frames in batches to avoid CUDA OOM on long videos.
     """
     _load_model()
     
-    # Convert BGR (cv2) to RGB (PIL)
-    pil_images = [Image.fromarray(f[:, :, ::-1]) for f in frames]
+    all_features = []
+    total = len(frames)
     
-    inputs = _processor(images=pil_images, return_tensors="pt", padding=True).to(_device)
-    
-    with torch.no_grad():
-        image_features = _model.get_image_features(**inputs)
+    for i in range(0, total, batch_size):
+        batch = frames[i:i + batch_size]
         
-    # Normalize features for cosine similarity
-    image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
-    return image_features.cpu().numpy()
+        # Convert BGR (cv2) to RGB (PIL)
+        pil_images = [Image.fromarray(f[:, :, ::-1]) for f in batch]
+        
+        inputs = _processor(images=pil_images, return_tensors="pt", padding=True).to(_device)
+        
+        with torch.no_grad():
+            image_features = _model.get_image_features(**inputs)
+            
+        # Normalize features for cosine similarity
+        image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
+        all_features.append(image_features.cpu().numpy())
+        
+        print(f"  Embedded batch {i // batch_size + 1}/{(total + batch_size - 1) // batch_size} ({min(i + batch_size, total)}/{total} frames)")
+    
+    return np.concatenate(all_features, axis=0)
 
 def embed_text(text: Union[str, List[str]]) -> np.ndarray:
     """
