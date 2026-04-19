@@ -5,6 +5,7 @@ import StepCard from "@components/stepCard/stepCard";
 import StatCard from "@components/statCard/statCard";
 import Reveal from "@components/reveal/reveal";
 import CtaShapes from "@components/ctaShapes/ctaShapes";
+import Footer from "@components/footer/footer"
 
 export default function Home() {
   return (
@@ -74,6 +75,7 @@ export default function Home() {
           </Reveal>
         </section>
       </main>
+      <Footer />
     </div>
   );
 }

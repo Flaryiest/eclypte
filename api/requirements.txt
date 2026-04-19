@@ -10,3 +10,6 @@ opencv-python
 scenedetect
 openai
 python-dotenv
+pydantic>=2
+pyyaml
+moviepy>=2

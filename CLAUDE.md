@@ -9,7 +9,7 @@ Eclypte is an AMV (Anime Music Video) creator. Monorepo layout:
 - **`web/`** — Next.js 16 frontend (React 19, TypeScript, App Router). [web/CLAUDE.md](web/CLAUDE.md) re-exports [web/AGENTS.md](web/AGENTS.md) — the Next.js 16 warning applies to anything under `web/`.
 - **`api/`** — Python backend. `api/main.py` is still an empty FastAPI stub; real work lives in `api/prototyping/` (see Audio Pipeline below).
 
-The audio pipeline emits `song_analysis.json` and the video pipeline emits a "clip map" JSON — both use `schema_version: 1` and the `_sec` suffix for timestamps. The (not-yet-built) AI editing agent will consume both, so keep their timestamp conventions aligned (seconds, not frames) when extending either side.
+The audio pipeline emits `song_analysis.json` and the video pipeline emits a "clip map" JSON — both use `schema_version: 1` and the `_sec` suffix for timestamps. The edit pipeline (`api/prototyping/edit/`, see Edit Pipeline below) consumes both, so keep their timestamp conventions aligned (seconds, not frames) when extending either side.
 
 ## Development Commands
 
@@ -214,6 +214,57 @@ First remote call builds OpenCV-CUDA inside the image (~20–40 min). The layer 
 ### Video — fallback: 16 vCPU CPU container
 
 If the OpenCV-CUDA image build becomes intractable on some future CUDA/driver bump, the fallback is a Modal CPU container with `modal.Image.debian_slim() + pip install opencv-python scenedetect` and `ProcessPoolExecutor(max_workers=16)` fanning out `cv2.calcOpticalFlowFarneback` over scenes. Expected ~12–15× speedup over the single-threaded local CPU path, ~$0.30 per 10 h job at Modal's CPU pricing — similar cost, simpler infra. Output schema is unchanged, so `analysis.py` and every consumer stay as-is.
+
+## Edit Pipeline (`api/prototyping/edit/`)
+
+Takes `(song_analysis.json, source_analysis.json, song.wav, source.mp4)` and produces a rendered AMV MP4. Phase-1 walking skeleton: deterministic planner (no LLM, no embeddings), motion-stat clip retrieval, hard cuts only, moviepy renderer on Modal. Phases 2 (reference-AMV consolidator) and 3 (CLIP index + LLM agent) are stubbed with stable interfaces. Full as-built details in `.claude/plans/now-that-i-have-concurrent-candle.md`.
+
+**Two-step flow** — plan locally (fast, no GPU), render on Modal:
+
+```bash
+cd api/prototyping
+
+# 1) plan → timeline.json
+python -m api.prototyping.edit.main \
+    --song   music/content/output.wav \
+    --source video/content/source.mp4 \
+    --out    edit/content/timeline.json
+
+# 2) one-off: create volume + upload sources (only when source/audio changes)
+modal volume create eclypte-edit
+modal volume put eclypte-edit music/content/output.wav
+modal volume put eclypte-edit video/content/source.mp4
+
+# 3) render → output.mp4  (must be run from api/prototyping/)
+modal run edit/render_modal.py \
+    --timeline edit/content/timeline.json \
+    --out      edit/content/output.mp4
+```
+
+**Subsystems:**
+
+- **[patterns/](api/prototyping/edit/patterns/)** — 5-layer pattern catalog (`micro` / `transition` / `shot_move` / `meso` / `macro`) with stable `<layer>.<slug>` IDs. [knowledge/patterns.yaml](api/prototyping/edit/knowledge/patterns.yaml) seeds 12 patterns. [registry.py](api/prototyping/edit/patterns/registry.py) loads + filters by section/energy/bpm/motion/camera; [compose.py](api/prototyping/edit/patterns/compose.py) picks macro + meso-per-section and expands meso→required atoms.
+- **[synthesis/](api/prototyping/edit/synthesis/)** — [timeline_schema.py](api/prototyping/edit/synthesis/timeline_schema.py) (pydantic v2), [validators.py](api/prototyping/edit/synthesis/validators.py) (contiguity within 1 ms, bounds, pattern-id refs), [prompt.py](api/prototyping/edit/synthesis/prompt.py) (allin1 label → intent + energy target), [planner.py](api/prototyping/edit/synthesis/planner.py) (deterministic). `agent.py` deferred to Phase 3.
+- **[index/query.py](api/prototyping/edit/index/query.py)** — `query_ranges(scenes, section, query_text, ...)`. Phase-1 scores scenes by `1 - |motion.avg_intensity - energy_target|`, picks a span centred on `motion.peak_timestamp_sec` clamped to the scene. `query_text` and `embeddings_path` accepted and ignored — the signature is the Phase-3 CLIP contract.
+- **[render/](api/prototyping/edit/render/)** — [renderer.py](api/prototyping/edit/render/renderer.py) (moviepy v2: `subclipped`, `with_duration`, `resized`, `concatenate_videoclips(method="compose")`, `with_audio` once at composite). `effects.py` and `transitions.py` are Phase-1 no-ops (freeze, speed-ramp, whip, crossfade, flash all deferred).
+- **[main.py](api/prototyping/edit/main.py)** — CLI wrapper; defaults analysis JSON paths to `<media>.with_suffix(".json")` and fails with the correct Modal command to run if missing.
+- **[render_modal.py](api/prototyping/edit/render_modal.py)** — Modal wrapper. App `eclypte-edit`, volume `eclypte-edit` at `/workdir`. Image is a fresh `debian_slim(python_version="3.12")` + ffmpeg + moviepy>=2 + pydantic>=2 + pyyaml + numpy + imageio-ffmpeg + `add_local_python_source("edit")` — no torch, no allin1, no OpenCV. 4 vCPU / 4 GB / 1800 s timeout, no GPU.
+
+**Rules and landmines:**
+
+- **`render_modal.py` must be invoked from `api/prototyping/`.** `add_local_python_source("edit")` resolves relative to the invocation cwd; running it from the repo root or from `edit/` won't upload the package correctly.
+- **`eclypte-edit` volume must exist before `modal volume put`** — `modal volume create eclypte-edit` is a one-off prerequisite. Was a first-run foot-gun.
+- **Windows → Linux path handling.** Timeline JSON may contain Windows-style paths (`video\content\foo.mp4`). `_patch_paths` in `render_modal.py` uses `PureWindowsPath(p).name` — Linux `pathlib.Path` treats `\` as a literal, not a separator, and silently returns the whole string.
+- **Planner output is always contiguous.** `_pick_range` has a 4-level fallback so it never returns None; a post-pass then rewrites every `timeline_start_sec` / `timeline_end_sec` via `shot.model_copy(update=...)` so shots stitch perfectly regardless of segment-boundary math. Don't remove either — the validator rejects gaps ≥ 1 ms.
+- **Renderer reads JSON only.** `render_timeline` has no dependency on patterns, sections, or embeddings. Keep it that way so timelines stay re-renderable, diff-able, and portable across Phase boundaries.
+- **Stable `query_ranges` signature.** Phase-3 CLIP will swap the body only — don't change the arg list unless you also fix the planner and agent.
+- **`edit/content/` is gitignored** like the music and video content folders.
+
+**Phase 2 / Phase 3 hooks (not yet built):**
+
+- `reference/{ingest,extractor,consolidate,ingest_modal}.py` — reuses `music/analysis.py` and `video/analysis_cuda.py` on viral AMVs; single LLM call rewrites `knowledge/references.md` whole per consolidation.
+- `index/{frames,embed,store,index_modal}.py` — CLIP ViT-L/14 embeddings, `.npz` store.
+- `synthesis/agent.py` — OpenAI `responses.create` tool loop (`query_clips`, `list_patterns`, `get_song_section`, `propose_shot`, `finalize`). Agent never writes JSON directly; invalid proposals return errors and retry.
 
 ## Next.js 16 — READ BEFORE WRITING CODE
 
