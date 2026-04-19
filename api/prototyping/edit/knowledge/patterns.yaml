@@ -1,0 +1,143 @@
+# Eclypte edit-pattern catalog. Stable IDs: <layer>.<slug>.
+# Layers: micro | transition | shot_move | meso | macro.
+# Phase-1 seed. Weights are priors; Phase-2 consolidator will tune them.
+
+- id: macro.rise_fall_arc
+  layer: macro
+  name: "Rise-fall arc"
+  description: "Whole-song energy arc: build through verses, climax on last chorus, resolve in outro."
+  applies_when: {}
+  params:
+    climax_section_index: {type: int, default: -1, range: [-1, 10]}
+  weight: 1.0
+  composes_with:
+    requires: [meso.chorus_hype_block]
+  emits: {kind: story_beat}
+
+- id: macro.slow_intro
+  layer: macro
+  name: "Slow intro"
+  description: "Long, sparse cuts during intro — establishing shots."
+  applies_when:
+    section_labels: [intro]
+  params:
+    shots_per_section: {type: int, default: 2, range: [1, 6]}
+  weight: 0.8
+  emits: {kind: story_beat}
+
+- id: meso.chorus_hype_block
+  layer: meso
+  name: "Chorus hype block"
+  description: "Dense cuts on every downbeat during chorus, high-motion clips preferred."
+  applies_when:
+    section_labels: [chorus]
+    min_energy: 0.4
+  params:
+    cut_density_per_beat: {type: float, default: 1.0, range: [0.5, 2.0]}
+  weight: 1.2
+  composes_with:
+    requires: [micro.beat_cut_on_downbeat]
+    forbids: []
+  emits: {kind: section_plan}
+
+- id: meso.verse_breathe
+  layer: meso
+  name: "Verse breathe"
+  description: "Longer holds during verses — one shot per 2 downbeats. Calmer clips."
+  applies_when:
+    section_labels: [verse]
+  params:
+    cut_density_per_beat: {type: float, default: 0.5, range: [0.25, 1.0]}
+  weight: 1.0
+  composes_with:
+    requires: [micro.beat_cut_on_downbeat]
+  emits: {kind: section_plan}
+
+- id: meso.bridge_contrast
+  layer: meso
+  name: "Bridge contrast"
+  description: "Slow down in bridge — add freezes on stillness points."
+  applies_when:
+    section_labels: [bridge]
+  params:
+    cut_density_per_beat: {type: float, default: 0.5, range: [0.25, 1.0]}
+  weight: 1.0
+  composes_with:
+    requires: [shot_move.freeze_on_stillness]
+  emits: {kind: section_plan}
+
+- id: micro.beat_cut_on_downbeat
+  layer: micro
+  name: "Cut on downbeat"
+  description: "Hard cut aligned to each downbeat timestamp."
+  applies_when:
+    min_energy: 0.2
+  params:
+    offset_frames: {type: int, default: 0, range: [-2, 2]}
+  weight: 1.0
+  emits: {kind: cut, align_to: downbeats_sec}
+
+- id: micro.cut_on_every_beat
+  layer: micro
+  name: "Cut on every beat"
+  description: "Double-time cuts: one per beat, not per downbeat. Chorus-only."
+  applies_when:
+    section_labels: [chorus]
+    min_energy: 0.6
+  params: {}
+  weight: 0.7
+  emits: {kind: cut, align_to: beats_sec}
+
+- id: transition.hard_cut
+  layer: transition
+  name: "Hard cut"
+  description: "Zero-duration cut between shots. Default transition."
+  applies_when: {}
+  params: {}
+  weight: 1.0
+  emits: {kind: transition, type: cut, duration_sec: 0.0}
+
+- id: transition.whip_pan_match
+  layer: transition
+  name: "Whip-pan match"
+  description: "Match-cut between two whip-pan shots (same direction)."
+  applies_when:
+    camera_movements: [whip_pan]
+  params:
+    duration_sec: {type: float, default: 0.18, range: [0.08, 0.3]}
+  weight: 0.6
+  emits: {kind: transition, type: whip}
+
+- id: shot_move.speed_ramp_to_impact
+  layer: shot_move
+  name: "Speed ramp to impact"
+  description: "Slow-fast ramp anchored on an impact_frame."
+  applies_when:
+    motion_intensity: [0.4, 1.0]
+  params:
+    from_speed: {type: float, default: 0.5, range: [0.25, 1.0]}
+    to_speed:   {type: float, default: 1.0, range: [1.0, 2.0]}
+    anchor:     {type: enum, default: impact_frame, range: [impact_frame, downbeat]}
+  weight: 0.8
+  emits: {kind: effect, type: speed_ramp}
+
+- id: shot_move.freeze_on_stillness
+  layer: shot_move
+  name: "Freeze on stillness"
+  description: "Hold the last frame briefly when the clip hits a stillness point near a downbeat."
+  applies_when: {}
+  params:
+    duration_sec: {type: float, default: 0.12, range: [0.04, 0.3]}
+  weight: 0.9
+  emits: {kind: effect, type: freeze}
+
+- id: shot_move.hold_wide
+  layer: shot_move
+  name: "Hold wide"
+  description: "Prefer low-motion, stable establishing shots. Used in intros."
+  applies_when:
+    motion_intensity: [0.0, 0.3]
+    camera_movements: [static, pan]
+  params: {}
+  weight: 0.7
+  emits: {kind: effect, type: hold}
