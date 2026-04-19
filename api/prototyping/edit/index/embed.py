@@ -1,0 +1,62 @@
+import numpy as np
+from typing import List, Union
+
+try:
+    import torch
+    from transformers import CLIPProcessor, CLIPModel
+    from PIL import Image
+    _HAS_TRANSFORMERS = True
+except ImportError:
+    _HAS_TRANSFORMERS = False
+
+# We load the model lazily
+_model = None
+_processor = None
+_device = "cuda" if _HAS_TRANSFORMERS and torch.cuda.is_available() else "cpu"
+
+def _load_model():
+    global _model, _processor
+    if not _HAS_TRANSFORMERS:
+        raise RuntimeError("transformers and torch are required for CLIP embedding.")
+    if _model is None:
+        model_id = "openai/clip-vit-large-patch14"
+        _model = CLIPModel.from_pretrained(model_id).to(_device)
+        _processor = CLIPProcessor.from_pretrained(model_id)
+
+def embed_frames(frames: List[np.ndarray]) -> np.ndarray:
+    """
+    Embed a list of BGR numpy frames (from cv2) using CLIP ViT-L/14.
+    Returns an array of shape (N, 768) for ViT-L/14.
+    """
+    _load_model()
+    
+    # Convert BGR (cv2) to RGB (PIL)
+    pil_images = [Image.fromarray(f[:, :, ::-1]) for f in frames]
+    
+    inputs = _processor(images=pil_images, return_tensors="pt", padding=True).to(_device)
+    
+    with torch.no_grad():
+        image_features = _model.get_image_features(**inputs)
+        
+    # Normalize features for cosine similarity
+    image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
+    return image_features.cpu().numpy()
+
+def embed_text(text: Union[str, List[str]]) -> np.ndarray:
+    """
+    Embed text query/queries using CLIP ViT-L/14.
+    Returns an array of shape (N, 768).
+    """
+    _load_model()
+    
+    if isinstance(text, str):
+        text = [text]
+        
+    inputs = _processor(text=text, return_tensors="pt", padding=True, truncation=True).to(_device)
+    
+    with torch.no_grad():
+        text_features = _model.get_text_features(**inputs)
+        
+    # Normalize
+    text_features = text_features / text_features.norm(p=2, dim=-1, keepdim=True)
+    return text_features.cpu().numpy()
