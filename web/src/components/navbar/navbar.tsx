@@ -15,6 +15,10 @@ export default function Navbar() {
         return () => window.removeEventListener("scroll", onScroll)
     }, [])
 
+    useEffect(() => {
+        if (window.location.hash.startsWith("#/")) setShowLogin(true)
+    }, [])
+
     return (
         <>
             <div className={`${styles.navbarContainer} ${scrolled ? styles.scrolled : ""}`}>
