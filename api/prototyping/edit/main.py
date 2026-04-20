@@ -1,13 +1,27 @@
 """
-Phase-1 CLI: plan a timeline from existing song + source analyses.
+Edit-pipeline CLI: plan a timeline from existing song + source analyses.
 
-Run the audio and video analyses separately (Modal commands below), then:
+Two planning paths share this CLI:
 
-    python -m api.prototyping.edit.main \\
-        --song content/song.wav \\
-        --source content/source.mp4
+- **Phase 1 (default)** — deterministic planner, beat-aligned, motion-stat clip
+  retrieval. No LLM, no embeddings:
 
-This writes `content/timeline.json`. Render on Modal:
+        python -m api.prototyping.edit.main \\
+            --song content/song.wav \\
+            --source content/source.mp4
+
+- **Phase 3 (`--agent`)** — GPT-4o synthesis loop + CLIP retrieval. Requires the
+  CLIP index to already be built on the `eclypte-edit` Modal volume
+  (`modal run edit/index/index_modal.py --video-filename source.mp4`) and the
+  `OPENAI_API_KEY` env var to be set:
+
+        python -m api.prototyping.edit.main \\
+            --song content/song.wav \\
+            --source content/source.mp4 \\
+            --agent \\
+            --instructions "fast-paced action AMV, cut on every downbeat in choruses"
+
+Both paths write `content/timeline.json`. Render on Modal:
 
     modal run api/prototyping/edit/render_modal.py \\
         --timeline content/timeline.json \\
@@ -22,11 +36,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
+import sys
 from pathlib import Path
 
-from .patterns import registry
-from .reference.annotations import parse_annotations
-from .synthesis.planner import plan
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8")
+
 from .synthesis.timeline_schema import Timeline
 
 PACKAGE_DIR = Path(__file__).resolve().parent
@@ -43,6 +60,46 @@ def main(argv: list[str] | None = None) -> int:
 
     song = json.loads(Path(song_json).read_text(encoding="utf-8"))
     video = json.loads(Path(video_json).read_text(encoding="utf-8"))
+
+    if args.agent:
+        timeline = _run_agent(args, song, video)
+    else:
+        timeline = _run_planner(args, song, video)
+
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(timeline.model_dump(mode="json"), indent=2))
+    _report(timeline, out_path)
+
+    if args.render:
+        _render(out_path, Path(args.render_out))
+    return 0
+
+
+def _render(timeline_path: Path, video_out: Path) -> None:
+    """Invoke `modal run edit/render_modal.py` from api/prototyping/."""
+    prototyping_dir = Path(__file__).resolve().parent.parent
+    timeline_abs = timeline_path.resolve()
+    video_out_abs = video_out.resolve()
+    video_out_abs.parent.mkdir(parents=True, exist_ok=True)
+
+    print(f"rendering via Modal: {timeline_abs} -> {video_out_abs}")
+    subprocess.run(
+        [
+            "modal", "run", "edit/render_modal.py",
+            "--timeline", str(timeline_abs),
+            "--out", str(video_out_abs),
+        ],
+        cwd=str(prototyping_dir),
+        check=True,
+    )
+    print(f"wrote {video_out_abs}")
+
+
+def _run_planner(args: argparse.Namespace, song: dict, video: dict) -> Timeline:
+    from .patterns import registry
+    from .reference.annotations import parse_annotations
+    from .synthesis.planner import plan
 
     patterns = None
     patterns_path = args.patterns
@@ -64,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"no annotations found at {args.annotations_path} (weights unchanged)")
         patterns_path = None
 
-    timeline = plan(
+    return plan(
         song=song,
         video=video,
         source_video_path=str(args.source),
@@ -76,11 +133,33 @@ def main(argv: list[str] | None = None) -> int:
         max_duration_sec=args.max_duration,
     )
 
-    out_path = Path(args.out)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(timeline.model_dump(mode="json"), indent=2))
-    _report(timeline, out_path)
-    return 0
+
+def _run_agent(args: argparse.Namespace, song: dict, video: dict) -> Timeline:
+    from .synthesis.adapter import adapt
+    from .synthesis.agent import run_synthesis_loop
+
+    if args.use_annotations:
+        print("warning: --use-annotations has no effect with --agent (patterns not used)")
+    if args.max_duration is not None:
+        print("warning: --max-duration has no effect with --agent")
+
+    print(f"running synthesis agent on {args.source.name}...")
+    agent_output = run_synthesis_loop(
+        video_filename=args.source.name,
+        instructions=args.instructions,
+        song=song,
+    )
+    print(f"agent produced {len(agent_output)} shots; adapting to timeline...")
+
+    return adapt(
+        agent_output=agent_output,
+        song=song,
+        video=video,
+        source_video_path=str(args.source),
+        audio_path=str(args.song),
+        output_size=(args.width, args.height),
+        output_fps=args.fps,
+    )
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -104,7 +183,23 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
                         "(Phase-2 Weighted Annotations section)")
     p.add_argument("--annotations-path", type=Path, default=DEFAULT_ANNOTATIONS_PATH,
                    help="path to references.md (default: knowledge/references.md)")
-    return p.parse_args(argv)
+    p.add_argument("--agent", action="store_true",
+                   help="use the Phase-3 GPT-4o synthesis agent instead of the "
+                        "deterministic planner (requires OPENAI_API_KEY and a "
+                        "prebuilt CLIP index on the eclypte-edit Modal volume)")
+    p.add_argument("--instructions", type=str, default=None,
+                   help="English AMV brief for the synthesis agent "
+                        "(required with --agent)")
+    p.add_argument("--render", action="store_true",
+                   help="after writing the timeline, invoke modal run to "
+                        "render it (requires Modal CLI on PATH)")
+    p.add_argument("--render-out", type=Path,
+                   default=DEFAULT_CONTENT_DIR / "output.mp4",
+                   help="rendered MP4 path when --render is set")
+    args = p.parse_args(argv)
+    if args.agent and not args.instructions:
+        p.error("--agent requires --instructions")
+    return args
 
 
 def _resolve_analysis(explicit: Path | None, media: Path, suffix: str) -> Path:

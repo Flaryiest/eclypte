@@ -39,8 +39,8 @@ WORKDIR = "/workdir"
 
 @app.function(
     image=image,
-    cpu=4,
-    memory=4096,
+    cpu=16,
+    memory=16384,
     timeout=1800,
     volumes={WORKDIR: edit_volume},
 )

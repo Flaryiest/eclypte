@@ -21,7 +21,23 @@
       "Bash(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 ./api/.venv/Scripts/python.exe -m api.prototyping.edit.reference ingest --url 'https://www.instagram.com/reels/DWxo7S4jFKf/')",
       "Bash(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 ./api/.venv/Scripts/python.exe -m api.prototyping.edit.reference show DWxo7S4jFKf)",
       "Bash(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 ./api/.venv/Scripts/python.exe -m api.prototyping.edit.reference list)",
-      "Read(//c/Users/ericm/.claude/plans/**)"
+      "Read(//c/Users/ericm/.claude/plans/**)",
+      "Bash(python -m pytest api/prototyping/edit/synthesis/test_adapter.py -v)",
+      "Bash(pip install *)",
+      "Bash(python -c \"from api.prototyping.edit.main import main, _parse_args; ns = _parse_args\\(['--song', 'a.wav', '--source', 'b.mp4', '--agent', '--instructions', 'test']\\); print\\('agent:', ns.agent, 'instr:', ns.instructions, 'source.name:', ns.source.name\\)\")",
+      "Bash(python -c 'from api.prototyping.edit.main import _parse_args *)",
+      "Bash(modal app *)",
+      "Bash(PYTHONIOENCODING=utf-8 modal deploy edit/index/query_modal.py)",
+      "Bash(PYTHONIOENCODING=utf-8 python -m api.prototyping.edit.main --song music/content/output.wav --source \"video/content/Project Hail Mary.mp4\" --out edit/content/timeline_agent.json --agent --instructions \"Fast-paced action AMV. Open strong with tight impact cuts and held beats on the first chorus. After that, use mostly plain cuts to tell the full story of the source in chronological order. Cover the full arc, not just action moments.\")",
+      "Bash(PYTHONIOENCODING=utf-8 modal run edit/render_modal.py --timeline edit/content/timeline_agent.json --out edit/content/output_agent.mp4)",
+      "Bash(python -c \"from api.prototyping.edit.main import _parse_args; ns = _parse_args\\(['--song', 'a.wav', '--source', 'b.mp4']\\); print\\('import + parse OK'\\)\")",
+      "WebFetch(domain:developers.openai.com)",
+      "WebFetch(domain:platform.openai.com)",
+      "Bash(python -c \"import openai; print\\('openai SDK:', openai.__version__\\)\")",
+      "Bash(python -m pytest api/prototyping/edit/synthesis/ -q)",
+      "Bash(python -m api.prototyping.edit.main --song \"api/prototyping/music/content/output.wav\" --source \"api/prototyping/video/content/Project Hail Mary.mp4\" --out \"api/prototyping/edit/content/timeline_agent.json\" --agent --instructions \"Fast-paced action AMV, open strong, tell the full story chronologically.\")",
+      "Bash(modal run *)",
+      "Read(//c/Users/ericm/AppData/Local/Temp/claude/c--Users-ericm-Documents-GitHub-eclypte/48c0f407-d212-4924-a4e1-145cc044e02e/tasks/**)"
     ],
     "additionalDirectories": [
       "\\tmp"
