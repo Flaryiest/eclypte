@@ -1,32 +1,35 @@
 import cv2
 import numpy as np
 
+
 def extract_frames(video_path: str, fps: int = 1) -> list[tuple[float, np.ndarray]]:
     """
     Extract frames from a video at the specified fps rate.
     Returns a list of tuples (timestamp_sec, frame_bgr_array).
+
+    Decodes sequentially and keeps every Nth frame where
+    N = round(source_fps / fps). Much faster than per-frame seeking
+    on long videos.
     """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise ValueError(f"Could not open video {video_path}")
-        
+
+    source_fps = cap.get(cv2.CAP_PROP_FPS)
+    if not source_fps or source_fps != source_fps:  # 0 or NaN
+        source_fps = float(fps)
+
+    step = max(1, round(source_fps / fps))
+
     frames = []
-    
-    # We will grab frames at 1-second intervals
-    # Since we don't know the exact duration easily, we iterate until False
-    # Actually, a better way is to iterate by setting CAP_PROP_POS_MSEC
-    
-    sec = 0.0
+    counter = 0
     while True:
-        # Set position in ms
-        cap.set(cv2.CAP_PROP_POS_MSEC, sec * 1000.0)
         ret, frame = cap.read()
-        
         if not ret:
             break
-            
-        frames.append((float(sec), frame))
-        sec += 1.0 / fps
-        
+        if counter % step == 0:
+            frames.append((counter / source_fps, frame))
+        counter += 1
+
     cap.release()
     return frames

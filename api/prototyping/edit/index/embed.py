@@ -45,8 +45,11 @@ def embed_frames(frames: List[np.ndarray], batch_size: int = 32) -> np.ndarray:
         
         with torch.no_grad():
             image_features = _model.get_image_features(**inputs)
-            
-        # Normalize features for cosine similarity
+
+        # Some transformers versions return a model output object instead of a tensor
+        if not isinstance(image_features, torch.Tensor):
+            image_features = image_features.pooler_output
+
         image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
         all_features.append(image_features.cpu().numpy())
         
@@ -68,7 +71,10 @@ def embed_text(text: Union[str, List[str]]) -> np.ndarray:
     
     with torch.no_grad():
         text_features = _model.get_text_features(**inputs)
-        
-    # Normalize
+
+    # Some transformers versions return a model output object instead of a tensor
+    if not isinstance(text_features, torch.Tensor):
+        text_features = text_features.pooler_output
+
     text_features = text_features / text_features.norm(p=2, dim=-1, keepdim=True)
     return text_features.cpu().numpy()

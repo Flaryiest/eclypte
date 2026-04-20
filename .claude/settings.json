@@ -20,7 +20,8 @@
       "Bash(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 \"c:/Users/ericm/Documents/GitHub/eclypte/api/.venv/Scripts/python.exe\" -m modal deploy video/analysis_modal.py)",
       "Bash(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 ./api/.venv/Scripts/python.exe -m api.prototyping.edit.reference ingest --url 'https://www.instagram.com/reels/DWxo7S4jFKf/')",
       "Bash(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 ./api/.venv/Scripts/python.exe -m api.prototyping.edit.reference show DWxo7S4jFKf)",
-      "Bash(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 ./api/.venv/Scripts/python.exe -m api.prototyping.edit.reference list)"
+      "Bash(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 ./api/.venv/Scripts/python.exe -m api.prototyping.edit.reference list)",
+      "Read(//c/Users/ericm/.claude/plans/**)"
     ],
     "additionalDirectories": [
       "\\tmp"
