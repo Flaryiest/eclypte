@@ -14,6 +14,7 @@ _model = None
 _processor = None
 _device = "cuda" if _HAS_TRANSFORMERS and torch.cuda.is_available() else "cpu"
 
+
 def _load_model():
     global _model, _processor
     if not _HAS_TRANSFORMERS:
@@ -22,6 +23,22 @@ def _load_model():
         model_id = "openai/clip-vit-large-patch14"
         _model = CLIPModel.from_pretrained(model_id).to(_device)
         _processor = CLIPProcessor.from_pretrained(model_id)
+
+
+def _is_tensor_like(value) -> bool:
+    return callable(getattr(value, "norm", None)) and callable(getattr(value, "cpu", None))
+
+
+def _coerce_feature_tensor(value):
+    if _is_tensor_like(value):
+        return value
+
+    pooler_output = getattr(value, "pooler_output", None)
+    if _is_tensor_like(pooler_output):
+        return pooler_output
+
+    return value
+
 
 def embed_frames(frames: List[np.ndarray], batch_size: int = 32) -> np.ndarray:
     """
@@ -46,9 +63,7 @@ def embed_frames(frames: List[np.ndarray], batch_size: int = 32) -> np.ndarray:
         with torch.no_grad():
             image_features = _model.get_image_features(**inputs)
 
-        # Some transformers versions return a model output object instead of a tensor
-        if not isinstance(image_features, torch.Tensor):
-            image_features = image_features.pooler_output
+        image_features = _coerce_feature_tensor(image_features)
 
         image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
         all_features.append(image_features.cpu().numpy())
@@ -72,9 +87,7 @@ def embed_text(text: Union[str, List[str]]) -> np.ndarray:
     with torch.no_grad():
         text_features = _model.get_text_features(**inputs)
 
-    # Some transformers versions return a model output object instead of a tensor
-    if not isinstance(text_features, torch.Tensor):
-        text_features = text_features.pooler_output
+    text_features = _coerce_feature_tensor(text_features)
 
     text_features = text_features / text_features.norm(p=2, dim=-1, keepdim=True)
     return text_features.cpu().numpy()
