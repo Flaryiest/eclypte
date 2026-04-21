@@ -5,8 +5,8 @@ Two independent retrieval functions:
 
 - `query_ranges` (Phase-1): pure motion-statistics ranking over video scenes.
   No embeddings, no network. Used by the deterministic planner.
-- `query_clips` / `query_clips_batch` (Phase-3): CLIP semantic similarity via
-  Modal. Used by the synthesis agent.
+- `query_clips` (Phase-3): CLIP semantic similarity via Modal. Used by the
+  synthesis agent.
 """
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,7 +21,6 @@ except ImportError:  # pragma: no cover - exercised only in lightweight test env
 
 MIN_SCORE = 1e-6
 _QUERY_FUNC = None
-_QUERY_BATCH_FUNC = None
 
 
 def query_ranges(
@@ -117,20 +116,3 @@ def query_clips(query: str, video_filename: str, top_k: int = 5) -> list[dict]:
     if _QUERY_FUNC is None:
         _QUERY_FUNC = _lookup_query_func("query_index")
     return _QUERY_FUNC.remote(query, video_filename, top_k)
-
-
-def query_clips_batch(
-    queries: list[str],
-    video_filename: str,
-    top_k: int = 5,
-) -> list[dict]:
-    """
-    Batch proxy to the Modal CLIP query endpoint.
-
-    Each returned item has shape:
-      {"query": <str>, "results": [{"timestamp": <float>, "score": <float>}, ...]}
-    """
-    global _QUERY_BATCH_FUNC
-    if _QUERY_BATCH_FUNC is None:
-        _QUERY_BATCH_FUNC = _lookup_query_func("query_index_batch")
-    return _QUERY_BATCH_FUNC.remote(queries, video_filename, top_k)

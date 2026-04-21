@@ -50,7 +50,7 @@ def _top_k_results(
     ]
 
 
-@app.function(image=image, volumes={"/workdir": volume}, gpu="T4")
+@app.function(image=image, volumes={"/workdir": volume}, gpu="T4", scaledown_window=600)
 def query_index(query: str, video_filename: str, top_k: int = 5) -> list[dict]:
     """
     Load the video's CLIP index, embed one text query, and return the best
@@ -62,33 +62,3 @@ def query_index(query: str, video_filename: str, top_k: int = 5) -> list[dict]:
     query_emb = embed_text(query)[0]
     similarities = np.dot(embeddings, query_emb)
     return _top_k_results(timestamps, similarities, top_k=top_k)
-
-
-@app.function(image=image, volumes={"/workdir": volume}, gpu="T4")
-def query_index_batch(
-    queries: list[str],
-    video_filename: str,
-    top_k: int = 5,
-) -> list[dict]:
-    """
-    Batch text-query variant of `query_index`.
-
-    This avoids repeated CLIP forward passes and lets a single Modal request
-    answer a whole planning step's worth of retrieval prompts.
-    """
-    from embed import embed_text
-
-    if not queries:
-        return []
-
-    timestamps, embeddings = _load_index(video_filename)
-    query_embeddings = embed_text(queries)
-    similarities = np.dot(query_embeddings, embeddings.T)
-
-    return [
-        {
-            "query": query,
-            "results": _top_k_results(timestamps, sim_row, top_k=top_k),
-        }
-        for query, sim_row in zip(queries, similarities, strict=False)
-    ]

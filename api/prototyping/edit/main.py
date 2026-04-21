@@ -50,6 +50,10 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 DEFAULT_CONTENT_DIR = PACKAGE_DIR / "content"
 DEFAULT_TIMELINE_OUT = DEFAULT_CONTENT_DIR / "timeline.json"
 DEFAULT_ANNOTATIONS_PATH = PACKAGE_DIR / "knowledge" / "references.md"
+RENDER_PROFILE_THREADS = {
+    "standard": 16,
+    "boosted": 24,
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -76,6 +80,8 @@ def main(argv: list[str] | None = None) -> int:
             out_path,
             Path(args.render_out),
             store_only=args.render_store_only,
+            render_profile=args.render_profile,
+            render_stage_inputs_local=args.render_stage_inputs_local,
             encode_preset=args.render_preset,
             threads=args.render_threads,
         )
@@ -87,34 +93,51 @@ def _render(
     video_out: Path,
     *,
     store_only: bool = False,
+    render_profile: str = "standard",
+    render_stage_inputs_local: bool = False,
     encode_preset: str = "medium",
-    threads: int = 16,
+    threads: int | None = None,
 ) -> None:
     """Invoke `modal run edit/render_modal.py` from api/prototyping/."""
     prototyping_dir = Path(__file__).resolve().parent.parent
     timeline_abs = timeline_path.resolve()
     video_out_abs = video_out.resolve()
     video_out_abs.parent.mkdir(parents=True, exist_ok=True)
+    resolved_threads = _resolve_render_threads(render_profile, threads)
 
     cmd = [
         "modal", "run", "edit/render_modal.py",
         "--timeline", str(timeline_abs),
         "--out", str(video_out_abs),
+        "--render-profile", render_profile,
         "--encode-preset", encode_preset,
-        "--threads", str(threads),
+        "--threads", str(resolved_threads),
     ]
     if store_only:
         cmd.append("--store-only")
+    if render_stage_inputs_local:
+        cmd.append("--render-stage-inputs-local")
 
     print(
         f"rendering via Modal: {timeline_abs} -> {video_out_abs} "
-        f"(store_only={store_only}, preset={encode_preset}, threads={threads})"
+        f"(store_only={store_only}, profile={render_profile}, "
+        f"stage_inputs_local={render_stage_inputs_local}, preset={encode_preset}, "
+        f"threads={resolved_threads})"
     )
     subprocess.run(cmd, cwd=str(prototyping_dir), check=True)
     if store_only:
         print(f"rendered remotely to volume as {video_out_abs.name}")
     else:
         print(f"wrote {video_out_abs}")
+
+
+def _resolve_render_threads(render_profile: str, threads: int | None) -> int:
+    try:
+        default_threads = RENDER_PROFILE_THREADS[render_profile]
+    except KeyError as exc:
+        choices = ", ".join(sorted(RENDER_PROFILE_THREADS))
+        raise ValueError(f"unknown render profile {render_profile!r}; expected one of: {choices}") from exc
+    return default_threads if threads is None else threads
 
 
 def _run_planner(args: argparse.Namespace, song: dict, video: dict) -> Timeline:
@@ -219,10 +242,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
                    help="rendered MP4 path when --render is set")
     p.add_argument("--render-store-only", action="store_true",
                    help="render into the Modal volume only; skip returning the MP4 bytes locally")
+    p.add_argument("--render-profile", choices=sorted(RENDER_PROFILE_THREADS), default="standard",
+                   help="Modal capacity profile for render workloads")
+    p.add_argument("--render-stage-inputs-local", action="store_true",
+                   help="stage source media from the Modal volume into container-local temp storage before rendering")
     p.add_argument("--render-preset", default="medium",
                    help="ffmpeg/x264 preset passed through to the Modal renderer (e.g. ultrafast, veryfast, medium)")
-    p.add_argument("--render-threads", type=int, default=16,
-                   help="thread count passed through to the Modal renderer")
+    p.add_argument("--render-threads", type=int, default=None,
+                   help="thread count passed through to the Modal renderer (defaults vary by --render-profile)")
     args = p.parse_args(argv)
     if args.agent and not args.instructions:
         p.error("--agent requires --instructions")

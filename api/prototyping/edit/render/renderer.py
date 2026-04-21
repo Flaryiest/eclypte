@@ -13,6 +13,7 @@ moviepy v2 API conventions used: `subclipped`, `with_duration`, `with_start`,
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from moviepy import AudioFileClip, ColorClip, CompositeVideoClip, VideoFileClip, concatenate_videoclips
@@ -27,6 +28,11 @@ CODEC_AUDIO = "aac"
 DEFAULT_ENCODE_PRESET = "medium"
 
 
+def _log_timing(step: str, started_at: float) -> None:
+    elapsed = time.perf_counter() - started_at
+    print(f"[renderer] {step}: {elapsed:.2f}s")
+
+
 def render_timeline(
     timeline_path: Path | str,
     out_path: Path | str,
@@ -35,6 +41,7 @@ def render_timeline(
     encode_preset: str = DEFAULT_ENCODE_PRESET,
     threads: int | None = None,
 ) -> Path:
+    total_started = time.perf_counter()
     timeline_path = Path(timeline_path)
     out_path = Path(out_path)
 
@@ -43,20 +50,33 @@ def render_timeline(
 
     target_size, target_fps = _resolve_output(timeline.output, preview=preview)
 
+    source = None
+    audio = None
+    concat = None
+    final = None
+    shot_clips = []
+
+    open_started = time.perf_counter()
     source = VideoFileClip(timeline.source.video)
     audio = AudioFileClip(timeline.audio.path)
+    _log_timing("open media", open_started)
 
     try:
+        build_started = time.perf_counter()
         shot_clips = _build_shot_clips(source, timeline.shots, target_size, timeline.output.crop)
-        concat = concatenate_videoclips(shot_clips, method="compose")
+        _log_timing("build shot clips", build_started)
 
+        concat_started = time.perf_counter()
+        concat = concatenate_videoclips(shot_clips, method="compose")
         audio_slice = audio.subclipped(
             timeline.audio.start_sec,
             timeline.audio.start_sec + timeline.output.duration_sec,
         )
         final = concat.with_audio(audio_slice).with_duration(timeline.output.duration_sec)
+        _log_timing("concat/compose", concat_started)
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
+        write_started = time.perf_counter()
         final.write_videofile(
             str(out_path),
             fps=target_fps,
@@ -66,10 +86,20 @@ def render_timeline(
             threads=threads,
             ffmpeg_params=["-movflags", "+faststart"],
         )
+        _log_timing("write_videofile", write_started)
     finally:
-        source.close()
-        audio.close()
+        if final is not None:
+            final.close()
+        elif concat is not None:
+            concat.close()
+        for clip in shot_clips:
+            clip.close()
+        if source is not None:
+            source.close()
+        if audio is not None:
+            audio.close()
 
+    _log_timing("total render_timeline", total_started)
     return out_path
 
 

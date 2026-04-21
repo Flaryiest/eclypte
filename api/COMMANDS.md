@@ -175,6 +175,19 @@ of returning the full file over the function response.
 `--render-preset` is still available if you want a different x264 speed/compression
 tradeoff, but the quality-safe fast path is just `--render-store-only`.
 
+For the higher-capacity benchmark profile, add:
+
+```powershell
+--render-profile boosted
+```
+
+To test whether local container staging beats repeated volume reads on long renders,
+add:
+
+```powershell
+--render-stage-inputs-local
+```
+
 ---
 
 ## Render a timeline manually (Phase-1 or Phase-3)
@@ -196,6 +209,37 @@ modal run edit/render_modal.py `
     --timeline edit/content/timeline.json `
     --out edit/content/output.mp4 `
     --store-only
+```
+
+Higher-capacity benchmark variant:
+
+```powershell
+cd api/prototyping
+modal run edit/render_modal.py `
+    --timeline edit/content/timeline.json `
+    --out edit/content/output.mp4 `
+    --render-profile boosted `
+    --store-only
+```
+
+Higher-capacity + local-staging benchmark:
+
+```powershell
+cd api/prototyping
+modal run edit/render_modal.py `
+    --timeline edit/content/timeline.json `
+    --out edit/content/output.mp4 `
+    --render-profile boosted `
+    --render-stage-inputs-local `
+    --store-only
+```
+
+Query warm-container tuning note:
+if you want the `scaledown_window=600` change on the deployed query app, redeploy it:
+
+```powershell
+cd api/prototyping
+modal deploy edit/index/query_modal.py
 ```
 
 ---
