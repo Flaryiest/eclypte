@@ -5,14 +5,23 @@ Two independent retrieval functions:
 
 - `query_ranges` (Phase-1): pure motion-statistics ranking over video scenes.
   No embeddings, no network. Used by the deterministic planner.
-- `query_clips` (Phase-3): CLIP semantic similarity via Modal. Used by the
-  synthesis agent.
+- `query_clips` / `query_clips_batch` (Phase-3): CLIP semantic similarity via
+  Modal. Used by the synthesis agent.
 """
 from pathlib import Path
+from types import SimpleNamespace
 
-import modal
+try:
+    import modal
+except ImportError:  # pragma: no cover - exercised only in lightweight test envs.
+    modal = SimpleNamespace(
+        Function=SimpleNamespace(from_name=None),
+        exception=SimpleNamespace(NotFoundError=RuntimeError),
+    )
 
 MIN_SCORE = 1e-6
+_QUERY_FUNC = None
+_QUERY_BATCH_FUNC = None
 
 
 def query_ranges(
@@ -32,7 +41,7 @@ def query_ranges(
 
     Each result: {"start_sec", "end_sec", "score", "scene_index"}.
 
-    `query_text` and `embeddings_path` are accepted and ignored — they exist
+    `query_text` and `embeddings_path` are accepted and ignored - they exist
     so Phase-3 CLIP retrieval can be swapped in without changing callers.
     """
     del query_text, section, embeddings_path
@@ -69,15 +78,33 @@ def query_ranges(
         elif end > scene_end:
             end, start = scene_end, scene_end - span
 
-        candidates.append((score, {
-            "start_sec": round(start, 3),
-            "end_sec": round(end, 3),
-            "score": round(score, 4),
-            "scene_index": int(scene["index"]),
-        }))
+        candidates.append((
+            score,
+            {
+                "start_sec": round(start, 3),
+                "end_sec": round(end, 3),
+                "score": round(score, 4),
+                "scene_index": int(scene["index"]),
+            },
+        ))
 
     candidates.sort(key=lambda pair: pair[0], reverse=True)
     return [item for _, item in candidates[:n]]
+
+
+def _lookup_query_func(function_name: str):
+    if getattr(modal.Function, "from_name", None) is None:
+        raise RuntimeError(
+            "Modal is not installed in this environment. Install the `modal` package "
+            "or run the query paths where it is available."
+        )
+    try:
+        return modal.Function.from_name("eclypte-query", function_name)
+    except modal.exception.NotFoundError as exc:
+        raise RuntimeError(
+            f"Could not find Modal function eclypte-query::{function_name}. "
+            "Have you deployed it?"
+        ) from exc
 
 
 def query_clips(query: str, video_filename: str, top_k: int = 5) -> list[dict]:
@@ -86,12 +113,24 @@ def query_clips(query: str, video_filename: str, top_k: int = 5) -> list[dict]:
     Retrieves the top K matching timestamps for the text query from the
     video's prebuilt CLIP index on the eclypte-edit volume.
     """
-    try:
-        query_func = modal.Function.from_name("eclypte-query", "query_index")
-    except modal.exception.NotFoundError:
-        raise RuntimeError(
-            "Could not find Modal function eclypte-query::query_index. "
-            "Have you deployed it?"
-        )
+    global _QUERY_FUNC
+    if _QUERY_FUNC is None:
+        _QUERY_FUNC = _lookup_query_func("query_index")
+    return _QUERY_FUNC.remote(query, video_filename, top_k)
 
-    return query_func.remote(query, video_filename, top_k)
+
+def query_clips_batch(
+    queries: list[str],
+    video_filename: str,
+    top_k: int = 5,
+) -> list[dict]:
+    """
+    Batch proxy to the Modal CLIP query endpoint.
+
+    Each returned item has shape:
+      {"query": <str>, "results": [{"timestamp": <float>, "score": <float>}, ...]}
+    """
+    global _QUERY_BATCH_FUNC
+    if _QUERY_BATCH_FUNC is None:
+        _QUERY_BATCH_FUNC = _lookup_query_func("query_index_batch")
+    return _QUERY_BATCH_FUNC.remote(queries, video_filename, top_k)

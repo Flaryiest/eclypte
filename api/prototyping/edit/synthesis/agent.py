@@ -5,7 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from api.prototyping.edit.index.query import query_clips
+from api.prototyping.edit.index.query import query_clips, query_clips_batch
 
 _ENV_PATH = Path(__file__).resolve().parent / ".env"
 
@@ -16,11 +16,11 @@ MAX_LOOPS = 10
 
 SYSTEM_PROMPT = """
 You are an expert AMV editor. You must construct a video timeline based on the user's instructions.
-You have access to a semantic search tool `query_clips` which lets you find timestamps in the source video matching a text query.
+You have access to semantic search tools `query_clips` and `query_clips_batch` which let you find timestamps in the source video matching text queries.
 
 Steps:
 1. Analyze the provided song metadata (duration, tempo, section structure) and the user's instructions.
-2. Use `query_clips` multiple times to find suitable shots (e.g. "explosion", "sad face").
+2. Prefer `query_clips_batch` whenever you need several searches for a planning step or section (e.g. ["explosion", "sad face", "spaceship"]). Use `query_clips` only for one-off follow-up lookups.
 3. Construct the timeline by matching shots to the song's sections and pacing. The total timeline MUST span the full song duration.
 4. Call `finish_edit` with the final timeline.
 
@@ -61,6 +61,26 @@ TOOLS = [
                 },
             },
             "required": ["query"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "query_clips_batch",
+        "description": "Finds the top K timestamps for multiple semantic descriptions in one request. Prefer this over repeated query_clips calls.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "queries": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Visual descriptions to search for together.",
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "Number of results to return per query (default 5)",
+                },
+            },
+            "required": ["queries"],
         },
     },
     {
@@ -182,6 +202,14 @@ def run_synthesis_loop(
 
             if tc.name == "query_clips":
                 result = query_clips(args["query"], video_filename, args.get("top_k", 5))
+                tool_outputs.append({
+                    "type": "function_call_output",
+                    "call_id": tc.call_id,
+                    "output": json.dumps(result),
+                })
+                issued_query = True
+            elif tc.name == "query_clips_batch":
+                result = query_clips_batch(args["queries"], video_filename, args.get("top_k", 5))
                 tool_outputs.append({
                     "type": "function_call_output",
                     "call_id": tc.call_id,

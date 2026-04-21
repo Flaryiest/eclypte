@@ -72,28 +72,49 @@ def main(argv: list[str] | None = None) -> int:
     _report(timeline, out_path)
 
     if args.render:
-        _render(out_path, Path(args.render_out))
+        _render(
+            out_path,
+            Path(args.render_out),
+            store_only=args.render_store_only,
+            encode_preset=args.render_preset,
+            threads=args.render_threads,
+        )
     return 0
 
 
-def _render(timeline_path: Path, video_out: Path) -> None:
+def _render(
+    timeline_path: Path,
+    video_out: Path,
+    *,
+    store_only: bool = False,
+    encode_preset: str = "medium",
+    threads: int = 16,
+) -> None:
     """Invoke `modal run edit/render_modal.py` from api/prototyping/."""
     prototyping_dir = Path(__file__).resolve().parent.parent
     timeline_abs = timeline_path.resolve()
     video_out_abs = video_out.resolve()
     video_out_abs.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"rendering via Modal: {timeline_abs} -> {video_out_abs}")
-    subprocess.run(
-        [
-            "modal", "run", "edit/render_modal.py",
-            "--timeline", str(timeline_abs),
-            "--out", str(video_out_abs),
-        ],
-        cwd=str(prototyping_dir),
-        check=True,
+    cmd = [
+        "modal", "run", "edit/render_modal.py",
+        "--timeline", str(timeline_abs),
+        "--out", str(video_out_abs),
+        "--encode-preset", encode_preset,
+        "--threads", str(threads),
+    ]
+    if store_only:
+        cmd.append("--store-only")
+
+    print(
+        f"rendering via Modal: {timeline_abs} -> {video_out_abs} "
+        f"(store_only={store_only}, preset={encode_preset}, threads={threads})"
     )
-    print(f"wrote {video_out_abs}")
+    subprocess.run(cmd, cwd=str(prototyping_dir), check=True)
+    if store_only:
+        print(f"rendered remotely to volume as {video_out_abs.name}")
+    else:
+        print(f"wrote {video_out_abs}")
 
 
 def _run_planner(args: argparse.Namespace, song: dict, video: dict) -> Timeline:
@@ -196,6 +217,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--render-out", type=Path,
                    default=DEFAULT_CONTENT_DIR / "output.mp4",
                    help="rendered MP4 path when --render is set")
+    p.add_argument("--render-store-only", action="store_true",
+                   help="render into the Modal volume only; skip returning the MP4 bytes locally")
+    p.add_argument("--render-preset", default="medium",
+                   help="ffmpeg/x264 preset passed through to the Modal renderer (e.g. ultrafast, veryfast, medium)")
+    p.add_argument("--render-threads", type=int, default=16,
+                   help="thread count passed through to the Modal renderer")
     args = p.parse_args(argv)
     if args.agent and not args.instructions:
         p.error("--agent requires --instructions")

@@ -2,7 +2,7 @@ from pytubefix import YouTube
 from pytubefix.cli import on_progress
 from pydub import AudioSegment
 
-url = "https://www.youtube.com/watch?v=nb8CnIo_-_A"
+url = "https://www.youtube.com/watch?v=HvYoohC9kVs"
 
 def main(video_url=url):
     print("running ytdownload")

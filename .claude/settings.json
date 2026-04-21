@@ -37,7 +37,11 @@
       "Bash(python -m pytest api/prototyping/edit/synthesis/ -q)",
       "Bash(python -m api.prototyping.edit.main --song \"api/prototyping/music/content/output.wav\" --source \"api/prototyping/video/content/Project Hail Mary.mp4\" --out \"api/prototyping/edit/content/timeline_agent.json\" --agent --instructions \"Fast-paced action AMV, open strong, tell the full story chronologically.\")",
       "Bash(modal run *)",
-      "Read(//c/Users/ericm/AppData/Local/Temp/claude/c--Users-ericm-Documents-GitHub-eclypte/48c0f407-d212-4924-a4e1-145cc044e02e/tasks/**)"
+      "Read(//c/Users/ericm/AppData/Local/Temp/claude/c--Users-ericm-Documents-GitHub-eclypte/48c0f407-d212-4924-a4e1-145cc044e02e/tasks/**)",
+      "Bash(PYTHONIOENCODING=utf-8 python main.py)",
+      "Bash(python -c \"import json; s=json.load\\(open\\('api/prototyping/music/content/output.json'\\)\\); print\\('duration:', s['source']['duration_sec'], 'tempo:', s['tempo_bpm'], 'segments:', len\\(s['segments']\\)\\)\")",
+      "Bash(python -c \"import json; s=json.load\\(open\\('content/output.json'\\)\\); print\\('duration:', s['source']['duration_sec'], 'tempo:', s['tempo_bpm'], 'segments:', len\\(s['segments']\\)\\)\")",
+      "Bash(python -c \"import json; t=json.load\\(open\\('api/prototyping/edit/content/timeline_speed.json'\\)\\); print\\('shots:', len\\(t['shots']\\), 'duration:', t['output']['duration_sec']\\); ts = [s['source']['start_sec'] for s in t['shots']]; print\\('first 5:', ts[:5]\\); print\\('last 5:', ts[-5:]\\); print\\('monotonic:', all\\(ts[i] < ts[i+1] for i in range\\(len\\(ts\\)-1\\)\\)\\)\")"
     ],
     "additionalDirectories": [
       "\\tmp"

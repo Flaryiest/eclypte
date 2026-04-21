@@ -65,3 +65,41 @@ def test_run_synthesis_loop():
         second_input = second_kwargs["input"]
         assert any(i.get("type") == "function_call_output" and i.get("call_id") == "call_1" for i in second_input)
         assert any(i.get("type") == "message" and "Reminder" in i.get("content", "") for i in second_input)
+
+
+def test_run_synthesis_loop_with_batch_queries():
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai, \
+         patch("api.prototyping.edit.synthesis.agent.query_clips_batch") as mock_query_batch:
+
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+
+        first = _fake_response(
+            [
+                _function_call(
+                    "query_clips_batch",
+                    '{"queries": ["explosion", "close up"], "top_k": 1}',
+                    "call_1",
+                )
+            ],
+            response_id="resp_1",
+        )
+        second = _fake_response(
+            [_function_call(
+                "finish_edit",
+                '{"timeline": [{"start_time": 0, "end_time": 2, "source_timestamp": 5.0}]}',
+                "call_2",
+            )],
+            response_id="resp_2",
+        )
+
+        mock_client.responses.create = MagicMock(side_effect=[first, second])
+        mock_query_batch.return_value = [
+            {"query": "explosion", "results": [{"timestamp": 5.0, "score": 0.9}]},
+            {"query": "close up", "results": [{"timestamp": 15.0, "score": 0.8}]},
+        ]
+
+        timeline = run_synthesis_loop("dummy.mp4", "make a cool video")
+
+        assert len(timeline) == 1
+        mock_query_batch.assert_called_with(["explosion", "close up"], "dummy.mp4", 1)

@@ -217,38 +217,52 @@ If the OpenCV-CUDA image build becomes intractable on some future CUDA/driver bu
 
 ## Edit Pipeline (`api/prototyping/edit/`)
 
-Takes `(song_analysis.json, source_analysis.json, song.wav, source.mp4)` and produces a rendered AMV MP4. Three phases — all complete: Phase 1 is the deterministic planner (no LLM, no embeddings), Phase 2 is the reference-AMV consolidator, Phase 3 is the CLIP index + GPT-4o synthesis agent. What remains deferred: render effects/transitions (freeze, speed-ramp, whip, crossfade, flash — stubs in `render/effects.py` and `render/transitions.py`).
+Takes `(song_analysis.json, source_analysis.json, song.wav, source.mp4)` and produces a rendered AMV MP4. Three phases — all complete: Phase 1 is the deterministic planner (no LLM, no embeddings), Phase 2 is the reference-AMV consolidator, Phase 3 is the CLIP index + `gpt-5.4` synthesis agent (OpenAI Responses API, `reasoning_effort="high"`, `verbosity="low"`). What remains deferred: render effects/transitions (freeze, speed-ramp, whip, crossfade, flash — stubs in `render/effects.py` and `render/transitions.py`).
 
-**Two-step flow** — plan locally (fast, no GPU), render on Modal:
+The user-facing runbook with every invocation lives at [api/COMMANDS.md](api/COMMANDS.md) — this file is the architecture reference; COMMANDS.md is "how do I actually run it".
+
+**Two-step flow** — plan locally (fast, no GPU), render on Modal. Run `main.py` from the **repo root** (module invocation); run `render_modal.py` from **`api/prototyping/`** (for `add_local_python_source("edit")` to resolve).
 
 ```bash
-cd api/prototyping
-
-# 1) plan → timeline.json
+# Phase-1 plan (deterministic):
 python -m api.prototyping.edit.main \
-    --song   music/content/output.wav \
-    --source video/content/source.mp4 \
-    --out    edit/content/timeline.json
+    --song   api/prototyping/music/content/output.wav \
+    --source api/prototyping/video/content/source.mp4 \
+    --out    api/prototyping/edit/content/timeline.json
 
-# 2) one-off: create volume + upload sources (only when source/audio changes)
-modal volume create eclypte-edit
-modal volume put eclypte-edit music/content/output.wav
-modal volume put eclypte-edit video/content/source.mp4
+# Phase-3 plan (gpt-5.4 agent; requires CLIP index + OPENAI_API_KEY):
+python -m api.prototyping.edit.main \
+    --song   api/prototyping/music/content/output.wav \
+    --source api/prototyping/video/content/source.mp4 \
+    --out    api/prototyping/edit/content/timeline_agent.json \
+    --agent \
+    --instructions "Fast-paced action AMV, open strong, tell the full story chronologically."
 
-# 3) render → output.mp4  (must be run from api/prototyping/)
-modal run edit/render_modal.py \
+# Plan + render in one command — add --render (and optional --render-out):
+python -m api.prototyping.edit.main ... --render --render-out api/prototyping/edit/content/output.mp4
+
+# Or render manually (must be run from api/prototyping/):
+cd api/prototyping && modal run edit/render_modal.py \
     --timeline edit/content/timeline.json \
     --out      edit/content/output.mp4
+```
+
+One-off volume setup when a source/audio pair changes:
+
+```bash
+modal volume create eclypte-edit  # first time only
+modal volume put    eclypte-edit api/prototyping/music/content/output.wav
+modal volume put    eclypte-edit api/prototyping/video/content/source.mp4
 ```
 
 **Subsystems:**
 
 - **[patterns/](api/prototyping/edit/patterns/)** — 5-layer pattern catalog (`micro` / `transition` / `shot_move` / `meso` / `macro`) with stable `<layer>.<slug>` IDs. [knowledge/patterns.yaml](api/prototyping/edit/knowledge/patterns.yaml) seeds 12 patterns. [registry.py](api/prototyping/edit/patterns/registry.py) loads + filters by section/energy/bpm/motion/camera; [compose.py](api/prototyping/edit/patterns/compose.py) picks macro + meso-per-section and expands meso→required atoms.
-- **[synthesis/](api/prototyping/edit/synthesis/)** — [timeline_schema.py](api/prototyping/edit/synthesis/timeline_schema.py) (pydantic v2), [validators.py](api/prototyping/edit/synthesis/validators.py) (contiguity within 1 ms, bounds, pattern-id refs), [prompt.py](api/prototyping/edit/synthesis/prompt.py) (allin1 label → intent + energy target), [planner.py](api/prototyping/edit/synthesis/planner.py) (deterministic Phase-1 baseline), [agent.py](api/prototyping/edit/synthesis/agent.py) (Phase-3 GPT-4o tool-use loop — see below).
-- **[index/](api/prototyping/edit/index/)** — Phase-3 CLIP retrieval. [frames.py](api/prototyping/edit/index/frames.py) extracts `(timestamp_sec, bgr_array)` tuples at 1 fps. [embed.py](api/prototyping/edit/index/embed.py) encodes frames and text queries via CLIP ViT-L/14 → normalized 768-d vectors. [index_modal.py](api/prototyping/edit/index/index_modal.py) Modal T4 app: video → frames → embeddings → `.npz` committed to `eclypte-edit` volume. [query_modal.py](api/prototyping/edit/index/query_modal.py) Modal T4 app: loads `.npz`, embeds text, returns top-k `[{timestamp, score}]`. [query.py](api/prototyping/edit/index/query.py) local proxy: `query_clips(query, video_filename, top_k=5)` → calls `query_index` on Modal.
+- **[synthesis/](api/prototyping/edit/synthesis/)** — [timeline_schema.py](api/prototyping/edit/synthesis/timeline_schema.py) (pydantic v2), [validators.py](api/prototyping/edit/synthesis/validators.py) (contiguity within 1 ms, bounds, pattern-id refs), [prompt.py](api/prototyping/edit/synthesis/prompt.py) (allin1 label → intent + energy target), [planner.py](api/prototyping/edit/synthesis/planner.py) (deterministic Phase-1 baseline), [agent.py](api/prototyping/edit/synthesis/agent.py) (Phase-3 `gpt-5.4` Responses-API tool-use loop — see below), [adapter.py](api/prototyping/edit/synthesis/adapter.py) (converts agent output → validated `Timeline` — dedupes duplicate `source_timestamp`s, trims last shot to song duration, reuses the planner's contiguity post-pass).
+- **[index/](api/prototyping/edit/index/)** — Phase-3 CLIP retrieval + Phase-1 motion-stat retrieval. [frames.py](api/prototyping/edit/index/frames.py) extracts `(timestamp_sec, bgr_array)` tuples by **sequentially decoding** and keeping every Nth frame (N = `round(source_fps / target_fps)`). Do NOT revert to the per-frame `CAP_PROP_POS_MSEC` seek — it's 10-20× slower on long videos because every seek resets to a keyframe. [embed.py](api/prototyping/edit/index/embed.py) encodes frames and text queries via CLIP ViT-L/14 → normalized 768-d vectors. [index_modal.py](api/prototyping/edit/index/index_modal.py) Modal T4 app: video → frames → embeddings → `.npz` committed to `eclypte-edit` volume. [query_modal.py](api/prototyping/edit/index/query_modal.py) Modal T4 app: loads `.npz`, embeds text, returns top-k `[{timestamp, score}]`. [query.py](api/prototyping/edit/index/query.py) exposes **two** functions: `query_clips(query, video_filename, top_k=5)` (Phase-3, CLIP via Modal) and `query_ranges(scenes, section, query_text, ...)` (Phase-1, pure motion-stat scoring). Both must stay.
 - **[render/](api/prototyping/edit/render/)** — [renderer.py](api/prototyping/edit/render/renderer.py) (moviepy v2: `subclipped`, `with_duration`, `resized`, `concatenate_videoclips(method="compose")`, `with_audio` once at composite). `effects.py` and `transitions.py` are Phase-1 no-ops (freeze, speed-ramp, whip, crossfade, flash all deferred).
-- **[main.py](api/prototyping/edit/main.py)** — CLI wrapper; defaults analysis JSON paths to `<media>.with_suffix(".json")` and fails with the correct Modal command to run if missing.
-- **[render_modal.py](api/prototyping/edit/render_modal.py)** — Modal wrapper. App `eclypte-edit`, volume `eclypte-edit` at `/workdir`. Image is a fresh `debian_slim(python_version="3.12")` + ffmpeg + moviepy>=2 + pydantic>=2 + pyyaml + numpy + imageio-ffmpeg + `add_local_python_source("edit")` — no torch, no allin1, no OpenCV. 4 vCPU / 4 GB / 1800 s timeout, no GPU.
+- **[main.py](api/prototyping/edit/main.py)** — CLI wrapper; defaults analysis JSON paths to `<media>.with_suffix(".json")` and fails with the correct Modal command to run if missing. Reconfigures `sys.stdout`/`stderr` to UTF-8 at import so the module prints safely on Windows (no `PYTHONIOENCODING` needed for the Python process itself). Flags: `--agent --instructions "..."` switches from the Phase-1 planner to the Phase-3 agent; `--render --render-out ...` subprocesses `modal run edit/render_modal.py` from `api/prototyping/` after writing the timeline. Planner imports are lazy inside `_run_planner` so the agent path doesn't pay Phase-1's dependency surface.
+- **[render_modal.py](api/prototyping/edit/render_modal.py)** — Modal wrapper. App `eclypte-edit`, volume `eclypte-edit` at `/workdir`. Image is a fresh `debian_slim(python_version="3.12")` + ffmpeg + moviepy>=2 + pydantic>=2 + pyyaml + numpy + imageio-ffmpeg + `add_local_python_source("edit")` — no torch, no allin1, no OpenCV. **16 vCPU / 16 GB / 1800 s timeout, no GPU.** Renderer is CPU-bound (stock x264 encode via moviepy/ffmpeg) — an A100 would not help unless the image ships a CUDA ffmpeg build and the pipeline is rewritten to use NVENC/NVDEC. vCPU count is the dial that actually moves render time.
 
 **Rules and landmines:**
 
@@ -258,6 +272,9 @@ modal run edit/render_modal.py \
 - **Planner output is always contiguous.** `_pick_range` has a 4-level fallback so it never returns None; a post-pass then rewrites every `timeline_start_sec` / `timeline_end_sec` via `shot.model_copy(update=...)` so shots stitch perfectly regardless of segment-boundary math. Don't remove either — the validator rejects gaps ≥ 1 ms.
 - **Renderer reads JSON only.** `render_timeline` has no dependency on patterns, sections, or embeddings. Keep it that way so timelines stay re-renderable, diff-able, and portable across Phase boundaries.
 - **Stable `query_clips` signature.** `index/query.py`'s `query_clips(query, video_filename, top_k)` is the contract between the Phase-3 agent and the Modal index. Don't change the arg list without also updating `synthesis/agent.py`.
+- **Agent `.env` location is fixed.** [synthesis/agent.py](api/prototyping/edit/synthesis/agent.py) loads env vars from `api/prototyping/edit/synthesis/.env` via `load_dotenv(_ENV_PATH)` where `_ENV_PATH = Path(__file__).resolve().parent / ".env"`. Put `OPENAI_API_KEY=...` there. `.env` is gitignored. Note: adding `PYTHONIOENCODING=utf-8` to this file has **no effect** — Python reads that env var at interpreter startup, before `load_dotenv()` runs. Use `setx` / `$env:` / the `sys.stdout.reconfigure` call in `main.py` instead.
+- **Agent-output adapter has two safety nets that are load-bearing.** (1) Duplicate-`source_timestamp` dedupe at 0.1s tolerance — LLMs reliably emit near-duplicate timestamps from the top of a `query_clips` result set; without dedupe the renderer shows the same clip back-to-back. Drops with a warning print. (2) Song-duration trim — agents round `end_time` up a fraction (e.g., 99.60 for a 99.59s song) and moviepy's audio `subclipped` rejects out-of-bounds ends. The adapter shortens the last shot's `timeline_end_sec` AND `source.end_sec` by the overshoot. Both live in [adapter.py](api/prototyping/edit/synthesis/adapter.py); removing either breaks real agent outputs.
+- **Agent Responses-API state lives on OpenAI's side.** Each loop iteration passes `previous_response_id=response.id` instead of re-uploading the full message history. Breaking this means passing `input=[...everything...]` on every call — expensive and never what you want for Responses.
 - **`edit/content/` is gitignored** like the music and video content folders.
 
 **Phase 2 — Reference consolidator (`api/prototyping/edit/reference/`):**
@@ -271,30 +288,43 @@ modal run edit/render_modal.py \
 
 **Phase 3 — CLIP index + synthesis agent:**
 
-Build the index once per source video (Modal GPU, ~T4):
+One-time prerequisites:
 
 ```bash
-cd api/prototyping
-modal run edit/index/index_modal.py --filename source.mp4
+# Build the CLIP index for this source (Modal T4; ~100s image build, ~30s inference):
+cd api/prototyping && modal run edit/index/index_modal.py --video-filename "source.mp4"
+
+# Deploy the query endpoint (one-time; `query_clips` uses modal.Function.from_name):
+cd api/prototyping && modal deploy edit/index/query_modal.py
+
+# Put OPENAI_API_KEY in api/prototyping/edit/synthesis/.env
 ```
 
-Run the synthesis agent (local, calls Modal for queries):
+Then plan + render through the standard CLI:
 
-```python
-from api.prototyping.edit.synthesis.agent import run_synthesis_loop
-
-timeline = run_synthesis_loop(
-    "source.mp4",
-    "fast-paced action AMV, cut on every downbeat in choruses",
-    openai_api_key="...",
-)
+```bash
+python -m api.prototyping.edit.main \
+    --song   api/prototyping/music/content/output.wav \
+    --source api/prototyping/video/content/source.mp4 \
+    --out    api/prototyping/edit/content/timeline_agent.json \
+    --agent --instructions "Fast-paced action AMV, open strong, tell the full story chronologically." \
+    --render --render-out api/prototyping/edit/content/output_agent.mp4
 ```
 
-`run_synthesis_loop` uses `openai.chat.completions.create` (GPT-4o) with two tools:
-- `query_clips(query, top_k)` — finds timestamps via CLIP cosine similarity (proxies to Modal)
-- `finish_edit(timeline)` — submits final `[{start_time, end_time, source_timestamp}]` and ends loop
+Under the hood, `--agent` calls `run_synthesis_loop(video_filename, instructions, song=<song_analysis_dict>)` in [synthesis/agent.py](api/prototyping/edit/synthesis/agent.py), which:
 
-Max 10 iterations. If model emits non-tool content, the loop forces a `finish_edit` call.
+- Hits **`client.responses.create(model="gpt-5.4", reasoning={"effort":"high"}, text={"verbosity":"low"}, tool_choice="auto", ...)`** on OpenAI.
+- Carries state across turns via `previous_response_id` (no message-history re-upload).
+- Exposes two tools with the flatter Responses-API schema (`{"type":"function","name":...,"parameters":...}`, no nested `"function"` key):
+  - `query_clips(query, top_k)` — proxies to Modal CLIP index.
+  - `finish_edit(timeline)` — submits final `[{start_time, end_time, source_timestamp}]` and ends loop.
+- Injects the song's duration, tempo, and section list into the user message via `_format_song_context(song)` so the agent sizes the edit to the music (dense cuts in choruses, longer holds in verses, etc.).
+- Appends a `{"type":"message","role":"user","content": REMINDER_TEXT}` after every `query_clips` tool turn — keeps the "unique timestamps + chronological" rule in active attention across up to `MAX_LOOPS = 10` iterations.
+- If the model emits non-tool content, the loop pushes a "please call `finish_edit`" nudge and continues.
+
+The raw `run_synthesis_loop` output is `list[{start_time, end_time, source_timestamp}]`. Conversion to a renderable `Timeline` is done by [synthesis/adapter.py](api/prototyping/edit/synthesis/adapter.py) — see the load-bearing adapter landmines above. The **adapter is where quality-control happens**: prompt engineering + agent reasoning get you 90% there; dedupe + duration trim are what make the output reliably renderable.
+
+Model/param overrides live at module-scope constants in `agent.py`: `MODEL`, `REASONING_EFFORT`, `VERBOSITY`, `MAX_LOOPS`. Revert to `"gpt-4o"` + Chat Completions is one model-constant line if `gpt-5.4` ever misbehaves; the Responses-API scaffolding stays as a strict upgrade regardless.
 
 ## Next.js 16 — READ BEFORE WRITING CODE
 

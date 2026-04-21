@@ -163,6 +163,18 @@ python -m api.prototyping.edit.main `
 
 `--render-out` defaults to `api/prototyping/edit/content/output.mp4` if omitted.
 
+For faster render turnaround with no encode-quality change, add:
+
+```powershell
+--render-store-only
+```
+
+`--render-store-only` keeps the MP4 on the `eclypte-edit` Modal volume instead
+of returning the full file over the function response.
+
+`--render-preset` is still available if you want a different x264 speed/compression
+tradeoff, but the quality-safe fast path is just `--render-store-only`.
+
 ---
 
 ## Render a timeline manually (Phase-1 or Phase-3)
@@ -174,6 +186,16 @@ cd api/prototyping
 modal run edit/render_modal.py `
     --timeline edit/content/timeline.json `
     --out edit/content/output.mp4
+```
+
+Faster remote-only variant:
+
+```powershell
+cd api/prototyping
+modal run edit/render_modal.py `
+    --timeline edit/content/timeline.json `
+    --out edit/content/output.mp4 `
+    --store-only
 ```
 
 ---

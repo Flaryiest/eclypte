@@ -24,6 +24,7 @@ from .transitions import apply_transition
 
 CODEC_VIDEO = "libx264"
 CODEC_AUDIO = "aac"
+DEFAULT_ENCODE_PRESET = "medium"
 
 
 def render_timeline(
@@ -31,6 +32,8 @@ def render_timeline(
     out_path: Path | str,
     *,
     preview: bool = False,
+    encode_preset: str = DEFAULT_ENCODE_PRESET,
+    threads: int | None = None,
 ) -> Path:
     timeline_path = Path(timeline_path)
     out_path = Path(out_path)
@@ -59,6 +62,9 @@ def render_timeline(
             fps=target_fps,
             codec=CODEC_VIDEO,
             audio_codec=CODEC_AUDIO,
+            preset=encode_preset,
+            threads=threads,
+            ffmpeg_params=["-movflags", "+faststart"],
         )
     finally:
         source.close()

@@ -1,6 +1,7 @@
+from pathlib import Path
+
 import modal
 import numpy as np
-from pathlib import Path
 
 app = modal.App("eclypte-query")
 volume = modal.Volume.from_name("eclypte-edit", create_if_missing=True)
@@ -10,40 +11,84 @@ image = (
     .add_local_python_source("embed")
 )
 
+_INDEX_CACHE: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+
+
+def _load_index(video_filename: str) -> tuple[np.ndarray, np.ndarray]:
+    index_filename = Path(video_filename).with_suffix(".npz").name
+    index_path = f"/workdir/{index_filename}"
+
+    if not Path(index_path).exists():
+        raise FileNotFoundError(
+            f"Index {index_path} not found. Ensure build_index ran successfully."
+        )
+
+    cached = _INDEX_CACHE.get(index_path)
+    if cached is not None:
+        return cached
+
+    with np.load(index_path) as data:
+        timestamps = data["timestamps"]
+        embeddings = data["embeddings"]
+    _INDEX_CACHE[index_path] = (timestamps, embeddings)
+    return timestamps, embeddings
+
+
+def _top_k_results(
+    timestamps: np.ndarray,
+    similarities: np.ndarray,
+    *,
+    top_k: int,
+) -> list[dict]:
+    top_indices = np.argsort(similarities)[::-1][:top_k]
+    return [
+        {
+            "timestamp": float(timestamps[idx]),
+            "score": float(similarities[idx]),
+        }
+        for idx in top_indices
+    ]
+
+
 @app.function(image=image, volumes={"/workdir": volume}, gpu="T4")
 def query_index(query: str, video_filename: str, top_k: int = 5) -> list[dict]:
     """
-    Loads the npz index for the video, embeds the text query,
-    computes cosine similarity, and returns the top_k matching timestamps.
+    Load the video's CLIP index, embed one text query, and return the best
+    matching timestamps.
     """
     from embed import embed_text
-    
-    index_filename = Path(video_filename).with_suffix(".npz").name
-    index_path = f"/workdir/{index_filename}"
-    
-    if not Path(index_path).exists():
-        raise FileNotFoundError(f"Index {index_path} not found. Ensure build_index ran successfully.")
-        
-    data = np.load(index_path)
-    timestamps = data["timestamps"]
-    embeddings = data["embeddings"]
-    
-    # Embed the text query
-    query_emb = embed_text(query)[0] # shape (768,)
-    
-    # Compute cosine similarity
-    # embeddings shape (N, 768), query_emb shape (768,)
-    # both are normalized to length 1
+
+    timestamps, embeddings = _load_index(video_filename)
+    query_emb = embed_text(query)[0]
     similarities = np.dot(embeddings, query_emb)
-    
-    # Get top_k indices
-    top_indices = np.argsort(similarities)[::-1][:top_k]
-    
-    results = []
-    for idx in top_indices:
-        results.append({
-            "timestamp": float(timestamps[idx]),
-            "score": float(similarities[idx])
-        })
-        
-    return results
+    return _top_k_results(timestamps, similarities, top_k=top_k)
+
+
+@app.function(image=image, volumes={"/workdir": volume}, gpu="T4")
+def query_index_batch(
+    queries: list[str],
+    video_filename: str,
+    top_k: int = 5,
+) -> list[dict]:
+    """
+    Batch text-query variant of `query_index`.
+
+    This avoids repeated CLIP forward passes and lets a single Modal request
+    answer a whole planning step's worth of retrieval prompts.
+    """
+    from embed import embed_text
+
+    if not queries:
+        return []
+
+    timestamps, embeddings = _load_index(video_filename)
+    query_embeddings = embed_text(queries)
+    similarities = np.dot(query_embeddings, embeddings.T)
+
+    return [
+        {
+            "query": query,
+            "results": _top_k_results(timestamps, sim_row, top_k=top_k),
+        }
+        for query, sim_row in zip(queries, similarities, strict=False)
+    ]
