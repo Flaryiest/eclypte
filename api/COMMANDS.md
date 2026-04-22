@@ -51,6 +51,22 @@ python main.py                # end-to-end: ytdownload + Modal analyze + lyrics
 modal run analysis_modal.py::main --wav content/output.wav
 ```
 
+If you also want the music workflow to publish `output.wav`, `output.json`, and
+`lyrics.txt` to R2 after local success, create `api/.env` from
+`api/.env.example` and fill in:
+
+```powershell
+$env:ECLYPTE_R2_ACCOUNT_ID="..."
+$env:ECLYPTE_R2_BUCKET="eclypte"
+$env:ECLYPTE_R2_ACCESS_KEY_ID="..."
+$env:ECLYPTE_R2_SECRET_ACCESS_KEY="..."
+$env:ECLYPTE_R2_REGION_NAME="auto"
+$env:ECLYPTE_DEFAULT_USER_ID="local_dev"
+```
+
+If those vars are missing, `python main.py` still succeeds locally and prints
+`R2 publish skipped: storage not configured.`
+
 Output: `api/prototyping/music/content/output.wav` + `output.json`.
 
 ---
