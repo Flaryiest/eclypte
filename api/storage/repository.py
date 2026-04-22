@@ -24,6 +24,7 @@ class StorageRepository:
         file_ref: FileRef,
         kind: str,
         display_name: str,
+        source_run_id: str | None = None,
     ) -> FileManifest:
         now = _utc_now()
         manifest = FileManifest(
@@ -31,7 +32,7 @@ class StorageRepository:
             owner_user_id=file_ref.user_id,
             kind=kind,
             current_version_id=None,
-            source_run_id=None,
+            source_run_id=source_run_id,
             display_name=display_name,
             created_at=now,
             updated_at=now,
@@ -61,6 +62,7 @@ class StorageRepository:
         created_by_step: str,
         derived_from_step: str,
         input_file_version_ids: list[str],
+        derived_from_run_id: str | None = None,
     ) -> FileVersionRef:
         version_id = f"ver_{uuid.uuid4().hex[:12]}"
         version_ref = FileVersionRef(
@@ -83,7 +85,7 @@ class StorageRepository:
             created_by_step=created_by_step,
             storage_key=version_ref.blob_key,
             derived_from=DerivedFrom(
-                run_id=None,
+                run_id=derived_from_run_id,
                 step_id=derived_from_step,
                 input_file_version_ids=input_file_version_ids,
                 params_hash=None,
@@ -110,6 +112,7 @@ class StorageRepository:
         created_by_step: str,
         derived_from_step: str,
         input_file_version_ids: list[str],
+        derived_from_run_id: str | None = None,
     ) -> FileVersionRef:
         body = json.dumps(data, indent=2).encode("utf-8")
         return self.publish_bytes(
@@ -120,6 +123,7 @@ class StorageRepository:
             created_by_step=created_by_step,
             derived_from_step=derived_from_step,
             input_file_version_ids=input_file_version_ids,
+            derived_from_run_id=derived_from_run_id,
         )
 
     def load_file_version_meta(self, version_ref: FileVersionRef) -> FileVersionMeta:

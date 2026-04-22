@@ -65,3 +65,33 @@ def test_repository_creates_run_and_appends_events():
 
     assert len(events) == 1
     assert events[0].payload["step"] == "upload_source"
+
+
+def test_publish_bytes_records_run_lineage():
+    from api.storage.repository import StorageRepository
+
+    repo = StorageRepository(InMemoryObjectStore())
+    file_ref = FileRef(user_id="user_123", file_id="file_001")
+
+    repo.create_file_manifest(
+        file_ref=file_ref,
+        kind="music_analysis",
+        display_name="output.json",
+        source_run_id="run_001",
+    )
+    version_ref = repo.publish_bytes(
+        file_ref=file_ref,
+        body=b"{}",
+        content_type="application/json",
+        original_filename="output.json",
+        created_by_step="analyze_music",
+        derived_from_step="analyze_music",
+        input_file_version_ids=[],
+        derived_from_run_id="run_001",
+    )
+
+    manifest = repo.load_file_manifest(file_ref)
+    meta = repo.load_file_version_meta(version_ref)
+
+    assert manifest.source_run_id == "run_001"
+    assert meta.derived_from.run_id == "run_001"
