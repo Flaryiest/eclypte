@@ -125,6 +125,9 @@ class StorageRepository:
     def load_file_version_meta(self, version_ref: FileVersionRef) -> FileVersionMeta:
         return FileVersionMeta.model_validate(self._store.get_json(version_ref.meta_key))
 
+    def read_version_bytes(self, version_ref: FileVersionRef) -> bytes:
+        return self._store.get_bytes(version_ref.blob_key)
+
     def append_run_event(
         self,
         *,
