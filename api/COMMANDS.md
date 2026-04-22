@@ -280,6 +280,30 @@ python -m pytest api/prototyping/edit/index/ -v
 
 ---
 
+## Storage substrate tests
+
+Set these env vars before using the shared R2 storage layer:
+
+```powershell
+$env:ECLYPTE_R2_ACCOUNT_ID="..."
+$env:ECLYPTE_R2_BUCKET="eclypte"
+$env:ECLYPTE_R2_ACCESS_KEY_ID="..."
+$env:ECLYPTE_R2_SECRET_ACCESS_KEY="..."
+$env:ECLYPTE_R2_REGION_NAME="auto"
+```
+
+Then run:
+
+```powershell
+python -m pytest api/storage -v
+```
+
+The storage test suite uses an in-memory fake by default, so it should pass
+without live R2 access. Real R2 integration checks can be added later behind
+explicit opt-in env vars.
+
+---
+
 ## Useful Modal housekeeping
 
 ```powershell
