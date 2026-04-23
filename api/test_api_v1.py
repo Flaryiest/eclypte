@@ -224,16 +224,11 @@ def test_workflow_endpoints_create_runs_and_schedule_background_tasks():
 
 
 def test_missing_storage_configuration_returns_503(monkeypatch):
+    import api.app
     from fastapi.testclient import TestClient
     from api.app import create_app
 
-    for key in (
-        "ECLYPTE_R2_ACCOUNT_ID",
-        "ECLYPTE_R2_BUCKET",
-        "ECLYPTE_R2_ACCESS_KEY_ID",
-        "ECLYPTE_R2_SECRET_ACCESS_KEY",
-    ):
-        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(api.app, "get_object_store", lambda *, required=False: None)
 
     client = TestClient(create_app(workflow_runner=RecordingWorkflowRunner()))
 
