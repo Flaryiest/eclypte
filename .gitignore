@@ -3,6 +3,7 @@
 .worktrees/
 .pytest_cache/
 .pytest-tmp*/
+.pytest
 pytest-cache-files-*/
 __pycache__/
 .agent
