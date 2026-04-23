@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Eclypte is an AMV (Anime Music Video) creator. Monorepo layout:
 
 - **`web/`** — Next.js 16 frontend (React 19, TypeScript, App Router). [web/CLAUDE.md](web/CLAUDE.md) re-exports [web/AGENTS.md](web/AGENTS.md) — the Next.js 16 warning applies to anything under `web/`.
-- **`api/`** — Python backend. `api/main.py` is still an empty FastAPI stub; real work lives in `api/prototyping/` (see Audio Pipeline below).
+- **`api/`** — Python backend. `api/main.py` now serves the FastAPI app from `api/app.py`; real media logic still lives in `api/prototyping/`, with REST workflow adapters in `api/workflows.py` and R2 persistence in `api/storage/`.
 
 The audio pipeline emits `song_analysis.json` and the video pipeline emits a "clip map" JSON — both use `schema_version: 1` and the `_sec` suffix for timestamps. The edit pipeline (`api/prototyping/edit/`, see Edit Pipeline below) consumes both, so keep their timestamp conventions aligned (seconds, not frames) when extending either side.
 
@@ -91,7 +91,7 @@ cached — subsequent runs skip straight to ~15–25s of GPU inference.
 **Costs:** T4 GPU ≈ $0.60/hr. Per-song cost ≈ $0.005. Modal's free tier
 (~$30/mo credit) covers thousands of songs.
 
-No test runner is configured yet.
+The API test suite is active. Use `python -m pytest api -v` from the repo root for the broad backend check. Repo-level `pytest.ini` disables pytest's cache provider and sets tmp-path retention to zero to reduce `.pytest*` artifacts.
 
 ### Dependency landmines
 
@@ -124,6 +124,37 @@ Modal covers dev and early prod. If/when we move off Modal, the image
 definition in `analysis_modal.py` maps directly to a Dockerfile: same Linux
 base, same apt packages, same pip installs, same natten wheel. No code
 changes expected.
+
+## Cloud REST API V1 (`api/app.py`, `api/workflows.py`)
+
+The cloud API is a FastAPI control plane intended for Railway short-term hosting. It uses R2 manifests as the v1 metadata store and keeps heavy media processing on Modal. Temporary auth resolves `user_id` from `X-User-Id`, falling back to `ECLYPTE_DEFAULT_USER_ID`. CORS defaults to `https://eclypte.vercel.app`, `http://localhost:3000`, and `http://127.0.0.1:3000`; override with `ECLYPTE_CORS_ORIGINS`.
+
+Routes:
+
+- `GET /healthz`
+- `POST /v1/uploads`
+- `POST /v1/uploads/{upload_id}/complete`
+- `GET /v1/files/{file_id}`
+- `GET /v1/files/{file_id}/versions/{version_id}`
+- `GET /v1/files/{file_id}/versions/{version_id}/download-url`
+- `POST /v1/music/analyses`
+- `POST /v1/video/analyses`
+- `POST /v1/timelines`
+- `POST /v1/renders`
+- `GET /v1/runs/{run_id}`
+- `GET /v1/runs/{run_id}/events`
+
+Direct uploads are browser-to-R2: `POST /v1/uploads` reserves a file/version/blob key and returns a presigned PUT URL; `POST /v1/uploads/{upload_id}/complete` validates the object with R2 `head`, requires client-provided SHA-256, records `FileVersionMeta`, and promotes it to current.
+
+Workflow endpoints create a `RunManifest` with `status="running"` and return `202` immediately. FastAPI `BackgroundTasks` call `DefaultWorkflowRunner`; run status, events, outputs, and errors are persisted back to R2. Music analysis reuses `eclypte-analysis::analyze_remote`; video analysis calls `eclypte-video-r2::analyze_r2`; rendering calls `eclypte-render-r2::render_r2`; deterministic timeline planning runs locally because it only consumes JSON artifacts.
+
+Important files:
+
+- [api/app.py](api/app.py) - app factory, CORS, request/response models, v1 routes.
+- [api/workflows.py](api/workflows.py) - background orchestration and workflow adapters.
+- [api/prototyping/video/storage_modal.py](api/prototyping/video/storage_modal.py) - R2-aware Modal video analysis.
+- [api/prototyping/edit/render_storage_modal.py](api/prototyping/edit/render_storage_modal.py) - R2-aware Modal rendering.
+- [api/storage/](api/storage/) - canonical R2 metadata/artifact store: file manifests, upload reservations, run manifests/events, presigned URLs, and staging helpers.
 
 ## Audio Pipeline (`api/prototyping/music/`)
 

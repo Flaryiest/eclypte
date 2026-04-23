@@ -40,6 +40,91 @@ OPENAI_API_KEY=sk-...
 
 ---
 
+## Cloud REST API V1
+
+The Railway-ready FastAPI app lives in `api/app.py` and is exposed by
+`api/main.py`. It uses R2 manifests as the v1 metadata store and returns
+immediately from workflow endpoints while background tasks call Modal or the
+local deterministic planner.
+
+Required storage env for real `/v1/*` calls:
+
+```powershell
+$env:ECLYPTE_R2_ACCOUNT_ID="..."
+$env:ECLYPTE_R2_BUCKET="eclypte"
+$env:ECLYPTE_R2_ACCESS_KEY_ID="..."
+$env:ECLYPTE_R2_SECRET_ACCESS_KEY="..."
+$env:ECLYPTE_R2_REGION_NAME="auto"
+$env:ECLYPTE_DEFAULT_USER_ID="local_dev"
+```
+
+```bash
+export ECLYPTE_R2_ACCOUNT_ID="..."
+export ECLYPTE_R2_BUCKET="eclypte"
+export ECLYPTE_R2_ACCESS_KEY_ID="..."
+export ECLYPTE_R2_SECRET_ACCESS_KEY="..."
+export ECLYPTE_R2_REGION_NAME="auto"
+export ECLYPTE_DEFAULT_USER_ID="local_dev"
+```
+
+CORS defaults to `https://eclypte.vercel.app`, `http://localhost:3000`, and
+`http://127.0.0.1:3000`. Override with a comma-separated
+`ECLYPTE_CORS_ORIGINS` value if needed.
+
+Run locally from the repo root:
+
+```powershell
+$env:PORT="8000"
+python -m api.main
+```
+
+```bash
+PORT=8000 python -m api.main
+```
+
+Health check:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/healthz
+```
+
+```bash
+curl http://127.0.0.1:8000/healthz
+```
+
+Routes:
+
+- `POST /v1/uploads` reserves a file/version/blob key and returns a presigned R2 PUT URL.
+- `POST /v1/uploads/{upload_id}/complete` validates the uploaded object and records metadata.
+- `GET /v1/files/{file_id}` and `GET /v1/files/{file_id}/versions/{version_id}` read manifests.
+- `GET /v1/files/{file_id}/versions/{version_id}/download-url` returns a presigned R2 GET URL.
+- `POST /v1/music/analyses`, `POST /v1/video/analyses`, `POST /v1/timelines`, and `POST /v1/renders` create run manifests and schedule background work.
+- `GET /v1/runs/{run_id}` and `GET /v1/runs/{run_id}/events` inspect workflow status.
+
+Deploy the new R2-aware Modal wrappers before using video-analysis/render API
+jobs against live Modal:
+
+```powershell
+cd api/prototyping/video
+modal deploy storage_modal.py
+
+cd ../
+modal deploy edit/render_storage_modal.py
+```
+
+```bash
+cd api/prototyping/video
+modal deploy storage_modal.py
+
+cd ../
+modal deploy edit/render_storage_modal.py
+```
+
+Music analysis API jobs reuse the existing `eclypte-analysis::analyze_remote`
+Modal function from `api/prototyping/music/analysis_modal.py`.
+
+---
+
 ## Music analysis (Modal GPU)
 
 Download a YouTube song → WAV → allin1 analysis JSON:
@@ -290,9 +375,16 @@ python -m api.prototyping.edit.main `
 ## Tests
 
 ```powershell
+python -m pytest api -v
+python -m pytest api/test_api_v1.py -v
+python -m pytest api/storage -v
 python -m pytest api/prototyping/edit/synthesis/ -v
 python -m pytest api/prototyping/edit/index/ -v
 ```
+
+`pytest.ini` disables pytest's cache provider and sets tmp-path retention to
+zero, so normal future test runs should leave far fewer `.pytest*` artifacts in
+the repo.
 
 ---
 
