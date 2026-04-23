@@ -1,8 +1,7 @@
-import pytest
 import numpy as np
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 from api.prototyping.edit.index.frames import extract_frames
+
 
 def test_extract_frames():
     # Mock cv2.VideoCapture to simulate a 3-second video at 30 fps
@@ -14,13 +13,10 @@ def test_extract_frames():
         
         mock_cap.get.side_effect = lambda prop: 30.0 if prop == 5 else 0.0
         
-        # Simulate returning 3 frames, one per second
-        # True, frame, True, frame, True, frame, False
         dummy_frame = np.zeros((10, 10, 3), dtype=np.uint8)
-        
-        # We need to simulate the read() calls and the get() calls for pos_msec
-        # Since extract_frames skips to specific timestamps, we mock set() and read()
-        mock_cap.read.side_effect = [(True, dummy_frame), (True, dummy_frame), (True, dummy_frame), (False, None)]
+
+        # Sequential decode keeps every 30th frame for 1 fps output from 30 fps input.
+        mock_cap.read.side_effect = [(True, dummy_frame)] * 90 + [(False, None)]
         
         # Call function
         frames = extract_frames("dummy.mp4", fps=1)

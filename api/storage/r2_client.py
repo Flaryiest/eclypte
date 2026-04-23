@@ -30,6 +30,14 @@ class ObjectStore(Protocol):
     def head(self, key: str) -> ObjectHead: ...
     def delete(self, key: str) -> None: ...
     def list_keys(self, prefix: str) -> list[str]: ...
+    def presigned_put_url(
+        self,
+        key: str,
+        *,
+        content_type: str,
+        expires_in: int,
+    ) -> str: ...
+    def presigned_get_url(self, key: str, *, expires_in: int) -> str: ...
 
 
 class R2ObjectStore:
@@ -102,3 +110,30 @@ class R2ObjectStore:
             for item in page.get("Contents", []):
                 keys.append(item["Key"])
         return keys
+
+    def presigned_put_url(
+        self,
+        key: str,
+        *,
+        content_type: str,
+        expires_in: int,
+    ) -> str:
+        return self._client.generate_presigned_url(
+            "put_object",
+            Params={
+                "Bucket": self._config.bucket,
+                "Key": key,
+                "ContentType": content_type,
+            },
+            ExpiresIn=expires_in,
+        )
+
+    def presigned_get_url(self, key: str, *, expires_in: int) -> str:
+        return self._client.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": self._config.bucket,
+                "Key": key,
+            },
+            ExpiresIn=expires_in,
+        )

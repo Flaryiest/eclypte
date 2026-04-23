@@ -57,3 +57,15 @@ class InMemoryObjectStore:
 
     def list_keys(self, prefix: str) -> list[str]:
         return sorted(key for key in self.objects if key.startswith(prefix))
+
+    def presigned_put_url(
+        self,
+        key: str,
+        *,
+        content_type: str,
+        expires_in: int,
+    ) -> str:
+        return f"memory://put/{key}?content_type={content_type}&expires_in={expires_in}"
+
+    def presigned_get_url(self, key: str, *, expires_in: int) -> str:
+        return f"memory://get/{key}?expires_in={expires_in}"

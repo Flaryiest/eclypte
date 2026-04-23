@@ -3,6 +3,8 @@
 # requirements-modal.txt and runs inside a Modal container — not here.
 
 modal
+fastapi
+uvicorn
 pytubefix
 yt-dlp
 pydub

@@ -14,6 +14,7 @@ ArtifactKind = Literal[
 ]
 RunStatus = Literal["created", "running", "blocked", "failed", "completed"]
 StepStatus = Literal["pending", "running", "completed", "failed"]
+UploadStatus = Literal["created", "completed"]
 
 
 class DerivedFrom(BaseModel):
@@ -87,3 +88,21 @@ class RunEvent(BaseModel):
     event_type: str
     timestamp: str
     payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class UploadReservation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    upload_id: str
+    owner_user_id: str
+    file_id: str
+    version_id: str
+    kind: ArtifactKind
+    filename: str
+    content_type: str
+    size_bytes: int | None = None
+    blob_key: str
+    status: UploadStatus
+    created_at: str
+    expires_at: str
+    completed_at: str | None = None

@@ -1,0 +1,400 @@
+from __future__ import annotations
+
+import os
+from typing import Literal
+
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+
+from api.storage.factory import get_default_user_id, get_object_store
+from api.storage.models import FileManifest, FileVersionMeta, RunEvent, RunManifest
+from api.storage.r2_client import ObjectStore
+from api.storage.refs import FileRef, FileVersionRef, RunRef
+from api.storage.repository import StorageRepository
+from api.workflows import DefaultWorkflowRunner, WorkflowRunner
+
+DEFAULT_CORS_ORIGINS = (
+    "https://eclypte.vercel.app",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+)
+UPLOAD_URL_EXPIRES_IN = 900
+DOWNLOAD_URL_EXPIRES_IN = 900
+
+
+class FileVersionInput(BaseModel):
+    file_id: str
+    version_id: str
+
+
+class UploadCreateRequest(BaseModel):
+    kind: Literal["song_audio", "source_video"]
+    filename: str = Field(min_length=1)
+    content_type: str = Field(min_length=1)
+    size_bytes: int | None = Field(default=None, ge=0)
+
+
+class UploadCreateResponse(BaseModel):
+    upload_id: str
+    file_id: str
+    version_id: str
+    upload_url: str
+    required_headers: dict[str, str]
+    expires_in: int
+
+
+class UploadCompleteRequest(BaseModel):
+    sha256: str = Field(min_length=64, max_length=64)
+
+
+class DownloadUrlResponse(BaseModel):
+    download_url: str
+    expires_in: int
+
+
+class MusicAnalysisRequest(BaseModel):
+    audio: FileVersionInput
+
+
+class VideoAnalysisRequest(BaseModel):
+    source_video: FileVersionInput
+
+
+class TimelineRequest(BaseModel):
+    audio: FileVersionInput
+    source_video: FileVersionInput
+    music_analysis: FileVersionInput
+    video_analysis: FileVersionInput
+    max_duration_sec: float | None = Field(default=None, gt=0)
+
+
+class RenderRequest(BaseModel):
+    timeline: FileVersionInput
+    audio: FileVersionInput
+    source_video: FileVersionInput
+
+
+def parse_cors_origins(value: str | None = None) -> list[str]:
+    raw = value if value is not None else os.environ.get("ECLYPTE_CORS_ORIGINS")
+    if not raw:
+        return list(DEFAULT_CORS_ORIGINS)
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+def create_app(
+    *,
+    store: ObjectStore | None = None,
+    workflow_runner: WorkflowRunner | None = None,
+    cors_origins: list[str] | None = None,
+) -> FastAPI:
+    app = FastAPI(title="Eclypte API", version="1.0.0")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins or parse_cors_origins(),
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    runner = workflow_runner or DefaultWorkflowRunner()
+
+    def resolve_store() -> ObjectStore:
+        resolved = store or get_object_store(required=False)
+        if resolved is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="R2 storage is not configured",
+            )
+        return resolved
+
+    def repository(resolved: ObjectStore = Depends(resolve_store)) -> StorageRepository:
+        return StorageRepository(resolved)
+
+    def user_id(x_user_id: str | None = Header(default=None)) -> str:
+        return x_user_id or get_default_user_id()
+
+    def load_version(
+        repo: StorageRepository,
+        uid: str,
+        ref: FileVersionInput,
+        expected_kind: str,
+    ) -> tuple[FileManifest, FileVersionMeta]:
+        try:
+            manifest = repo.load_file_manifest(FileRef(user_id=uid, file_id=ref.file_id))
+            meta = repo.load_file_version_meta(
+                FileVersionRef(
+                    user_id=uid,
+                    file_id=ref.file_id,
+                    version_id=ref.version_id,
+                )
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="file version not found") from exc
+        if manifest.kind != expected_kind:
+            raise HTTPException(
+                status_code=400,
+                detail=f"expected {expected_kind}, got {manifest.kind}",
+            )
+        return manifest, meta
+
+    def create_workflow_run(
+        repo: StorageRepository,
+        uid: str,
+        workflow_type: str,
+        inputs: dict[str, str],
+        steps: list[str],
+    ) -> RunManifest:
+        run = repo.create_run(
+            user_id=uid,
+            workflow_type=workflow_type,
+            inputs=inputs,
+            steps=steps,
+        )
+        repo.append_run_event(
+            run_ref=RunRef(user_id=uid, run_id=run.run_id),
+            event_type="run_created",
+            timestamp=run.created_at,
+            event_id="evt_created",
+            payload={"workflow_type": workflow_type},
+        )
+        return run
+
+    @app.get("/healthz")
+    def healthz() -> dict[str, bool]:
+        return {"ok": True}
+
+    @app.post(
+        "/v1/uploads",
+        response_model=UploadCreateResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_upload(
+        request: UploadCreateRequest,
+        repo: StorageRepository = Depends(repository),
+        resolved_store: ObjectStore = Depends(resolve_store),
+        uid: str = Depends(user_id),
+    ) -> UploadCreateResponse:
+        reservation = repo.create_upload_reservation(
+            user_id=uid,
+            kind=request.kind,
+            filename=request.filename,
+            content_type=request.content_type,
+            size_bytes=request.size_bytes,
+            expires_in=UPLOAD_URL_EXPIRES_IN,
+        )
+        upload_url = resolved_store.presigned_put_url(
+            reservation.blob_key,
+            content_type=request.content_type,
+            expires_in=UPLOAD_URL_EXPIRES_IN,
+        )
+        return UploadCreateResponse(
+            upload_id=reservation.upload_id,
+            file_id=reservation.file_id,
+            version_id=reservation.version_id,
+            upload_url=upload_url,
+            required_headers={"Content-Type": request.content_type},
+            expires_in=UPLOAD_URL_EXPIRES_IN,
+        )
+
+    @app.post("/v1/uploads/{upload_id}/complete", response_model=FileVersionMeta)
+    def complete_upload(
+        upload_id: str,
+        request: UploadCompleteRequest,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> FileVersionMeta:
+        try:
+            version_ref = repo.complete_upload_reservation(
+                upload_id=upload_id,
+                sha256=request.sha256,
+                user_id=uid,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="upload not found") from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return repo.load_file_version_meta(version_ref)
+
+    @app.get("/v1/files/{file_id}", response_model=FileManifest)
+    def get_file(
+        file_id: str,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> FileManifest:
+        try:
+            return repo.load_file_manifest(FileRef(user_id=uid, file_id=file_id))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="file not found") from exc
+
+    @app.get("/v1/files/{file_id}/versions/{version_id}", response_model=FileVersionMeta)
+    def get_file_version(
+        file_id: str,
+        version_id: str,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> FileVersionMeta:
+        try:
+            return repo.load_file_version_meta(
+                FileVersionRef(user_id=uid, file_id=file_id, version_id=version_id)
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="file version not found") from exc
+
+    @app.get(
+        "/v1/files/{file_id}/versions/{version_id}/download-url",
+        response_model=DownloadUrlResponse,
+    )
+    def get_download_url(
+        file_id: str,
+        version_id: str,
+        repo: StorageRepository = Depends(repository),
+        resolved_store: ObjectStore = Depends(resolve_store),
+        uid: str = Depends(user_id),
+    ) -> DownloadUrlResponse:
+        meta = get_file_version(file_id, version_id, repo, uid)
+        return DownloadUrlResponse(
+            download_url=resolved_store.presigned_get_url(
+                meta.storage_key,
+                expires_in=DOWNLOAD_URL_EXPIRES_IN,
+            ),
+            expires_in=DOWNLOAD_URL_EXPIRES_IN,
+        )
+
+    @app.post("/v1/music/analyses", response_model=RunManifest, status_code=202)
+    def create_music_analysis(
+        request: MusicAnalysisRequest,
+        background_tasks: BackgroundTasks,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> RunManifest:
+        load_version(repo, uid, request.audio, "song_audio")
+        run = create_workflow_run(
+            repo,
+            uid,
+            "music_analysis",
+            {"audio_file_id": request.audio.file_id, "audio_version_id": request.audio.version_id},
+            ["analyze_music", "publish_analysis"],
+        )
+        background_tasks.add_task(
+            runner.run_music_analysis,
+            user_id=uid,
+            run_id=run.run_id,
+            audio=request.audio.model_dump(),
+        )
+        return run
+
+    @app.post("/v1/video/analyses", response_model=RunManifest, status_code=202)
+    def create_video_analysis(
+        request: VideoAnalysisRequest,
+        background_tasks: BackgroundTasks,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> RunManifest:
+        load_version(repo, uid, request.source_video, "source_video")
+        run = create_workflow_run(
+            repo,
+            uid,
+            "video_analysis",
+            {
+                "source_video_file_id": request.source_video.file_id,
+                "source_video_version_id": request.source_video.version_id,
+            },
+            ["analyze_video", "publish_analysis"],
+        )
+        background_tasks.add_task(
+            runner.run_video_analysis,
+            user_id=uid,
+            run_id=run.run_id,
+            source_video=request.source_video.model_dump(),
+        )
+        return run
+
+    @app.post("/v1/timelines", response_model=RunManifest, status_code=202)
+    def create_timeline(
+        request: TimelineRequest,
+        background_tasks: BackgroundTasks,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> RunManifest:
+        load_version(repo, uid, request.audio, "song_audio")
+        load_version(repo, uid, request.source_video, "source_video")
+        load_version(repo, uid, request.music_analysis, "music_analysis")
+        load_version(repo, uid, request.video_analysis, "video_analysis")
+        run = create_workflow_run(
+            repo,
+            uid,
+            "timeline_plan",
+            {
+                "audio_version_id": request.audio.version_id,
+                "source_video_version_id": request.source_video.version_id,
+                "music_analysis_version_id": request.music_analysis.version_id,
+                "video_analysis_version_id": request.video_analysis.version_id,
+            },
+            ["plan_timeline", "publish_timeline"],
+        )
+        background_tasks.add_task(
+            runner.run_timeline_plan,
+            user_id=uid,
+            run_id=run.run_id,
+            audio=request.audio.model_dump(),
+            source_video=request.source_video.model_dump(),
+            music_analysis=request.music_analysis.model_dump(),
+            video_analysis=request.video_analysis.model_dump(),
+            max_duration_sec=request.max_duration_sec,
+        )
+        return run
+
+    @app.post("/v1/renders", response_model=RunManifest, status_code=202)
+    def create_render(
+        request: RenderRequest,
+        background_tasks: BackgroundTasks,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> RunManifest:
+        load_version(repo, uid, request.timeline, "timeline")
+        load_version(repo, uid, request.audio, "song_audio")
+        load_version(repo, uid, request.source_video, "source_video")
+        run = create_workflow_run(
+            repo,
+            uid,
+            "render",
+            {
+                "timeline_version_id": request.timeline.version_id,
+                "audio_version_id": request.audio.version_id,
+                "source_video_version_id": request.source_video.version_id,
+            },
+            ["render", "publish_render"],
+        )
+        background_tasks.add_task(
+            runner.run_render,
+            user_id=uid,
+            run_id=run.run_id,
+            timeline=request.timeline.model_dump(),
+            audio=request.audio.model_dump(),
+            source_video=request.source_video.model_dump(),
+        )
+        return run
+
+    @app.get("/v1/runs/{run_id}", response_model=RunManifest)
+    def get_run(
+        run_id: str,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> RunManifest:
+        try:
+            return repo.load_run_manifest(RunRef(user_id=uid, run_id=run_id))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="run not found") from exc
+
+    @app.get("/v1/runs/{run_id}/events", response_model=list[RunEvent])
+    def get_run_events(
+        run_id: str,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> list[RunEvent]:
+        return repo.list_run_events(RunRef(user_id=uid, run_id=run_id))
+
+    return app
