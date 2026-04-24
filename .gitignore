@@ -7,4 +7,5 @@
 pytest-cache-files-*/
 __pycache__/
 .agent
+.claude/
 docs
