@@ -5,10 +5,20 @@ import tempfile
 
 import modal
 
-from render_modal import RENDER_PROFILES, image
+RENDER_PROFILES = {
+    "standard": {"cpu": 16, "memory": 16384, "threads": 16},
+    "boosted": {"cpu": 24, "memory": 32768, "threads": 24},
+}
+
+image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .apt_install("ffmpeg")
+    .pip_install("moviepy>=2", "pydantic>=2", "pyyaml", "numpy", "imageio-ffmpeg", "boto3")
+    .add_local_python_source("edit")
+)
 
 app = modal.App("eclypte-render-r2")
-storage_image = image.pip_install("boto3")
+storage_image = image
 
 
 def _s3_client(config: dict):
