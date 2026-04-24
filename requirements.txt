@@ -1,1 +1,9 @@
--r api/requirements.txt
+# Railway API runtime dependencies. Keep this self-contained because Railpack's
+# Python install step copies this file without the api/ subdirectory.
+modal
+fastapi
+uvicorn
+python-dotenv
+pydantic>=2
+pyyaml
+boto3
