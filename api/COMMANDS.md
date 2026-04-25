@@ -71,6 +71,22 @@ CORS defaults to `https://eclypte.vercel.app`, `http://localhost:3000`, and
 `http://127.0.0.1:3000`. Override with a comma-separated
 `ECLYPTE_CORS_ORIGINS` value if needed.
 
+YouTube song import may require authenticated YouTube cookies when Railway's
+IP is challenged. Export YouTube cookies in Netscape `cookies.txt` format,
+base64-encode the file contents, and set this on the Railway API service:
+
+```powershell
+$env:ECLYPTE_YOUTUBE_COOKIES_B64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Content .\youtube-cookies.txt -Raw)))
+```
+
+```bash
+export ECLYPTE_YOUTUBE_COOKIES_B64="$(base64 < youtube-cookies.txt | tr -d '\n')"
+```
+
+For local-only development, raw `ECLYPTE_YOUTUBE_COOKIES` text is also accepted.
+Do not commit exported cookies; treat them like passwords and refresh them if
+YouTube rejects the configured value.
+
 Run locally from the repo root:
 
 ```powershell

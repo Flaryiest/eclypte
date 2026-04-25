@@ -1,3 +1,4 @@
+import base64
 import sys
 from pathlib import Path
 import subprocess
@@ -118,3 +119,90 @@ def test_youtube_download_uses_yt_dlp_and_converts_to_wav(monkeypatch):
         assert title == "Imported Song"
         assert wav_path.name == "abc123.wav"
         assert wav_path.read_bytes() == b"wav-bytes"
+
+
+def test_youtube_download_passes_cookiefile_from_base64_env(monkeypatch):
+    cookie_text = "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tsecret\n"
+    monkeypatch.setenv(
+        "ECLYPTE_YOUTUBE_COOKIES_B64",
+        base64.b64encode(cookie_text.encode("utf-8")).decode("ascii"),
+    )
+    monkeypatch.setenv("ECLYPTE_TEMP_DIR", str(Path.cwd() / ".pytest-tmp-youtube-worker"))
+
+    class FakeYoutubeDL:
+        def __init__(self, options):
+            self.options = options
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def extract_info(self, _url, download):
+            assert download is True
+            cookiefile = Path(self.options["cookiefile"])
+            assert cookiefile.read_text(encoding="utf-8") == cookie_text
+            audio_path = Path(self.options["outtmpl"].replace("%(id)s", "abc123").replace("%(ext)s", "m4a"))
+            audio_path.write_bytes(b"source-audio")
+            return {
+                "id": "abc123",
+                "title": "Cookie Song",
+                "requested_downloads": [{"filepath": str(audio_path)}],
+            }
+
+    monkeypatch.setitem(sys.modules, "yt_dlp", SimpleNamespace(YoutubeDL=FakeYoutubeDL))
+    monkeypatch.setitem(
+        sys.modules,
+        "imageio_ffmpeg",
+        SimpleNamespace(get_ffmpeg_exe=lambda: "fake-ffmpeg"),
+    )
+    monkeypatch.setattr(
+        workflows.subprocess,
+        "run",
+        lambda command, **_kwargs: Path(command[-1]).write_bytes(b"wav-bytes"),
+    )
+
+    with workflows._temporary_directory("eclypte_youtube_") as td:
+        title, _wav_path = workflows._download_youtube_wav(
+            "https://www.youtube.com/watch?v=abc123",
+            Path(td),
+        )
+
+    assert title == "Cookie Song"
+
+
+def test_youtube_download_auth_error_mentions_cookie_secret(monkeypatch):
+    monkeypatch.delenv("ECLYPTE_YOUTUBE_COOKIES_B64", raising=False)
+    monkeypatch.delenv("ECLYPTE_YOUTUBE_COOKIES", raising=False)
+    monkeypatch.setenv("ECLYPTE_TEMP_DIR", str(Path.cwd() / ".pytest-tmp-youtube-worker"))
+
+    class FakeYoutubeDL:
+        def __init__(self, _options):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def extract_info(self, _url, download):
+            assert download is True
+            raise RuntimeError("Sign in to confirm you're not a bot. Use --cookies")
+
+    monkeypatch.setitem(sys.modules, "yt_dlp", SimpleNamespace(YoutubeDL=FakeYoutubeDL))
+
+    with workflows._temporary_directory("eclypte_youtube_") as td:
+        try:
+            workflows._download_youtube_wav(
+                "https://www.youtube.com/watch?v=abc123",
+                Path(td),
+            )
+        except RuntimeError as exc:
+            message = str(exc)
+        else:
+            raise AssertionError("Expected auth failure")
+
+    assert "ECLYPTE_YOUTUBE_COOKIES_B64" in message
+    assert "Railway" in message

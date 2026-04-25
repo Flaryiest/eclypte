@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import os
 import re
 import shutil
@@ -467,9 +468,17 @@ def _download_youtube_wav(url: str, workdir: Path) -> tuple[str, Path]:
         "quiet": True,
         "no_warnings": True,
     }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        downloaded = _yt_dlp_downloaded_path(info, ydl)
+    cookiefile = _youtube_cookiefile(workdir)
+    if cookiefile is not None:
+        ydl_opts["cookiefile"] = str(cookiefile)
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            downloaded = _yt_dlp_downloaded_path(info, ydl)
+    except Exception as exc:
+        if _is_youtube_cookie_auth_error(exc):
+            raise RuntimeError(_youtube_auth_error_message(cookiefile is not None)) from exc
+        raise
 
     wav_path = workdir / f"{_safe_audio_basename(info.get('id') or 'youtube_audio')}.wav"
     try:
@@ -494,6 +503,44 @@ def _yt_dlp_downloaded_path(info: dict, ydl) -> Path:
     if filepath:
         return Path(filepath)
     return Path(ydl.prepare_filename(info))
+
+
+def _youtube_cookiefile(workdir: Path) -> Path | None:
+    cookie_text = os.environ.get("ECLYPTE_YOUTUBE_COOKIES")
+    encoded = os.environ.get("ECLYPTE_YOUTUBE_COOKIES_B64")
+    if encoded:
+        try:
+            cookie_text = base64.b64decode(encoded, validate=True).decode("utf-8")
+        except Exception as exc:
+            raise RuntimeError("ECLYPTE_YOUTUBE_COOKIES_B64 is not valid base64 text") from exc
+    if not cookie_text:
+        return None
+    cookie_path = workdir / "youtube_cookies.txt"
+    cookie_path.write_text(cookie_text, encoding="utf-8", newline="\n")
+    return cookie_path
+
+
+def _is_youtube_cookie_auth_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return (
+        "sign in to confirm" in message
+        or "not a bot" in message
+        or "--cookies" in message
+        or "cookies-from-browser" in message
+    )
+
+
+def _youtube_auth_error_message(has_cookiefile: bool) -> str:
+    if has_cookiefile:
+        return (
+            "YouTube rejected the configured cookies. Refresh the YouTube cookies export, "
+            "base64-encode it, and update ECLYPTE_YOUTUBE_COOKIES_B64 on the Railway API service."
+        )
+    return (
+        "YouTube is requiring authenticated cookies for this download. Export YouTube cookies "
+        "in Netscape cookies.txt format, base64-encode the file contents, and set "
+        "ECLYPTE_YOUTUBE_COOKIES_B64 on the Railway API service."
+    )
 
 
 @contextmanager
