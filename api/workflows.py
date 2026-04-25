@@ -457,22 +457,43 @@ def _synthesis_guidance(references) -> str:
 
 def _download_youtube_wav(url: str, workdir: Path) -> tuple[str, Path]:
     from imageio_ffmpeg import get_ffmpeg_exe
-    from pytubefix import YouTube
+    import yt_dlp
 
-    yt = YouTube(url)
-    stream = yt.streams.get_audio_only()
-    if stream is None:
-        raise RuntimeError("No audio-only stream found for YouTube URL")
-    extension = ".webm" if "webm" in (stream.mime_type or "") else ".m4a"
-    source_path = workdir / f"youtube_audio{extension}"
-    wav_path = workdir / "youtube_audio.wav"
-    downloaded = stream.download(output_path=str(workdir), filename=source_path.name)
-    subprocess.run(
-        [get_ffmpeg_exe(), "-y", "-i", str(downloaded), str(wav_path)],
-        check=True,
-        capture_output=True,
-    )
-    return yt.title or "YouTube song", wav_path
+    workdir.mkdir(parents=True, exist_ok=True)
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": str(workdir / "%(id)s.%(ext)s"),
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        downloaded = _yt_dlp_downloaded_path(info, ydl)
+
+    wav_path = workdir / f"{_safe_audio_basename(info.get('id') or 'youtube_audio')}.wav"
+    try:
+        subprocess.run(
+            [get_ffmpeg_exe(), "-y", "-i", str(downloaded), str(wav_path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or str(exc)).strip()
+        raise RuntimeError(f"failed to convert YouTube audio to WAV: {detail}") from exc
+    return info.get("title") or "YouTube song", wav_path
+
+
+def _yt_dlp_downloaded_path(info: dict, ydl) -> Path:
+    for download in info.get("requested_downloads") or []:
+        filepath = download.get("filepath")
+        if filepath:
+            return Path(filepath)
+    filepath = info.get("filepath")
+    if filepath:
+        return Path(filepath)
+    return Path(ydl.prepare_filename(info))
 
 
 @contextmanager
