@@ -225,6 +225,59 @@ def test_youtube_download_falls_back_to_missing_pot_formats(monkeypatch):
     ]
 
 
+def test_youtube_download_format_error_lists_visible_formats(monkeypatch):
+    monkeypatch.setenv("ECLYPTE_TEMP_DIR", str(Path.cwd() / ".pytest-tmp-youtube-worker"))
+
+    class FakeYoutubeDL:
+        def __init__(self, options):
+            self.options = options
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def extract_info(self, _url, download):
+            if download:
+                raise RuntimeError("Requested format is not available")
+            return {
+                "formats": [
+                    {
+                        "format_id": "sb0",
+                        "ext": "mhtml",
+                        "acodec": "none",
+                        "vcodec": "images",
+                        "protocol": "mhtml",
+                    },
+                    {
+                        "format_id": "234",
+                        "ext": "mp4",
+                        "acodec": "mp4a.40.2",
+                        "vcodec": "none",
+                        "protocol": "m3u8_native",
+                    },
+                ],
+            }
+
+    monkeypatch.setitem(sys.modules, "yt_dlp", SimpleNamespace(YoutubeDL=FakeYoutubeDL))
+
+    with workflows._temporary_directory("eclypte_youtube_") as td:
+        try:
+            workflows._download_youtube_wav(
+                "https://www.youtube.com/watch?v=abc123",
+                Path(td),
+            )
+        except RuntimeError as exc:
+            message = str(exc)
+        else:
+            raise AssertionError("Expected format failure")
+
+    assert "visible formats" in message
+    assert "sb0:mhtml:a=none:v=images:p=mhtml" in message
+    assert "234:mp4:a=mp4a.40.2:v=none:p=m3u8_native" in message
+
+
 def test_youtube_download_passes_cookiefile_from_base64_env(monkeypatch):
     cookie_text = "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tsecret\n"
     monkeypatch.setenv(

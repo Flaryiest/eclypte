@@ -521,8 +521,48 @@ def _download_youtube_media(url: str, ydl_opts_base: dict, yt_dlp) -> tuple[dict
                     continue
                 raise
     if last_format_error is not None:
-        raise last_format_error
+        formats = _probe_youtube_formats(url, ydl_opts_base, yt_dlp)
+        summary = _youtube_format_summary(formats)
+        raise RuntimeError(
+            "Requested YouTube format is not available after trying fallback selectors. "
+            f"yt-dlp visible formats: {summary}"
+        ) from last_format_error
     raise RuntimeError("No YouTube format selectors configured")
+
+
+def _probe_youtube_formats(url: str, ydl_opts_base: dict, yt_dlp) -> list[dict]:
+    for extractor_args in YOUTUBE_EXTRACTOR_ARG_VARIANTS:
+        ydl_opts = dict(ydl_opts_base)
+        if extractor_args:
+            ydl_opts["extractor_args"] = extractor_args
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+            formats = info.get("formats") or []
+            if formats:
+                return formats
+        except Exception:
+            continue
+    return []
+
+
+def _youtube_format_summary(formats: list[dict], limit: int = 12) -> str:
+    if not formats:
+        return "none"
+    parts = []
+    for fmt in formats[:limit]:
+        parts.append(
+            "{id}:{ext}:a={audio}:v={video}:p={protocol}".format(
+                id=fmt.get("format_id") or "?",
+                ext=fmt.get("ext") or "?",
+                audio=fmt.get("acodec") or "?",
+                video=fmt.get("vcodec") or "?",
+                protocol=fmt.get("protocol") or "?",
+            )
+        )
+    if len(formats) > limit:
+        parts.append(f"... +{len(formats) - limit} more")
+    return ", ".join(parts)
 
 
 def _yt_dlp_downloaded_path(info: dict, ydl) -> Path:
