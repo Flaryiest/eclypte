@@ -9,4 +9,5 @@ pyyaml
 boto3
 imageio-ffmpeg
 yt-dlp
+pytubefix
 pydub
