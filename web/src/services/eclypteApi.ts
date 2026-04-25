@@ -189,6 +189,14 @@ export class EclypteApiClient {
         })
     }
 
+    async createYouTubeSongImport(url: string, signal?: AbortSignal) {
+        return this.request<RunManifest>("/v1/music/youtube-imports", {
+            method: "POST",
+            body: JSON.stringify({ url }),
+            signal,
+        })
+    }
+
     async createVideoAnalysis(sourceVideo: FileVersionInput, signal?: AbortSignal) {
         return this.request<RunManifest>("/v1/video/analyses", {
             method: "POST",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from typing import Literal
+from urllib.parse import urlparse
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -69,6 +70,10 @@ class MusicAnalysisRequest(BaseModel):
     audio: FileVersionInput
 
 
+class YouTubeSongImportRequest(BaseModel):
+    url: str = Field(min_length=1)
+
+
 class VideoAnalysisRequest(BaseModel):
     source_video: FileVersionInput
 
@@ -120,6 +125,19 @@ def parse_cors_origins(value: str | None = None) -> list[str]:
     if not raw:
         return list(DEFAULT_CORS_ORIGINS)
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+def is_youtube_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    hostname = (parsed.hostname or "").lower()
+    return parsed.scheme in {"http", "https"} and (
+        hostname == "youtu.be"
+        or hostname == "youtube.com"
+        or hostname.endswith(".youtube.com")
+    )
 
 
 def create_app(
@@ -226,8 +244,15 @@ def create_app(
         matching = [
             run
             for run in runs
-            if run.workflow_type == workflow_type
-            and run.inputs.get(input_key) == manifest.current_version_id
+            if (
+                run.workflow_type == workflow_type
+                and run.inputs.get(input_key) == manifest.current_version_id
+            )
+            or (
+                manifest.kind == "song_audio"
+                and run.workflow_type == "youtube_song_import"
+                and run.outputs.get("audio_version_id") == manifest.current_version_id
+            )
         ]
         if not matching:
             return None, None
@@ -413,6 +438,30 @@ def create_app(
             user_id=uid,
             run_id=run.run_id,
             audio=request.audio.model_dump(),
+        )
+        return run
+
+    @app.post("/v1/music/youtube-imports", response_model=RunManifest, status_code=202)
+    def create_youtube_song_import(
+        request: YouTubeSongImportRequest,
+        background_tasks: BackgroundTasks,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> RunManifest:
+        if not is_youtube_url(request.url):
+            raise HTTPException(status_code=400, detail="expected a YouTube URL")
+        run = create_workflow_run(
+            repo,
+            uid,
+            "youtube_song_import",
+            {"youtube_url": request.url},
+            ["download_youtube_audio", "publish_audio", "analyze_music", "publish_analysis"],
+        )
+        background_tasks.add_task(
+            runner.run_youtube_song_import,
+            user_id=uid,
+            run_id=run.run_id,
+            url=request.url,
         )
         return run
 

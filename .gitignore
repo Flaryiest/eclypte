@@ -8,6 +8,9 @@ pytest-tmp*/
 pytest-temp-root*/
 .pytest
 pytest-cache-files-*/
+youtube-worker-tmp/
+.youtube-worker-tmp/
+api/youtube-worker-tmp/
 __pycache__/
 .agent
 .claude/

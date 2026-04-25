@@ -1,5 +1,5 @@
 from api.storage.keys import file_version_blob_key
-from api.storage.refs import FileRef
+from api.storage.refs import FileRef, RunRef
 from api.storage.repository import StorageRepository
 from api.storage.test_fakes import InMemoryObjectStore
 
@@ -10,6 +10,9 @@ class RecordingWorkflowRunner:
 
     def run_music_analysis(self, **kwargs):
         self.calls.append(("music", kwargs))
+
+    def run_youtube_song_import(self, **kwargs):
+        self.calls.append(("youtube_song_import", kwargs))
 
     def run_video_analysis(self, **kwargs):
         self.calls.append(("video", kwargs))
@@ -227,6 +230,83 @@ def test_workflow_endpoints_create_runs_and_schedule_background_tasks():
     )
     assert run.json()["status"] == "running"
     assert events.json()[0]["event_type"] == "run_created"
+
+
+def test_youtube_song_import_endpoint_creates_run_and_schedules_background_task():
+    client, _, runner = build_client()
+
+    response = client.post(
+        "/v1/music/youtube-imports",
+        headers={"X-User-Id": "user_123"},
+        json={"url": "https://www.youtube.com/watch?v=abc123"},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["workflow_type"] == "youtube_song_import"
+    assert response.json()["inputs"]["youtube_url"] == "https://www.youtube.com/watch?v=abc123"
+    assert [call[0] for call in runner.calls] == ["youtube_song_import"]
+    assert runner.calls[0][1]["url"] == "https://www.youtube.com/watch?v=abc123"
+
+
+def test_youtube_song_import_rejects_non_youtube_url():
+    client, _, runner = build_client()
+
+    response = client.post(
+        "/v1/music/youtube-imports",
+        headers={"X-User-Id": "user_123"},
+        json={"url": "https://example.com/audio"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "expected a YouTube URL"
+    assert runner.calls == []
+
+
+def test_assets_list_marks_youtube_imported_song_ready_with_analysis():
+    client, store, _ = build_client()
+    repo = StorageRepository(store)
+    audio = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_audio",
+        kind="song_audio",
+        filename="Imported Song.wav",
+        content_type="audio/wav",
+    )
+    analysis = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_analysis",
+        kind="music_analysis",
+        filename="Imported Song.wav.json",
+        body=b"{}",
+        content_type="application/json",
+    )
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="youtube_song_import",
+        inputs={"youtube_url": "https://www.youtube.com/watch?v=abc123"},
+        steps=["download_youtube_audio", "publish_audio", "analyze_music", "publish_analysis"],
+    )
+    repo.update_run_status(
+        run_ref=RunRef(user_id="user_123", run_id=run.run_id),
+        status="completed",
+        outputs={
+            "audio_file_id": audio["file_id"],
+            "audio_version_id": audio["version_id"],
+            "music_analysis_file_id": analysis["file_id"],
+            "music_analysis_version_id": analysis["version_id"],
+        },
+    )
+
+    response = client.get(
+        "/v1/assets?kind=song_audio",
+        headers={"X-User-Id": "user_123"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()[0]["analysis"] == analysis
+    assert response.json()[0]["latest_run"]["workflow_type"] == "youtube_song_import"
 
 
 def test_assets_list_returns_current_version_metadata_and_kind_filter():

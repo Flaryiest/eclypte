@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import os
+import re
+import shutil
+import subprocess
+import uuid
+from contextlib import contextmanager
+from pathlib import Path
 from typing import Protocol
 
 from api.storage.config import R2Config
@@ -10,6 +17,7 @@ from api.storage.repository import StorageRepository
 
 class WorkflowRunner(Protocol):
     def run_music_analysis(self, **kwargs) -> None: ...
+    def run_youtube_song_import(self, **kwargs) -> None: ...
     def run_video_analysis(self, **kwargs) -> None: ...
     def run_timeline_plan(self, **kwargs) -> None: ...
     def run_render(self, **kwargs) -> None: ...
@@ -88,6 +96,67 @@ class DefaultWorkflowRunner:
                 outputs={
                     "music_analysis_file_id": file_ref.file_id,
                     "music_analysis_version_id": version.version_id,
+                },
+            )
+        except Exception as exc:
+            self._mark_failed(repo, user_id, run_id, exc)
+
+    def run_youtube_song_import(self, **kwargs) -> None:
+        repo = self._repository()
+        user_id = kwargs["user_id"]
+        run_id = kwargs["run_id"]
+        url = kwargs["url"]
+        try:
+            import modal
+            with _temporary_directory("eclypte_youtube_") as td:
+                title, wav_path = _download_youtube_wav(url, Path(td))
+                filename = f"{_safe_audio_basename(title)}.wav"
+                wav_bytes = wav_path.read_bytes()
+
+            audio_ref = FileRef(user_id=user_id, file_id=f"file_audio_{run_id}")
+            repo.create_file_manifest(
+                file_ref=audio_ref,
+                kind="song_audio",
+                display_name=filename,
+                source_run_id=run_id,
+            )
+            audio_version = repo.publish_bytes(
+                file_ref=audio_ref,
+                body=wav_bytes,
+                content_type="audio/wav",
+                original_filename=filename,
+                created_by_step="download_youtube_audio",
+                derived_from_step="download_youtube_audio",
+                input_file_version_ids=[],
+                derived_from_run_id=run_id,
+            )
+
+            analyze = modal.Function.from_name("eclypte-analysis", "analyze_remote")
+            result = analyze.remote(wav_bytes, filename)
+            analysis_ref = FileRef(user_id=user_id, file_id=f"file_music_analysis_{run_id}")
+            repo.create_file_manifest(
+                file_ref=analysis_ref,
+                kind="music_analysis",
+                display_name=f"{filename}.json",
+                source_run_id=run_id,
+            )
+            analysis_version = repo.publish_json(
+                file_ref=analysis_ref,
+                data=result,
+                original_filename=f"{filename}.json",
+                created_by_step="analyze_music",
+                derived_from_step="analyze_music",
+                input_file_version_ids=[audio_version.version_id],
+                derived_from_run_id=run_id,
+            )
+            repo.update_run_status(
+                RunRef(user_id=user_id, run_id=run_id),
+                status="completed",
+                outputs={
+                    "audio_file_id": audio_ref.file_id,
+                    "audio_version_id": audio_version.version_id,
+                    "music_analysis_file_id": analysis_ref.file_id,
+                    "music_analysis_version_id": analysis_version.version_id,
                 },
             )
         except Exception as exc:
@@ -384,3 +453,51 @@ def _synthesis_guidance(references) -> str:
         "Prefer hooks and pacing patterns supported by multiple references; keep source timestamps unique."
     )
     return "\n".join(lines)
+
+
+def _download_youtube_wav(url: str, workdir: Path) -> tuple[str, Path]:
+    from imageio_ffmpeg import get_ffmpeg_exe
+    from pytubefix import YouTube
+
+    yt = YouTube(url)
+    stream = yt.streams.get_audio_only()
+    if stream is None:
+        raise RuntimeError("No audio-only stream found for YouTube URL")
+    extension = ".webm" if "webm" in (stream.mime_type or "") else ".m4a"
+    source_path = workdir / f"youtube_audio{extension}"
+    wav_path = workdir / "youtube_audio.wav"
+    downloaded = stream.download(output_path=str(workdir), filename=source_path.name)
+    subprocess.run(
+        [get_ffmpeg_exe(), "-y", "-i", str(downloaded), str(wav_path)],
+        check=True,
+        capture_output=True,
+    )
+    return yt.title or "YouTube song", wav_path
+
+
+@contextmanager
+def _temporary_directory(prefix: str):
+    import tempfile
+
+    temp_root = os.environ.get("ECLYPTE_TEMP_DIR")
+    if temp_root:
+        root = Path(temp_root)
+        root.mkdir(parents=True, exist_ok=True)
+        workdir = root / f"{prefix}{uuid.uuid4().hex[:12]}"
+        workdir.mkdir()
+        try:
+            yield str(workdir)
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+        return
+    with tempfile.TemporaryDirectory(
+        prefix=prefix,
+        ignore_cleanup_errors=True,
+    ) as td:
+        yield td
+
+
+def _safe_audio_basename(title: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._ -]+", "", title).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ._-")
+    return (cleaned or "youtube_song")[:96]

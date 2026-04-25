@@ -2,7 +2,7 @@
 
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
-import { Activity, Download, RefreshCw, Upload } from "lucide-react"
+import { Activity, Download, Link2, RefreshCw, Upload } from "lucide-react"
 import {
     DashboardPage,
     StatusBadge,
@@ -30,15 +30,18 @@ export default function AssetsPage() {
     const [filter, setFilter] = useState<"all" | ArtifactKind>("all")
     const [file, setFile] = useState<File | null>(null)
     const [slot, setSlot] = useState<UploadSlot>("audio")
+    const [youtubeUrl, setYoutubeUrl] = useState("")
     const [status, setStatus] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [preview, setPreview] = useState<PreviewState | null>(null)
     const [isUploading, setIsUploading] = useState(false)
+    const [isImporting, setIsImporting] = useState(false)
     const [busyAssetId, setBusyAssetId] = useState<string | null>(null)
     const abortRef = useRef<AbortController | null>(null)
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
     const visibleAssets = filter === "all" ? assets : assets.filter((asset) => asset.kind === filter)
+    const isWorking = isUploading || isImporting
 
     const loadAssets = useCallback(async () => {
         if (!api) {
@@ -100,6 +103,40 @@ export default function AssetsPage() {
         } finally {
             abortRef.current = null
             setIsUploading(false)
+        }
+    }
+
+    const importYouTubeSong = async () => {
+        if (!api) {
+            return
+        }
+        const validation = validateYouTubeUrl(youtubeUrl)
+        if (validation) {
+            setError(validation)
+            return
+        }
+        const controller = new AbortController()
+        abortRef.current = controller
+        setError(null)
+        setIsImporting(true)
+        try {
+            setStatus("Starting YouTube import")
+            const run = await api.createYouTubeSongImport(youtubeUrl.trim(), controller.signal)
+            await waitForRunCompletion(api, run, {
+                signal: controller.signal,
+                onUpdate: (next) => setStatus(formatYouTubeImportStatus(next.status)),
+            })
+            setStatus("YouTube song imported and analyzed")
+            setYoutubeUrl("")
+            setFilter("song_audio")
+            await loadAssets()
+        } catch (caught) {
+            if (!isAbortError(caught)) {
+                setError(errorMessage(caught))
+            }
+        } finally {
+            abortRef.current = null
+            setIsImporting(false)
         }
     }
 
@@ -187,8 +224,30 @@ export default function AssetsPage() {
                             {file && <span className={styles.smallText}>{formatBytes(file.size)}</span>}
                             <input type="file" accept={slot === "audio" ? "audio/wav,.wav" : "video/mp4,.mp4"} onChange={onFileChange} />
                         </label>
-                        <button className={styles.primaryButton} type="button" onClick={uploadSelected} disabled={!file || Boolean(error) || isUploading}>
+                        <button className={styles.primaryButton} type="button" onClick={uploadSelected} disabled={!file || Boolean(validateUpload(file, slot)) || isWorking}>
                             <Upload size={16} /> {isUploading ? "Uploading" : "Upload asset"}
+                        </button>
+                        <label className={styles.fieldLabel}>
+                            YouTube song URL
+                            <input
+                                className={styles.input}
+                                type="url"
+                                value={youtubeUrl}
+                                placeholder="https://www.youtube.com/watch?v=..."
+                                onChange={(event) => {
+                                    setYoutubeUrl(event.target.value)
+                                    setError(null)
+                                    setStatus(null)
+                                }}
+                            />
+                        </label>
+                        <button
+                            className={styles.secondaryButton}
+                            type="button"
+                            onClick={importYouTubeSong}
+                            disabled={!youtubeUrl.trim() || isWorking}
+                        >
+                            <Link2 size={16} /> {isImporting ? "Importing" : "Import and analyze"}
                         </button>
                         {status && <div className={styles.successBanner}>{status}</div>}
                         {error && <div className={styles.errorBanner}>{error}</div>}
@@ -289,6 +348,32 @@ function validateUpload(file: File | null, slot: UploadSlot) {
         return "Use an MP4 file."
     }
     return null
+}
+
+function validateYouTubeUrl(value: string) {
+    try {
+        const url = new URL(value.trim())
+        const host = url.hostname.toLowerCase()
+        if (
+            (url.protocol === "http:" || url.protocol === "https:") &&
+            (host === "youtu.be" || host === "youtube.com" || host.endsWith(".youtube.com"))
+        ) {
+            return null
+        }
+    } catch {
+        return "Use a valid YouTube URL."
+    }
+    return "Use a valid YouTube URL."
+}
+
+function formatYouTubeImportStatus(status: string) {
+    if (status === "completed") {
+        return "YouTube song imported and analyzed"
+    }
+    if (status === "failed") {
+        return "YouTube import failed"
+    }
+    return `YouTube import ${status}`
 }
 
 function isAbortError(error: unknown) {

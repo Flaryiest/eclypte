@@ -7,3 +7,5 @@ python-dotenv
 pydantic>=2
 pyyaml
 boto3
+pytubefix
+imageio-ffmpeg

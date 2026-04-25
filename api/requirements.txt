@@ -17,3 +17,4 @@ pydantic>=2
 pyyaml
 moviepy>=2
 boto3
+imageio-ffmpeg
