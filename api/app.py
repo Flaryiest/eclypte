@@ -8,7 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from api.storage.factory import get_default_user_id, get_object_store
-from api.prototyping.edit.synthesis.agent import SYSTEM_PROMPT as DEFAULT_SYNTHESIS_PROMPT
+from api.prototyping.edit.synthesis.system_prompt import (
+    SYSTEM_PROMPT as DEFAULT_SYNTHESIS_PROMPT,
+)
 from api.storage.models import (
     ArtifactKind,
     FileManifest,

@@ -338,7 +338,7 @@ class DefaultWorkflowRunner:
         user_id = kwargs["user_id"]
         run_id = kwargs["run_id"]
         try:
-            from api.prototyping.edit.synthesis.agent import SYSTEM_PROMPT
+            from api.prototyping.edit.synthesis.system_prompt import SYSTEM_PROMPT
 
             references = [
                 record
