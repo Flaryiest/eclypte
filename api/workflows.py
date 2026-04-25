@@ -16,9 +16,14 @@ from api.storage.refs import FileRef, FileVersionRef, RunRef
 from api.storage.repository import StorageRepository
 
 YOUTUBE_FORMAT_SELECTORS = (
+    "234/233/140/251/bestaudio/best[acodec!=none]/best*[acodec!=none]",
     "bestaudio/best[acodec!=none]/best*[acodec!=none]",
     "best*[acodec!=none]/best*",
     None,
+)
+YOUTUBE_EXTRACTOR_ARG_VARIANTS = (
+    None,
+    {"youtube": {"formats": ["missing_pot"]}},
 )
 
 
@@ -499,19 +504,22 @@ def _download_youtube_wav(url: str, workdir: Path) -> tuple[str, Path]:
 
 def _download_youtube_media(url: str, ydl_opts_base: dict, yt_dlp) -> tuple[dict, Path]:
     last_format_error = None
-    for format_selector in YOUTUBE_FORMAT_SELECTORS:
-        ydl_opts = dict(ydl_opts_base)
-        if format_selector:
-            ydl_opts["format"] = format_selector
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                return info, _yt_dlp_downloaded_path(info, ydl)
-        except Exception as exc:
-            if _is_youtube_format_unavailable_error(exc):
-                last_format_error = exc
-                continue
-            raise
+    for extractor_args in YOUTUBE_EXTRACTOR_ARG_VARIANTS:
+        for format_selector in YOUTUBE_FORMAT_SELECTORS:
+            ydl_opts = dict(ydl_opts_base)
+            if extractor_args:
+                ydl_opts["extractor_args"] = extractor_args
+            if format_selector:
+                ydl_opts["format"] = format_selector
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    return info, _yt_dlp_downloaded_path(info, ydl)
+            except Exception as exc:
+                if _is_youtube_format_unavailable_error(exc):
+                    last_format_error = exc
+                    continue
+                raise
     if last_format_error is not None:
         raise last_format_error
     raise RuntimeError("No YouTube format selectors configured")
