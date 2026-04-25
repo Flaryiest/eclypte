@@ -225,6 +225,59 @@ def test_youtube_download_falls_back_to_missing_pot_formats(monkeypatch):
     ]
 
 
+def test_youtube_download_tries_mweb_missing_pot_fallback(monkeypatch):
+    monkeypatch.setenv("ECLYPTE_TEMP_DIR", str(Path.cwd() / ".pytest-tmp-youtube-worker"))
+    seen_options = []
+
+    class FakeYoutubeDL:
+        def __init__(self, options):
+            self.options = options
+            seen_options.append(options)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def extract_info(self, _url, download):
+            assert download is True
+            extractor_args = self.options.get("extractor_args")
+            if extractor_args != {"youtube": {"player_client": ["mweb"], "formats": ["missing_pot"]}}:
+                raise RuntimeError("Requested format is not available")
+            media_path = Path(self.options["outtmpl"].replace("%(id)s", "abc123").replace("%(ext)s", "mp4"))
+            media_path.write_bytes(b"source-media")
+            return {
+                "id": "abc123",
+                "title": "Mweb Song",
+                "requested_downloads": [{"filepath": str(media_path)}],
+            }
+
+    monkeypatch.setitem(sys.modules, "yt_dlp", SimpleNamespace(YoutubeDL=FakeYoutubeDL))
+    monkeypatch.setitem(
+        sys.modules,
+        "imageio_ffmpeg",
+        SimpleNamespace(get_ffmpeg_exe=lambda: "fake-ffmpeg"),
+    )
+    monkeypatch.setattr(
+        workflows.subprocess,
+        "run",
+        lambda command, **_kwargs: Path(command[-1]).write_bytes(b"wav-bytes"),
+    )
+
+    with workflows._temporary_directory("eclypte_youtube_") as td:
+        title, wav_path = workflows._download_youtube_wav(
+            "https://www.youtube.com/watch?v=abc123",
+            Path(td),
+        )
+        assert title == "Mweb Song"
+        assert wav_path.read_bytes() == b"wav-bytes"
+
+    assert {"youtube": {"player_client": ["mweb"], "formats": ["missing_pot"]}} in [
+        options.get("extractor_args") for options in seen_options
+    ]
+
+
 def test_youtube_download_format_error_lists_visible_formats(monkeypatch):
     monkeypatch.setenv("ECLYPTE_TEMP_DIR", str(Path.cwd() / ".pytest-tmp-youtube-worker"))
 
@@ -276,6 +329,42 @@ def test_youtube_download_format_error_lists_visible_formats(monkeypatch):
     assert "visible formats" in message
     assert "sb0:mhtml:a=none:v=images:p=mhtml" in message
     assert "234:mp4:a=mp4a.40.2:v=none:p=m3u8_native" in message
+
+
+def test_youtube_download_format_error_lists_probe_errors(monkeypatch):
+    monkeypatch.setenv("ECLYPTE_TEMP_DIR", str(Path.cwd() / ".pytest-tmp-youtube-worker"))
+
+    class FakeYoutubeDL:
+        def __init__(self, options):
+            self.options = options
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def extract_info(self, _url, download):
+            if download:
+                raise RuntimeError("Requested format is not available")
+            raise RuntimeError("probe could not extract player response")
+
+    monkeypatch.setitem(sys.modules, "yt_dlp", SimpleNamespace(YoutubeDL=FakeYoutubeDL))
+
+    with workflows._temporary_directory("eclypte_youtube_") as td:
+        try:
+            workflows._download_youtube_wav(
+                "https://www.youtube.com/watch?v=abc123",
+                Path(td),
+            )
+        except RuntimeError as exc:
+            message = str(exc)
+        else:
+            raise AssertionError("Expected format failure")
+
+    assert "yt-dlp visible formats: none" in message
+    assert "probe errors:" in message
+    assert "probe could not extract player response" in message
 
 
 def test_youtube_download_passes_cookiefile_from_base64_env(monkeypatch):

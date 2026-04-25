@@ -23,7 +23,15 @@ YOUTUBE_FORMAT_SELECTORS = (
 )
 YOUTUBE_EXTRACTOR_ARG_VARIANTS = (
     None,
+    {"youtube": {"player_client": ["mweb"]}},
+    {"youtube": {"player_client": ["web"]}},
+    {"youtube": {"player_client": ["web_safari"]}},
+    {"youtube": {"player_client": ["tv"]}},
     {"youtube": {"formats": ["missing_pot"]}},
+    {"youtube": {"player_client": ["mweb"], "formats": ["missing_pot"]}},
+    {"youtube": {"player_client": ["web"], "formats": ["missing_pot"]}},
+    {"youtube": {"player_client": ["web_safari"], "formats": ["missing_pot"]}},
+    {"youtube": {"player_client": ["tv"], "formats": ["missing_pot"]}},
 )
 
 
@@ -521,18 +529,21 @@ def _download_youtube_media(url: str, ydl_opts_base: dict, yt_dlp) -> tuple[dict
                     continue
                 raise
     if last_format_error is not None:
-        formats = _probe_youtube_formats(url, ydl_opts_base, yt_dlp)
+        formats, probe_errors = _probe_youtube_formats(url, ydl_opts_base, yt_dlp)
         summary = _youtube_format_summary(formats)
+        error_suffix = f" probe errors: {_youtube_error_summary(probe_errors)}" if probe_errors else ""
         raise RuntimeError(
             "Requested YouTube format is not available after trying fallback selectors. "
-            f"yt-dlp visible formats: {summary}"
+            f"yt-dlp visible formats: {summary}.{error_suffix}"
         ) from last_format_error
     raise RuntimeError("No YouTube format selectors configured")
 
 
-def _probe_youtube_formats(url: str, ydl_opts_base: dict, yt_dlp) -> list[dict]:
+def _probe_youtube_formats(url: str, ydl_opts_base: dict, yt_dlp) -> tuple[list[dict], list[str]]:
+    errors = []
     for extractor_args in YOUTUBE_EXTRACTOR_ARG_VARIANTS:
         ydl_opts = dict(ydl_opts_base)
+        ydl_opts["ignore_no_formats_error"] = True
         if extractor_args:
             ydl_opts["extractor_args"] = extractor_args
         try:
@@ -540,10 +551,11 @@ def _probe_youtube_formats(url: str, ydl_opts_base: dict, yt_dlp) -> list[dict]:
                 info = ydl.extract_info(url, download=False)
             formats = info.get("formats") or []
             if formats:
-                return formats
-        except Exception:
+                return formats, errors
+        except Exception as exc:
+            errors.append(str(exc))
             continue
-    return []
+    return [], errors
 
 
 def _youtube_format_summary(formats: list[dict], limit: int = 12) -> str:
@@ -563,6 +575,20 @@ def _youtube_format_summary(formats: list[dict], limit: int = 12) -> str:
     if len(formats) > limit:
         parts.append(f"... +{len(formats) - limit} more")
     return ", ".join(parts)
+
+
+def _youtube_error_summary(errors: list[str], limit: int = 4) -> str:
+    if not errors:
+        return "none"
+    unique = []
+    for error in errors:
+        compact = re.sub(r"\s+", " ", error).strip()
+        if compact and compact not in unique:
+            unique.append(compact)
+    parts = unique[:limit]
+    if len(unique) > limit:
+        parts.append(f"... +{len(unique) - limit} more")
+    return " | ".join(parts)
 
 
 def _yt_dlp_downloaded_path(info: dict, ydl) -> Path:
