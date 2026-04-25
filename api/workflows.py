@@ -1,41 +1,24 @@
 from __future__ import annotations
 
-import base64
 import os
 import re
 import shutil
-import subprocess
 import uuid
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
+from api.youtube_download import (
+    YoutubeDownloadAttempt,
+    YoutubeDownloadError,
+    YoutubeDownloadResult,
+    download_youtube_wav,
+)
 from api.storage.config import R2Config
 from api.storage.factory import get_object_store, load_storage_env
 from api.storage.refs import FileRef, FileVersionRef, RunRef
 from api.storage.repository import StorageRepository
-
-YOUTUBE_FORMAT_SELECTORS = (
-    "234/233/140/251/bestaudio/best[acodec!=none]/best*[acodec!=none]",
-    "bestaudio/best[acodec!=none]/best*[acodec!=none]",
-    "best*[acodec!=none]/best*",
-    None,
-)
-YOUTUBE_EXTRACTOR_ARG_VARIANTS = (
-    None,
-    {"youtube": {"player_client": ["mweb"]}},
-    {"youtube": {"player_client": ["web"]}},
-    {"youtube": {"player_client": ["web_safari"]}},
-    {"youtube": {"player_client": ["tv"]}},
-    {"youtube": {"formats": ["missing_pot"]}},
-    {"youtube": {"player_client": ["mweb"], "formats": ["missing_pot"]}},
-    {"youtube": {"player_client": ["web"], "formats": ["missing_pot"]}},
-    {"youtube": {"player_client": ["web_safari"], "formats": ["missing_pot"]}},
-    {"youtube": {"player_client": ["tv"], "formats": ["missing_pot"]}},
-)
-YOUTUBE_NO_COOKIE_EXTRACTOR_ARG_VARIANTS = (
-    {"youtube": {"player_client": ["android_vr"]}},
-)
 
 
 class WorkflowRunner(Protocol):
@@ -132,7 +115,14 @@ class DefaultWorkflowRunner:
         try:
             import modal
             with _temporary_directory("eclypte_youtube_") as td:
-                title, wav_path = _download_youtube_wav(url, Path(td))
+                try:
+                    download = _download_youtube_wav(url, Path(td))
+                except YoutubeDownloadError as exc:
+                    _record_youtube_download_attempts(repo, user_id, run_id, exc.attempts)
+                    raise
+                _record_youtube_download_attempts(repo, user_id, run_id, download.attempts)
+                title = download.title
+                wav_path = download.wav_path
                 filename = f"{_safe_audio_basename(title)}.wav"
                 wav_bytes = wav_path.read_bytes()
 
@@ -478,193 +468,30 @@ def _synthesis_guidance(references) -> str:
     return "\n".join(lines)
 
 
-def _download_youtube_wav(url: str, workdir: Path) -> tuple[str, Path]:
-    from imageio_ffmpeg import get_ffmpeg_exe
-    import yt_dlp
+def _download_youtube_wav(url: str, workdir: Path) -> YoutubeDownloadResult:
+    return download_youtube_wav(url, workdir)
 
-    workdir.mkdir(parents=True, exist_ok=True)
-    ydl_opts_base = {
-        "outtmpl": str(workdir / "%(id)s.%(ext)s"),
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
-    }
-    cookiefile = _youtube_cookiefile(workdir)
-    if cookiefile is not None:
-        ydl_opts_base["cookiefile"] = str(cookiefile)
-    try:
-        info, downloaded = _download_youtube_media(url, ydl_opts_base, yt_dlp)
-    except Exception as exc:
-        if _is_youtube_cookie_auth_error(exc):
-            raise RuntimeError(_youtube_auth_error_message(cookiefile is not None)) from exc
-        raise
 
-    wav_path = workdir / f"{_safe_audio_basename(info.get('id') or 'youtube_audio')}.wav"
-    try:
-        subprocess.run(
-            [get_ffmpeg_exe(), "-y", "-i", str(downloaded), str(wav_path)],
-            check=True,
-            capture_output=True,
-            text=True,
+def _record_youtube_download_attempts(
+    repo: StorageRepository,
+    user_id: str,
+    run_id: str,
+    attempts: list[YoutubeDownloadAttempt],
+) -> None:
+    run_ref = RunRef(user_id=user_id, run_id=run_id)
+    for index, attempt in enumerate(attempts):
+        repo.append_run_event(
+            run_ref=run_ref,
+            event_type="youtube_download_attempt",
+            timestamp=_utc_now(),
+            event_id=f"evt_{index:04d}_{uuid.uuid4().hex[:12]}",
+            payload={
+                "step": "download_youtube_audio",
+                "provider": attempt.provider,
+                "status": attempt.status,
+                "detail": attempt.detail,
+            },
         )
-    except subprocess.CalledProcessError as exc:
-        detail = (exc.stderr or exc.stdout or str(exc)).strip()
-        raise RuntimeError(f"failed to convert YouTube audio to WAV: {detail}") from exc
-    return info.get("title") or "YouTube song", wav_path
-
-
-def _download_youtube_media(url: str, ydl_opts_base: dict, yt_dlp) -> tuple[dict, Path]:
-    last_format_error = None
-    for extractor_args in YOUTUBE_EXTRACTOR_ARG_VARIANTS:
-        for format_selector in YOUTUBE_FORMAT_SELECTORS:
-            ydl_opts = dict(ydl_opts_base)
-            if extractor_args:
-                ydl_opts["extractor_args"] = extractor_args
-            if format_selector:
-                ydl_opts["format"] = format_selector
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
-                    return info, _yt_dlp_downloaded_path(info, ydl)
-            except Exception as exc:
-                if _is_youtube_format_unavailable_error(exc):
-                    last_format_error = exc
-                    continue
-                raise
-    if last_format_error is not None:
-        if "cookiefile" in ydl_opts_base:
-            no_cookie_opts_base = dict(ydl_opts_base)
-            no_cookie_opts_base.pop("cookiefile", None)
-            for extractor_args in YOUTUBE_NO_COOKIE_EXTRACTOR_ARG_VARIANTS:
-                for format_selector in YOUTUBE_FORMAT_SELECTORS:
-                    ydl_opts = dict(no_cookie_opts_base)
-                    ydl_opts["extractor_args"] = extractor_args
-                    if format_selector:
-                        ydl_opts["format"] = format_selector
-                    try:
-                        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                            info = ydl.extract_info(url, download=True)
-                            return info, _yt_dlp_downloaded_path(info, ydl)
-                    except Exception as exc:
-                        if _is_youtube_format_unavailable_error(exc):
-                            last_format_error = exc
-                            continue
-                        if _is_youtube_cookie_auth_error(exc):
-                            continue
-                        raise
-        formats, probe_errors = _probe_youtube_formats(url, ydl_opts_base, yt_dlp)
-        summary = _youtube_format_summary(formats)
-        error_suffix = f" probe errors: {_youtube_error_summary(probe_errors)}" if probe_errors else ""
-        raise RuntimeError(
-            "Requested YouTube format is not available after trying fallback selectors. "
-            f"yt-dlp visible formats: {summary}.{error_suffix}"
-        ) from last_format_error
-    raise RuntimeError("No YouTube format selectors configured")
-
-
-def _probe_youtube_formats(url: str, ydl_opts_base: dict, yt_dlp) -> tuple[list[dict], list[str]]:
-    errors = []
-    for extractor_args in YOUTUBE_EXTRACTOR_ARG_VARIANTS:
-        ydl_opts = dict(ydl_opts_base)
-        ydl_opts["ignore_no_formats_error"] = True
-        if extractor_args:
-            ydl_opts["extractor_args"] = extractor_args
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-            formats = info.get("formats") or []
-            if formats:
-                return formats, errors
-        except Exception as exc:
-            errors.append(str(exc))
-            continue
-    return [], errors
-
-
-def _youtube_format_summary(formats: list[dict], limit: int = 12) -> str:
-    if not formats:
-        return "none"
-    parts = []
-    for fmt in formats[:limit]:
-        parts.append(
-            "{id}:{ext}:a={audio}:v={video}:p={protocol}".format(
-                id=fmt.get("format_id") or "?",
-                ext=fmt.get("ext") or "?",
-                audio=fmt.get("acodec") or "?",
-                video=fmt.get("vcodec") or "?",
-                protocol=fmt.get("protocol") or "?",
-            )
-        )
-    if len(formats) > limit:
-        parts.append(f"... +{len(formats) - limit} more")
-    return ", ".join(parts)
-
-
-def _youtube_error_summary(errors: list[str], limit: int = 4) -> str:
-    if not errors:
-        return "none"
-    unique = []
-    for error in errors:
-        compact = re.sub(r"\s+", " ", error).strip()
-        if compact and compact not in unique:
-            unique.append(compact)
-    parts = unique[:limit]
-    if len(unique) > limit:
-        parts.append(f"... +{len(unique) - limit} more")
-    return " | ".join(parts)
-
-
-def _yt_dlp_downloaded_path(info: dict, ydl) -> Path:
-    for download in info.get("requested_downloads") or []:
-        filepath = download.get("filepath")
-        if filepath:
-            return Path(filepath)
-    filepath = info.get("filepath")
-    if filepath:
-        return Path(filepath)
-    return Path(ydl.prepare_filename(info))
-
-
-def _is_youtube_format_unavailable_error(exc: Exception) -> bool:
-    return "requested format is not available" in str(exc).lower()
-
-
-def _youtube_cookiefile(workdir: Path) -> Path | None:
-    cookie_text = os.environ.get("ECLYPTE_YOUTUBE_COOKIES")
-    encoded = os.environ.get("ECLYPTE_YOUTUBE_COOKIES_B64")
-    if encoded:
-        try:
-            cookie_text = base64.b64decode(encoded, validate=True).decode("utf-8")
-        except Exception as exc:
-            raise RuntimeError("ECLYPTE_YOUTUBE_COOKIES_B64 is not valid base64 text") from exc
-    if not cookie_text:
-        return None
-    cookie_path = workdir / "youtube_cookies.txt"
-    cookie_path.write_text(cookie_text, encoding="utf-8", newline="\n")
-    return cookie_path
-
-
-def _is_youtube_cookie_auth_error(exc: Exception) -> bool:
-    message = str(exc).lower()
-    return (
-        "sign in to confirm" in message
-        or "not a bot" in message
-        or "--cookies" in message
-        or "cookies-from-browser" in message
-    )
-
-
-def _youtube_auth_error_message(has_cookiefile: bool) -> str:
-    if has_cookiefile:
-        return (
-            "YouTube rejected the configured cookies. Refresh the YouTube cookies export, "
-            "base64-encode it, and update ECLYPTE_YOUTUBE_COOKIES_B64 on the Railway API service."
-        )
-    return (
-        "YouTube is requiring authenticated cookies for this download. Export YouTube cookies "
-        "in Netscape cookies.txt format, base64-encode the file contents, and set "
-        "ECLYPTE_YOUTUBE_COOKIES_B64 on the Railway API service."
-    )
 
 
 @contextmanager
@@ -687,6 +514,10 @@ def _temporary_directory(prefix: str):
         ignore_cleanup_errors=True,
     ) as td:
         yield td
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _safe_audio_basename(title: str) -> str:
