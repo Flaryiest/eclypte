@@ -77,7 +77,12 @@ class R2ObjectStore:
         self._client.put_object(**payload)
 
     def get_bytes(self, key: str) -> bytes:
-        response = self._client.get_object(Bucket=self._config.bucket, Key=key)
+        try:
+            response = self._client.get_object(Bucket=self._config.bucket, Key=key)
+        except Exception as exc:
+            if _is_missing_object_error(exc):
+                raise KeyError(key) from exc
+            raise
         return response["Body"].read()
 
     def put_json(self, key: str, data: dict[str, Any]) -> None:
@@ -91,7 +96,12 @@ class R2ObjectStore:
         return json.loads(self.get_bytes(key).decode("utf-8"))
 
     def head(self, key: str) -> ObjectHead:
-        response = self._client.head_object(Bucket=self._config.bucket, Key=key)
+        try:
+            response = self._client.head_object(Bucket=self._config.bucket, Key=key)
+        except Exception as exc:
+            if _is_missing_object_error(exc):
+                raise KeyError(key) from exc
+            raise
         return ObjectHead(
             key=key,
             size_bytes=response["ContentLength"],
@@ -137,3 +147,13 @@ class R2ObjectStore:
             },
             ExpiresIn=expires_in,
         )
+
+
+def _is_missing_object_error(exc: Exception) -> bool:
+    response = getattr(exc, "response", None)
+    if not isinstance(response, dict):
+        return False
+    error = response.get("Error", {})
+    code = str(error.get("Code", ""))
+    status_code = response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+    return code in {"404", "NoSuchKey", "NotFound"} or status_code == 404
