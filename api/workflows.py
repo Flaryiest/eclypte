@@ -33,6 +33,9 @@ YOUTUBE_EXTRACTOR_ARG_VARIANTS = (
     {"youtube": {"player_client": ["web_safari"], "formats": ["missing_pot"]}},
     {"youtube": {"player_client": ["tv"], "formats": ["missing_pot"]}},
 )
+YOUTUBE_NO_COOKIE_EXTRACTOR_ARG_VARIANTS = (
+    {"youtube": {"player_client": ["android_vr"]}},
+)
 
 
 class WorkflowRunner(Protocol):
@@ -529,6 +532,26 @@ def _download_youtube_media(url: str, ydl_opts_base: dict, yt_dlp) -> tuple[dict
                     continue
                 raise
     if last_format_error is not None:
+        if "cookiefile" in ydl_opts_base:
+            no_cookie_opts_base = dict(ydl_opts_base)
+            no_cookie_opts_base.pop("cookiefile", None)
+            for extractor_args in YOUTUBE_NO_COOKIE_EXTRACTOR_ARG_VARIANTS:
+                for format_selector in YOUTUBE_FORMAT_SELECTORS:
+                    ydl_opts = dict(no_cookie_opts_base)
+                    ydl_opts["extractor_args"] = extractor_args
+                    if format_selector:
+                        ydl_opts["format"] = format_selector
+                    try:
+                        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                            info = ydl.extract_info(url, download=True)
+                            return info, _yt_dlp_downloaded_path(info, ydl)
+                    except Exception as exc:
+                        if _is_youtube_format_unavailable_error(exc):
+                            last_format_error = exc
+                            continue
+                        if _is_youtube_cookie_auth_error(exc):
+                            continue
+                        raise
         formats, probe_errors = _probe_youtube_formats(url, ydl_opts_base, yt_dlp)
         summary = _youtube_format_summary(formats)
         error_suffix = f" probe errors: {_youtube_error_summary(probe_errors)}" if probe_errors else ""

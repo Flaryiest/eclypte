@@ -418,6 +418,67 @@ def test_youtube_download_passes_cookiefile_from_base64_env(monkeypatch):
     assert title == "Cookie Song"
 
 
+def test_youtube_download_tries_android_vr_without_cookies_after_cookie_formats_fail(monkeypatch):
+    cookie_text = "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tsecret\n"
+    monkeypatch.setenv(
+        "ECLYPTE_YOUTUBE_COOKIES_B64",
+        base64.b64encode(cookie_text.encode("utf-8")).decode("ascii"),
+    )
+    monkeypatch.setenv("ECLYPTE_TEMP_DIR", str(Path.cwd() / ".pytest-tmp-youtube-worker"))
+    seen_options = []
+
+    class FakeYoutubeDL:
+        def __init__(self, options):
+            self.options = options
+            seen_options.append(options)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def extract_info(self, _url, download):
+            assert download is True
+            if self.options.get("cookiefile"):
+                raise RuntimeError("Requested format is not available")
+            if self.options.get("extractor_args") != {"youtube": {"player_client": ["android_vr"]}}:
+                raise RuntimeError("Requested format is not available")
+            audio_path = Path(self.options["outtmpl"].replace("%(id)s", "abc123").replace("%(ext)s", "m4a"))
+            audio_path.write_bytes(b"source-audio")
+            return {
+                "id": "abc123",
+                "title": "Android VR Song",
+                "requested_downloads": [{"filepath": str(audio_path)}],
+            }
+
+    monkeypatch.setitem(sys.modules, "yt_dlp", SimpleNamespace(YoutubeDL=FakeYoutubeDL))
+    monkeypatch.setitem(
+        sys.modules,
+        "imageio_ffmpeg",
+        SimpleNamespace(get_ffmpeg_exe=lambda: "fake-ffmpeg"),
+    )
+    monkeypatch.setattr(
+        workflows.subprocess,
+        "run",
+        lambda command, **_kwargs: Path(command[-1]).write_bytes(b"wav-bytes"),
+    )
+
+    with workflows._temporary_directory("eclypte_youtube_") as td:
+        title, wav_path = workflows._download_youtube_wav(
+            "https://www.youtube.com/watch?v=abc123",
+            Path(td),
+        )
+        wav_bytes = wav_path.read_bytes()
+
+    assert title == "Android VR Song"
+    assert wav_bytes == b"wav-bytes"
+    assert any(options.get("cookiefile") for options in seen_options)
+    assert {"youtube": {"player_client": ["android_vr"]}} in [
+        options.get("extractor_args") for options in seen_options if not options.get("cookiefile")
+    ]
+
+
 def test_youtube_download_auth_error_mentions_cookie_secret(monkeypatch):
     monkeypatch.delenv("ECLYPTE_YOUTUBE_COOKIES_B64", raising=False)
     monkeypatch.delenv("ECLYPTE_YOUTUBE_COOKIES", raising=False)
