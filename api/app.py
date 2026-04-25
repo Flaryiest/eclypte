@@ -8,7 +8,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from api.storage.factory import get_default_user_id, get_object_store
-from api.storage.models import FileManifest, FileVersionMeta, RunEvent, RunManifest
+from api.prototyping.edit.synthesis.agent import SYSTEM_PROMPT as DEFAULT_SYNTHESIS_PROMPT
+from api.storage.models import (
+    ArtifactKind,
+    FileManifest,
+    FileVersionMeta,
+    RunEvent,
+    RunManifest,
+    RunStatus,
+    SynthesisPromptState,
+    SynthesisReferenceRecord,
+)
 from api.storage.r2_client import ObjectStore
 from api.storage.refs import FileRef, FileVersionRef, RunRef
 from api.storage.repository import StorageRepository
@@ -73,6 +83,34 @@ class RenderRequest(BaseModel):
     timeline: FileVersionInput
     audio: FileVersionInput
     source_video: FileVersionInput
+
+
+class AssetSummary(BaseModel):
+    file_id: str
+    kind: ArtifactKind
+    display_name: str
+    current_version_id: str | None
+    created_at: str
+    updated_at: str
+    source_run_id: str | None
+    tags: list[str]
+    current_version: FileVersionMeta | None
+    latest_run: RunManifest | None
+    analysis: FileVersionInput | None
+
+
+class SynthesisReferencesRequest(BaseModel):
+    urls: list[str] = Field(min_length=1)
+    likes: int = Field(default=0, ge=0)
+    views: int = Field(default=0, ge=0)
+
+
+class SynthesisPromptVersionRequest(BaseModel):
+    prompt_text: str = Field(min_length=1)
+    label: str = Field(default="Manual edit", min_length=1)
+    generated_guidance: str = ""
+    source_reference_ids: list[str] = Field(default_factory=list)
+    activate: bool = True
 
 
 def parse_cors_origins(value: str | None = None) -> list[str]:
@@ -160,6 +198,84 @@ def create_app(
         )
         return run
 
+    def file_version_input(file_id: str | None, version_id: str | None) -> FileVersionInput | None:
+        if not file_id or not version_id:
+            return None
+        return FileVersionInput(file_id=file_id, version_id=version_id)
+
+    def analysis_for_asset(
+        manifest: FileManifest,
+        runs: list[RunManifest],
+    ) -> tuple[FileVersionInput | None, RunManifest | None]:
+        if not manifest.current_version_id:
+            return None, None
+        if manifest.kind == "song_audio":
+            workflow_type = "music_analysis"
+            input_key = "audio_version_id"
+            file_key = "music_analysis_file_id"
+            version_key = "music_analysis_version_id"
+        elif manifest.kind == "source_video":
+            workflow_type = "video_analysis"
+            input_key = "source_video_version_id"
+            file_key = "video_analysis_file_id"
+            version_key = "video_analysis_version_id"
+        else:
+            return None, None
+        matching = [
+            run
+            for run in runs
+            if run.workflow_type == workflow_type
+            and run.inputs.get(input_key) == manifest.current_version_id
+        ]
+        if not matching:
+            return None, None
+        latest = matching[0]
+        if latest.status != "completed":
+            return None, latest
+        return file_version_input(
+            latest.outputs.get(file_key),
+            latest.outputs.get(version_key),
+        ), latest
+
+    def summarize_asset(
+        repo: StorageRepository,
+        manifest: FileManifest,
+        runs: list[RunManifest],
+        uid: str,
+    ) -> AssetSummary:
+        current_version = None
+        if manifest.current_version_id:
+            try:
+                current_version = repo.load_file_version_meta(
+                    FileVersionRef(
+                        user_id=uid,
+                        file_id=manifest.file_id,
+                        version_id=manifest.current_version_id,
+                    )
+                )
+            except KeyError:
+                current_version = None
+        analysis, analysis_run = analysis_for_asset(manifest, runs)
+        latest_run = analysis_run
+        if latest_run is None and manifest.source_run_id:
+            latest_run = next(
+                (run for run in runs if run.run_id == manifest.source_run_id),
+                None,
+            )
+        return AssetSummary(
+            file_id=manifest.file_id,
+            kind=manifest.kind,
+            display_name=manifest.display_name,
+            current_version_id=manifest.current_version_id,
+            created_at=manifest.created_at,
+            updated_at=manifest.updated_at,
+            source_run_id=manifest.source_run_id,
+            tags=manifest.tags,
+            current_version=current_version,
+            latest_run=latest_run,
+            analysis=analysis,
+        )
+
     @app.get("/healthz")
     def healthz() -> dict[str, bool]:
         return {"ok": True}
@@ -228,6 +344,18 @@ def create_app(
             return repo.load_file_manifest(FileRef(user_id=uid, file_id=file_id))
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="file not found") from exc
+
+    @app.get("/v1/assets", response_model=list[AssetSummary])
+    def list_assets(
+        kind: ArtifactKind | None = None,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> list[AssetSummary]:
+        manifests = repo.list_file_manifests(uid)
+        if kind is not None:
+            manifests = [manifest for manifest in manifests if manifest.kind == kind]
+        runs = repo.list_run_manifests(uid)
+        return [summarize_asset(repo, manifest, runs, uid) for manifest in manifests]
 
     @app.get("/v1/files/{file_id}/versions/{version_id}", response_model=FileVersionMeta)
     def get_file_version(
@@ -378,6 +506,20 @@ def create_app(
         )
         return run
 
+    @app.get("/v1/runs", response_model=list[RunManifest])
+    def list_runs(
+        workflow_type: str | None = None,
+        status: RunStatus | None = None,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> list[RunManifest]:
+        runs = repo.list_run_manifests(uid)
+        if workflow_type is not None:
+            runs = [run for run in runs if run.workflow_type == workflow_type]
+        if status is not None:
+            runs = [run for run in runs if run.status == status]
+        return runs
+
     @app.get("/v1/runs/{run_id}", response_model=RunManifest)
     def get_run(
         run_id: str,
@@ -396,5 +538,117 @@ def create_app(
         uid: str = Depends(user_id),
     ) -> list[RunEvent]:
         return repo.list_run_events(RunRef(user_id=uid, run_id=run_id))
+
+    @app.post(
+        "/v1/synthesis/references",
+        response_model=list[SynthesisReferenceRecord],
+        status_code=201,
+    )
+    def create_synthesis_references(
+        request: SynthesisReferencesRequest,
+        background_tasks: BackgroundTasks,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> list[SynthesisReferenceRecord]:
+        records = [
+            repo.create_synthesis_reference(
+                user_id=uid,
+                url=url,
+                likes=request.likes,
+                views=request.views,
+            )
+            for url in request.urls
+        ]
+        for record in records:
+            background_tasks.add_task(
+                runner.run_synthesis_reference_ingest,
+                user_id=uid,
+                reference_id=record.reference_id,
+                url=record.url,
+                likes=record.likes,
+                views=record.views,
+            )
+        return records
+
+    @app.get("/v1/synthesis/references", response_model=list[SynthesisReferenceRecord])
+    def list_synthesis_references(
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> list[SynthesisReferenceRecord]:
+        return repo.list_synthesis_references(uid)
+
+    @app.post("/v1/synthesis/consolidations", response_model=RunManifest, status_code=202)
+    def create_synthesis_consolidation(
+        background_tasks: BackgroundTasks,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> RunManifest:
+        run = create_workflow_run(
+            repo,
+            uid,
+            "synthesis_consolidation",
+            {},
+            ["consolidate_references", "publish_prompt"],
+        )
+        background_tasks.add_task(
+            runner.run_synthesis_consolidation,
+            user_id=uid,
+            run_id=run.run_id,
+        )
+        return run
+
+    @app.get("/v1/synthesis/prompt", response_model=SynthesisPromptState)
+    def get_synthesis_prompt(
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> SynthesisPromptState:
+        return repo.get_synthesis_prompt_state(
+            user_id=uid,
+            default_prompt_text=DEFAULT_SYNTHESIS_PROMPT.strip(),
+        )
+
+    @app.post(
+        "/v1/synthesis/prompt/versions",
+        response_model=SynthesisPromptState,
+        status_code=201,
+    )
+    def create_synthesis_prompt_version(
+        request: SynthesisPromptVersionRequest,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> SynthesisPromptState:
+        repo.create_synthesis_prompt_version(
+            user_id=uid,
+            label=request.label,
+            prompt_text=request.prompt_text,
+            generated_guidance=request.generated_guidance,
+            source_reference_ids=request.source_reference_ids,
+            activate=request.activate,
+        )
+        return repo.get_synthesis_prompt_state(
+            user_id=uid,
+            default_prompt_text=DEFAULT_SYNTHESIS_PROMPT.strip(),
+        )
+
+    @app.post(
+        "/v1/synthesis/prompt/versions/{version_id}/activate",
+        response_model=SynthesisPromptState,
+    )
+    def activate_synthesis_prompt_version(
+        version_id: str,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> SynthesisPromptState:
+        state = repo.get_synthesis_prompt_state(
+            user_id=uid,
+            default_prompt_text=DEFAULT_SYNTHESIS_PROMPT.strip(),
+        )
+        if not any(version.version_id == version_id for version in state.versions):
+            raise HTTPException(status_code=404, detail="prompt version not found")
+        repo.activate_synthesis_prompt_version(user_id=uid, version_id=version_id)
+        return repo.get_synthesis_prompt_state(
+            user_id=uid,
+            default_prompt_text=DEFAULT_SYNTHESIS_PROMPT.strip(),
+        )
 
     return app

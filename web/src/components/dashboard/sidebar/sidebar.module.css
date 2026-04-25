@@ -98,12 +98,12 @@
 	display: flex;
 	align-items: center;
 	gap: 2rem;
+	font-family: var(--font-neue), sans-serif;
+	text-decoration: none;
 	text-align: left;
 	border-radius: 4px;
 	position: relative;
 	transition: all 160ms ease;
-
-
 }
 
 .navItem:hover {
@@ -151,7 +151,7 @@
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
-    font-family: var(--font-neue);
+	font-family: var(--font-neue), sans-serif;
 }
 
 .footer {
@@ -161,7 +161,7 @@
 	flex-direction: column;
 	align-items: stretch;
 	gap: 0.8rem;
-    padding-bottom: 3rem;
+	padding-bottom: 3rem;
 }
 
 .statusRow {
@@ -197,7 +197,7 @@
 	align-items: center;
 	gap: 0.58rem;
 	transition: all 160ms ease;
-    font-family: var(--font-neue);
+	font-family: var(--font-neue), sans-serif;
 }
 
 .logoutButton:hover {
@@ -245,8 +245,9 @@
 	padding-left: 0.35rem;
 	padding-right: 0.35rem;
 }
+
 .minimized .label {
-    display: none;
+	display: none;
 }
 
 .minimized .footer {

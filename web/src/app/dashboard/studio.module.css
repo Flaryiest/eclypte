@@ -1,0 +1,499 @@
+.page {
+	display: flex;
+	flex-direction: column;
+	gap: 1.15rem;
+	color: rgb(244, 244, 244);
+}
+
+.header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 1rem;
+	padding: 0.2rem 0 0.6rem;
+}
+
+.eyebrow {
+	margin: 0 0 0.35rem;
+	color: #f0bf68;
+	font-size: 0.76rem;
+	font-weight: 700;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+}
+
+.title {
+	margin: 0;
+	font-family: var(--font-eiko), var(--font-neue), sans-serif;
+	font-size: clamp(2rem, 4vw, 3.4rem);
+	font-weight: 500;
+	line-height: 0.95;
+	letter-spacing: 0;
+}
+
+.subtitle {
+	margin: 0.6rem 0 0;
+	max-width: 700px;
+	color: rgb(177, 177, 177);
+	font-size: 0.98rem;
+	line-height: 1.55;
+}
+
+.toolbar {
+	display: flex;
+	align-items: center;
+	gap: 0.65rem;
+	flex-wrap: wrap;
+}
+
+.grid {
+	display: grid;
+	grid-template-columns: repeat(12, minmax(0, 1fr));
+	gap: 1rem;
+}
+
+.panel,
+.assetCard,
+.runCard,
+.listCard,
+.settingCard {
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 8px;
+	background:
+		linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025)),
+		rgba(15, 15, 15, 0.92);
+	box-shadow: 0 18px 48px rgba(0, 0, 0, 0.24);
+}
+
+.panel {
+	padding: 1rem;
+}
+
+.wide {
+	grid-column: span 8;
+}
+
+.side {
+	grid-column: span 4;
+}
+
+.full {
+	grid-column: 1 / -1;
+}
+
+.panelHeader {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 0.8rem;
+	margin-bottom: 0.95rem;
+}
+
+.panelHeader h2,
+.assetCard h3,
+.runCard h3,
+.listCard h3 {
+	margin: 0;
+	font-size: 1rem;
+	font-weight: 700;
+	letter-spacing: 0;
+}
+
+.panelHeader p,
+.muted,
+.smallText {
+	margin: 0.25rem 0 0;
+	color: rgb(160, 160, 160);
+	font-size: 0.84rem;
+	line-height: 1.45;
+}
+
+.primaryButton,
+.secondaryButton,
+.ghostButton,
+.dangerButton,
+.select,
+.input,
+.textarea {
+	border-radius: 8px;
+	font-family: var(--font-neue), sans-serif;
+	font-size: 0.88rem;
+}
+
+.primaryButton,
+.secondaryButton,
+.ghostButton,
+.dangerButton {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.45rem;
+	min-height: 38px;
+	padding: 0.58rem 0.85rem;
+	border: 1px solid transparent;
+	cursor: pointer;
+	transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, opacity 160ms ease;
+}
+
+.primaryButton {
+	background: #f0bf68;
+	color: #111;
+	font-weight: 800;
+}
+
+.primaryButton:hover {
+	background: #ffd27e;
+}
+
+.secondaryButton {
+	background: rgba(255, 255, 255, 0.08);
+	border-color: rgba(255, 255, 255, 0.12);
+	color: #fff;
+}
+
+.secondaryButton:hover,
+.ghostButton:hover {
+	background: rgba(255, 255, 255, 0.13);
+	border-color: rgba(255, 255, 255, 0.2);
+}
+
+.ghostButton {
+	background: transparent;
+	border-color: rgba(255, 255, 255, 0.1);
+	color: rgb(220, 220, 220);
+}
+
+.dangerButton {
+	background: rgba(255, 93, 93, 0.12);
+	border-color: rgba(255, 93, 93, 0.24);
+	color: #ffb6b6;
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled,
+.ghostButton:disabled,
+.dangerButton:disabled {
+	cursor: not-allowed;
+	opacity: 0.45;
+}
+
+.select,
+.input,
+.textarea {
+	width: 100%;
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	background: rgba(0, 0, 0, 0.28);
+	color: #fff;
+	outline: none;
+}
+
+.select,
+.input {
+	min-height: 42px;
+	padding: 0 0.75rem;
+}
+
+.textarea {
+	min-height: 170px;
+	padding: 0.75rem;
+	resize: vertical;
+	line-height: 1.45;
+}
+
+.promptTextarea {
+	min-height: 420px;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+	font-size: 0.82rem;
+}
+
+.select:focus,
+.input:focus,
+.textarea:focus,
+.filePicker:focus-within {
+	border-color: rgba(240, 191, 104, 0.72);
+	box-shadow: 0 0 0 3px rgba(240, 191, 104, 0.12);
+}
+
+.fieldStack {
+	display: flex;
+	flex-direction: column;
+	gap: 0.8rem;
+}
+
+.fieldLabel {
+	display: flex;
+	flex-direction: column;
+	gap: 0.42rem;
+	color: rgb(224, 224, 224);
+	font-size: 0.84rem;
+	font-weight: 700;
+}
+
+.filePicker {
+	display: flex;
+	flex-direction: column;
+	gap: 0.45rem;
+	min-height: 132px;
+	padding: 1rem;
+	border: 1px dashed rgba(255, 255, 255, 0.18);
+	border-radius: 8px;
+	background: rgba(255, 255, 255, 0.035);
+	cursor: pointer;
+}
+
+.filePicker input {
+	display: none;
+}
+
+.fileName {
+	color: #fff;
+	font-size: 0.95rem;
+	font-weight: 700;
+	overflow-wrap: anywhere;
+}
+
+.errorBanner,
+.successBanner {
+	border-radius: 8px;
+	padding: 0.75rem 0.9rem;
+	font-size: 0.86rem;
+	line-height: 1.45;
+}
+
+.errorBanner {
+	border: 1px solid rgba(255, 93, 93, 0.28);
+	background: rgba(255, 93, 93, 0.1);
+	color: #ffc6c6;
+}
+
+.successBanner {
+	border: 1px solid rgba(83, 215, 144, 0.28);
+	background: rgba(83, 215, 144, 0.1);
+	color: #c5f6d9;
+}
+
+.stageList,
+.assetList,
+.runList,
+.versionList,
+.referenceList {
+	display: flex;
+	flex-direction: column;
+	gap: 0.7rem;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.stageItem {
+	display: grid;
+	grid-template-columns: 18px 1fr;
+	gap: 0.65rem;
+	align-items: start;
+	padding: 0.72rem;
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 8px;
+	background: rgba(255, 255, 255, 0.035);
+}
+
+.stageDot {
+	width: 10px;
+	height: 10px;
+	margin-top: 0.25rem;
+	border-radius: 999px;
+	background: rgb(115, 115, 115);
+}
+
+.activeStage .stageDot,
+.analyzing .badgeDot,
+.running .badgeDot,
+.queued .badgeDot {
+	background: #72b8ff;
+	box-shadow: 0 0 0 4px rgba(114, 184, 255, 0.14);
+}
+
+.completeStage .stageDot,
+.ready .badgeDot,
+.completed .badgeDot {
+	background: #65dc96;
+	box-shadow: 0 0 0 4px rgba(101, 220, 150, 0.14);
+}
+
+.failedStage .stageDot,
+.failed .badgeDot {
+	background: #ff7777;
+	box-shadow: 0 0 0 4px rgba(255, 119, 119, 0.14);
+}
+
+.uploaded .badgeDot,
+.created .badgeDot,
+.blocked .badgeDot {
+	background: #f0bf68;
+	box-shadow: 0 0 0 4px rgba(240, 191, 104, 0.12);
+}
+
+.stageLabel {
+	display: block;
+	color: #fff;
+	font-size: 0.88rem;
+	font-weight: 800;
+}
+
+.stageDetail {
+	display: block;
+	margin-top: 0.2rem;
+	color: rgb(160, 160, 160);
+	font-size: 0.8rem;
+}
+
+.assetGrid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+	gap: 0.85rem;
+}
+
+.assetCard,
+.runCard {
+	padding: 0.9rem;
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	min-width: 0;
+}
+
+.listCard {
+	padding: 0.85rem;
+	display: flex;
+	flex-direction: column;
+	gap: 0.7rem;
+	min-width: 0;
+}
+
+.settingsGrid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+	gap: 0.85rem;
+}
+
+.settingCard {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.7rem;
+	padding: 0.85rem;
+	color: rgb(230, 230, 230);
+}
+
+.settingLabel {
+	display: block;
+	margin-bottom: 0.3rem;
+	color: rgb(150, 150, 150);
+	font-size: 0.74rem;
+	font-weight: 800;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+.monoText {
+	display: block;
+	color: rgb(238, 238, 238);
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+	font-size: 0.78rem;
+	overflow-wrap: anywhere;
+}
+
+.cardTop {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 0.7rem;
+}
+
+.badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 999px;
+	padding: 0.24rem 0.5rem;
+	color: rgb(215, 215, 215);
+	background: rgba(255, 255, 255, 0.055);
+	font-size: 0.72rem;
+	font-weight: 800;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	white-space: nowrap;
+}
+
+.badgeDot {
+	width: 7px;
+	height: 7px;
+	border-radius: 999px;
+	background: rgb(130, 130, 130);
+}
+
+.cardActions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.45rem;
+}
+
+.previewMedia {
+	width: 100%;
+	max-height: 420px;
+	border-radius: 8px;
+	background: #050505;
+	border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.codeBlock {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	max-height: 280px;
+	overflow: auto;
+	padding: 0.8rem;
+	border-radius: 8px;
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	background: rgba(0, 0, 0, 0.28);
+	color: rgb(225, 225, 225);
+	font-size: 0.78rem;
+	line-height: 1.45;
+}
+
+.emptyState {
+	padding: 1.1rem;
+	border: 1px dashed rgba(255, 255, 255, 0.14);
+	border-radius: 8px;
+	color: rgb(170, 170, 170);
+	text-align: center;
+}
+
+@media (max-width: 980px) {
+	.header {
+		flex-direction: column;
+	}
+
+	.wide,
+	.side {
+		grid-column: 1 / -1;
+	}
+}
+
+@media (max-width: 640px) {
+	.page {
+		gap: 0.9rem;
+	}
+
+.panel,
+.assetCard,
+.runCard,
+.listCard,
+.settingCard {
+		padding: 0.85rem;
+	}
+
+	.toolbar,
+	.cardActions {
+		align-items: stretch;
+		flex-direction: column;
+	}
+}

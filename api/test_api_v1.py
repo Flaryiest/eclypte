@@ -20,6 +20,12 @@ class RecordingWorkflowRunner:
     def run_render(self, **kwargs):
         self.calls.append(("render", kwargs))
 
+    def run_synthesis_reference_ingest(self, **kwargs):
+        self.calls.append(("synthesis_reference", kwargs))
+
+    def run_synthesis_consolidation(self, **kwargs):
+        self.calls.append(("synthesis_consolidation", kwargs))
+
 
 def build_client():
     from fastapi.testclient import TestClient
@@ -221,6 +227,154 @@ def test_workflow_endpoints_create_runs_and_schedule_background_tasks():
     )
     assert run.json()["status"] == "running"
     assert events.json()[0]["event_type"] == "run_created"
+
+
+def test_assets_list_returns_current_version_metadata_and_kind_filter():
+    client, store, _ = build_client()
+    repo = StorageRepository(store)
+    audio = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_audio",
+        kind="song_audio",
+        filename="song.wav",
+        body=b"song",
+        content_type="audio/wav",
+    )
+    publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_video",
+        kind="source_video",
+        filename="source.mp4",
+        body=b"video",
+        content_type="video/mp4",
+    )
+
+    response = client.get(
+        "/v1/assets?kind=song_audio",
+        headers={"X-User-Id": "user_123"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "file_id": "file_audio",
+            "kind": "song_audio",
+            "display_name": "song.wav",
+            "current_version_id": audio["version_id"],
+            "created_at": response.json()[0]["created_at"],
+            "updated_at": response.json()[0]["updated_at"],
+            "source_run_id": None,
+            "tags": [],
+            "current_version": {
+                "version_id": audio["version_id"],
+                "file_id": "file_audio",
+                "owner_user_id": "user_123",
+                "content_type": "audio/wav",
+                "size_bytes": 4,
+                "sha256": response.json()[0]["current_version"]["sha256"],
+                "original_filename": "song.wav",
+                "created_at": response.json()[0]["current_version"]["created_at"],
+                "created_by_step": "test",
+                "storage_key": response.json()[0]["current_version"]["storage_key"],
+                "derived_from": response.json()[0]["current_version"]["derived_from"],
+            },
+            "latest_run": None,
+            "analysis": None,
+        }
+    ]
+
+
+def test_runs_list_supports_workflow_and_status_filters():
+    client, store, _ = build_client()
+    repo = StorageRepository(store)
+    music = repo.create_run(
+        user_id="user_123",
+        workflow_type="music_analysis",
+        inputs={"audio_version_id": "ver_audio"},
+        steps=["analyze_music", "publish_analysis"],
+    )
+    repo.create_run(
+        user_id="user_123",
+        workflow_type="render",
+        inputs={"timeline_version_id": "ver_timeline"},
+        steps=["render", "publish_render"],
+    )
+
+    response = client.get(
+        "/v1/runs?workflow_type=music_analysis&status=running",
+        headers={"X-User-Id": "user_123"},
+    )
+
+    assert response.status_code == 200
+    assert [run["run_id"] for run in response.json()] == [music.run_id]
+
+
+def test_synthesis_reference_submission_persists_queue_records_and_schedules_ingest():
+    client, _, runner = build_client()
+
+    response = client.post(
+        "/v1/synthesis/references",
+        headers={"X-User-Id": "user_123"},
+        json={"urls": ["https://www.instagram.com/reel/example/"]},
+    )
+    listed = client.get(
+        "/v1/synthesis/references",
+        headers={"X-User-Id": "user_123"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()[0]["url"] == "https://www.instagram.com/reel/example/"
+    assert response.json()[0]["status"] == "queued"
+    assert listed.json()[0]["reference_id"] == response.json()[0]["reference_id"]
+    assert runner.calls[-1][0] == "synthesis_reference"
+    assert runner.calls[-1][1]["reference_id"] == response.json()[0]["reference_id"]
+
+
+def test_synthesis_prompt_versions_can_be_saved_and_activated():
+    client, _, _ = build_client()
+
+    default_state = client.get(
+        "/v1/synthesis/prompt",
+        headers={"X-User-Id": "user_123"},
+    )
+    saved = client.post(
+        "/v1/synthesis/prompt/versions",
+        headers={"X-User-Id": "user_123"},
+        json={
+            "label": "Sharper hook",
+            "prompt_text": "Open with a fast, clear hook.",
+            "source_reference_ids": ["ref_001"],
+        },
+    )
+    version_id = saved.json()["active_version_id"]
+    reverted = client.post(
+        f"/v1/synthesis/prompt/versions/{default_state.json()['active_version_id']}/activate",
+        headers={"X-User-Id": "user_123"},
+    )
+
+    assert default_state.status_code == 200
+    assert default_state.json()["active_version_id"] == "default"
+    assert saved.status_code == 201
+    assert saved.json()["active_prompt"]["version_id"] == version_id
+    assert saved.json()["active_prompt"]["prompt_text"] == "Open with a fast, clear hook."
+    assert reverted.status_code == 200
+    assert reverted.json()["active_version_id"] == "default"
+
+
+def test_synthesis_consolidation_creates_run_and_schedules_prompt_update():
+    client, _, runner = build_client()
+
+    response = client.post(
+        "/v1/synthesis/consolidations",
+        headers={"X-User-Id": "user_123"},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["workflow_type"] == "synthesis_consolidation"
+    assert runner.calls[-1][0] == "synthesis_consolidation"
+    assert runner.calls[-1][1]["run_id"] == response.json()["run_id"]
 
 
 def test_missing_storage_configuration_returns_503(monkeypatch):

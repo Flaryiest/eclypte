@@ -4,7 +4,16 @@ import json
 import uuid
 from typing import Any
 
-from .keys import run_event_key, run_manifest_key, upload_reservation_key
+from .keys import (
+    run_event_key,
+    run_manifest_key,
+    synthesis_prompt_state_key,
+    synthesis_prompt_version_key,
+    synthesis_prompt_version_prefix,
+    synthesis_reference_key,
+    synthesis_reference_prefix,
+    upload_reservation_key,
+)
 from .models import (
     ArtifactKind,
     DerivedFrom,
@@ -14,6 +23,11 @@ from .models import (
     RunManifest,
     RunStatus,
     RunStep,
+    StoredSynthesisPromptState,
+    SynthesisPromptState,
+    SynthesisPromptVersion,
+    SynthesisReferenceRecord,
+    SynthesisReferenceStatus,
     UploadReservation,
 )
 from .r2_client import ObjectStore
@@ -60,6 +74,19 @@ class StorageRepository:
     def load_file_manifest(self, file_ref: FileRef) -> FileManifest:
         return FileManifest.model_validate(self._store.get_json(file_ref.manifest_key))
 
+    def list_file_manifests(self, user_id: str) -> list[FileManifest]:
+        prefix = f"users/{user_id}/files/"
+        keys = [
+            key
+            for key in self._store.list_keys(prefix)
+            if key.endswith("/manifest.json")
+        ]
+        manifests = [
+            FileManifest.model_validate(self._store.get_json(key))
+            for key in keys
+        ]
+        return sorted(manifests, key=lambda item: item.updated_at, reverse=True)
+
     def save_run_manifest(self, manifest: RunManifest) -> RunManifest:
         key = run_manifest_key(user_id=manifest.owner_user_id, run_id=manifest.run_id)
         self._store.put_json(key, manifest.model_dump(mode="json"))
@@ -67,6 +94,19 @@ class StorageRepository:
 
     def load_run_manifest(self, run_ref: RunRef) -> RunManifest:
         return RunManifest.model_validate(self._store.get_json(run_ref.manifest_key))
+
+    def list_run_manifests(self, user_id: str) -> list[RunManifest]:
+        prefix = f"users/{user_id}/runs/"
+        keys = [
+            key
+            for key in self._store.list_keys(prefix)
+            if key.endswith("/manifest.json")
+        ]
+        runs = [
+            RunManifest.model_validate(self._store.get_json(key))
+            for key in keys
+        ]
+        return sorted(runs, key=lambda item: item.updated_at, reverse=True)
 
     def publish_bytes(
         self,
@@ -426,3 +466,201 @@ class StorageRepository:
             }
         )
         return self.save_run_manifest(updated)
+
+    def create_synthesis_reference(
+        self,
+        *,
+        user_id: str,
+        url: str,
+        likes: int = 0,
+        views: int = 0,
+    ) -> SynthesisReferenceRecord:
+        now = _utc_now()
+        record = SynthesisReferenceRecord(
+            reference_id=f"ref_{uuid.uuid4().hex[:12]}",
+            owner_user_id=user_id,
+            url=url,
+            status="queued",
+            likes=likes,
+            views=views,
+            created_at=now,
+            updated_at=now,
+        )
+        return self.save_synthesis_reference(record)
+
+    def save_synthesis_reference(
+        self,
+        record: SynthesisReferenceRecord,
+    ) -> SynthesisReferenceRecord:
+        self._store.put_json(
+            synthesis_reference_key(
+                user_id=record.owner_user_id,
+                reference_id=record.reference_id,
+            ),
+            record.model_dump(mode="json"),
+        )
+        return record
+
+    def load_synthesis_reference(
+        self,
+        *,
+        user_id: str,
+        reference_id: str,
+    ) -> SynthesisReferenceRecord:
+        return SynthesisReferenceRecord.model_validate(
+            self._store.get_json(
+                synthesis_reference_key(user_id=user_id, reference_id=reference_id)
+            )
+        )
+
+    def update_synthesis_reference(
+        self,
+        *,
+        user_id: str,
+        reference_id: str,
+        status: SynthesisReferenceStatus,
+        title: str | None = None,
+        author: str | None = None,
+        duration_sec: float | None = None,
+        metrics: dict[str, Any] | None = None,
+        last_error: str | None = None,
+    ) -> SynthesisReferenceRecord:
+        current = self.load_synthesis_reference(
+            user_id=user_id,
+            reference_id=reference_id,
+        )
+        update: dict[str, Any] = {
+            "status": status,
+            "updated_at": _utc_now(),
+            "last_error": last_error,
+        }
+        if title is not None:
+            update["title"] = title
+        if author is not None:
+            update["author"] = author
+        if duration_sec is not None:
+            update["duration_sec"] = duration_sec
+        if metrics is not None:
+            update["metrics"] = metrics
+        return self.save_synthesis_reference(current.model_copy(update=update))
+
+    def list_synthesis_references(self, user_id: str) -> list[SynthesisReferenceRecord]:
+        keys = self._store.list_keys(synthesis_reference_prefix(user_id=user_id))
+        records = [
+            SynthesisReferenceRecord.model_validate(self._store.get_json(key))
+            for key in keys
+        ]
+        return sorted(records, key=lambda item: item.updated_at, reverse=True)
+
+    def default_synthesis_prompt_version(
+        self,
+        *,
+        user_id: str,
+        prompt_text: str,
+    ) -> SynthesisPromptVersion:
+        return SynthesisPromptVersion(
+            version_id="default",
+            owner_user_id=user_id,
+            label="Baseline prompt",
+            prompt_text=prompt_text,
+            generated_guidance="",
+            source_reference_ids=[],
+            created_at="system",
+        )
+
+    def list_synthesis_prompt_versions(
+        self,
+        *,
+        user_id: str,
+        default_prompt_text: str,
+    ) -> list[SynthesisPromptVersion]:
+        versions = [
+            self.default_synthesis_prompt_version(
+                user_id=user_id,
+                prompt_text=default_prompt_text,
+            )
+        ]
+        keys = self._store.list_keys(synthesis_prompt_version_prefix(user_id=user_id))
+        versions.extend(
+            SynthesisPromptVersion.model_validate(self._store.get_json(key))
+            for key in keys
+        )
+        return sorted(
+            versions,
+            key=lambda item: "0000" if item.version_id == "default" else item.created_at,
+            reverse=True,
+        )
+
+    def get_synthesis_prompt_state(
+        self,
+        *,
+        user_id: str,
+        default_prompt_text: str,
+    ) -> SynthesisPromptState:
+        versions = self.list_synthesis_prompt_versions(
+            user_id=user_id,
+            default_prompt_text=default_prompt_text,
+        )
+        try:
+            stored = StoredSynthesisPromptState.model_validate(
+                self._store.get_json(synthesis_prompt_state_key(user_id=user_id))
+            )
+            active_version_id = stored.active_version_id
+        except KeyError:
+            active_version_id = "default"
+        active = next(
+            (version for version in versions if version.version_id == active_version_id),
+            versions[-1],
+        )
+        return SynthesisPromptState(
+            owner_user_id=user_id,
+            active_version_id=active.version_id,
+            active_prompt=active,
+            versions=versions,
+        )
+
+    def create_synthesis_prompt_version(
+        self,
+        *,
+        user_id: str,
+        label: str,
+        prompt_text: str,
+        generated_guidance: str = "",
+        source_reference_ids: list[str] | None = None,
+        activate: bool = True,
+    ) -> SynthesisPromptVersion:
+        version = SynthesisPromptVersion(
+            version_id=f"prompt_{uuid.uuid4().hex[:12]}",
+            owner_user_id=user_id,
+            label=label,
+            prompt_text=prompt_text,
+            generated_guidance=generated_guidance,
+            source_reference_ids=list(source_reference_ids or []),
+            created_at=_utc_now(),
+        )
+        self._store.put_json(
+            synthesis_prompt_version_key(
+                user_id=user_id,
+                version_id=version.version_id,
+            ),
+            version.model_dump(mode="json"),
+        )
+        if activate:
+            self.activate_synthesis_prompt_version(user_id=user_id, version_id=version.version_id)
+        return version
+
+    def activate_synthesis_prompt_version(
+        self,
+        *,
+        user_id: str,
+        version_id: str,
+    ) -> StoredSynthesisPromptState:
+        state = StoredSynthesisPromptState(
+            owner_user_id=user_id,
+            active_version_id=version_id,
+        )
+        self._store.put_json(
+            synthesis_prompt_state_key(user_id=user_id),
+            state.model_dump(mode="json"),
+        )
+        return state

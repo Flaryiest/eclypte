@@ -13,6 +13,8 @@ class WorkflowRunner(Protocol):
     def run_video_analysis(self, **kwargs) -> None: ...
     def run_timeline_plan(self, **kwargs) -> None: ...
     def run_render(self, **kwargs) -> None: ...
+    def run_synthesis_reference_ingest(self, **kwargs) -> None: ...
+    def run_synthesis_consolidation(self, **kwargs) -> None: ...
 
 
 class DefaultWorkflowRunner:
@@ -281,3 +283,104 @@ class DefaultWorkflowRunner:
             )
         except Exception as exc:
             self._mark_failed(repo, user_id, run_id, exc)
+
+    def run_synthesis_reference_ingest(self, **kwargs) -> None:
+        repo = self._repository()
+        user_id = kwargs["user_id"]
+        reference_id = kwargs["reference_id"]
+        url = kwargs["url"]
+        likes = int(kwargs.get("likes", 0))
+        views = int(kwargs.get("views", 0))
+        try:
+            import tempfile
+            from pathlib import Path
+
+            from api.prototyping.edit.reference.download import download_reference
+            from api.prototyping.edit.reference.ingest import (
+                _run_music_analysis,
+                _run_video_analysis,
+            )
+            from api.prototyping.edit.reference.metrics import compute_metrics
+
+            repo.update_synthesis_reference(
+                user_id=user_id,
+                reference_id=reference_id,
+                status="running",
+            )
+            with tempfile.TemporaryDirectory(prefix="eclypte_ref_api_") as td:
+                media = download_reference(url, Path(td))
+                music = _run_music_analysis(media.audio_wav_path)
+                video = _run_video_analysis(media.video_mp4_path)
+                metrics = compute_metrics(music, video)
+            repo.update_synthesis_reference(
+                user_id=user_id,
+                reference_id=reference_id,
+                status="completed",
+                title=media.title,
+                author=media.author,
+                duration_sec=media.duration_sec,
+                metrics={
+                    **metrics,
+                    "likes": likes,
+                    "views": views,
+                },
+            )
+        except Exception as exc:
+            repo.update_synthesis_reference(
+                user_id=user_id,
+                reference_id=reference_id,
+                status="failed",
+                last_error=str(exc),
+            )
+
+    def run_synthesis_consolidation(self, **kwargs) -> None:
+        repo = self._repository()
+        user_id = kwargs["user_id"]
+        run_id = kwargs["run_id"]
+        try:
+            from api.prototyping.edit.synthesis.agent import SYSTEM_PROMPT
+
+            references = [
+                record
+                for record in repo.list_synthesis_references(user_id)
+                if record.status == "completed"
+            ]
+            guidance = _synthesis_guidance(references)
+            prompt_text = SYSTEM_PROMPT.strip()
+            if guidance:
+                prompt_text = f"{prompt_text}\n\nReference guidance:\n{guidance}"
+            version = repo.create_synthesis_prompt_version(
+                user_id=user_id,
+                label=f"Generated from {len(references)} references",
+                prompt_text=prompt_text,
+                generated_guidance=guidance,
+                source_reference_ids=[record.reference_id for record in references],
+                activate=True,
+            )
+            repo.update_run_status(
+                RunRef(user_id=user_id, run_id=run_id),
+                status="completed",
+                outputs={"synthesis_prompt_version_id": version.version_id},
+            )
+        except Exception as exc:
+            self._mark_failed(repo, user_id, run_id, exc)
+
+
+def _synthesis_guidance(references) -> str:
+    if not references:
+        return "No completed Reel references yet. Keep the baseline AMV editing rules."
+    lines = [
+        "Use the completed Reel reference metrics as lightweight style guidance:",
+    ]
+    for record in references[:8]:
+        metrics = record.metrics or {}
+        title = record.title or record.url
+        cuts = metrics.get("n_cuts", 0)
+        scenes = metrics.get("n_scenes", 0)
+        lines.append(
+            f"- {record.reference_id}: {title} ({cuts} cuts across {scenes} scenes)."
+        )
+    lines.append(
+        "Prefer hooks and pacing patterns supported by multiple references; keep source timestamps unique."
+    )
+    return "\n".join(lines)

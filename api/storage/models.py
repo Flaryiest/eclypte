@@ -15,6 +15,7 @@ ArtifactKind = Literal[
 RunStatus = Literal["created", "running", "blocked", "failed", "completed"]
 StepStatus = Literal["pending", "running", "completed", "failed"]
 UploadStatus = Literal["created", "completed"]
+SynthesisReferenceStatus = Literal["queued", "running", "completed", "failed"]
 
 
 class DerivedFrom(BaseModel):
@@ -106,3 +107,49 @@ class UploadReservation(BaseModel):
     created_at: str
     expires_at: str
     completed_at: str | None = None
+
+
+class SynthesisReferenceRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reference_id: str
+    owner_user_id: str
+    url: str
+    status: SynthesisReferenceStatus
+    likes: int = 0
+    views: int = 0
+    title: str | None = None
+    author: str | None = None
+    duration_sec: float | None = None
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    last_error: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class SynthesisPromptVersion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version_id: str
+    owner_user_id: str
+    label: str
+    prompt_text: str
+    generated_guidance: str = ""
+    source_reference_ids: list[str] = Field(default_factory=list)
+    created_at: str
+
+
+class SynthesisPromptState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    owner_user_id: str
+    active_version_id: str
+    active_prompt: SynthesisPromptVersion
+    versions: list[SynthesisPromptVersion] = Field(default_factory=list)
+
+
+class StoredSynthesisPromptState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    owner_user_id: str
+    active_version_id: str

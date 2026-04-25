@@ -20,3 +20,23 @@ def run_event_key(*, user_id: str, run_id: str, timestamp: str, event_id: str) -
 
 def upload_reservation_key(*, upload_id: str) -> str:
     return f"uploads/{upload_id}.json"
+
+
+def synthesis_reference_prefix(*, user_id: str) -> str:
+    return f"users/{user_id}/synthesis/references/"
+
+
+def synthesis_reference_key(*, user_id: str, reference_id: str) -> str:
+    return f"{synthesis_reference_prefix(user_id=user_id)}{reference_id}.json"
+
+
+def synthesis_prompt_state_key(*, user_id: str) -> str:
+    return f"users/{user_id}/synthesis/prompt/state.json"
+
+
+def synthesis_prompt_version_prefix(*, user_id: str) -> str:
+    return f"users/{user_id}/synthesis/prompt/versions/"
+
+
+def synthesis_prompt_version_key(*, user_id: str, version_id: str) -> str:
+    return f"{synthesis_prompt_version_prefix(user_id=user_id)}{version_id}.json"
