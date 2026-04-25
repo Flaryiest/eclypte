@@ -129,6 +129,15 @@ changes expected.
 
 The cloud API is a FastAPI control plane intended for Railway short-term hosting. It uses R2 manifests as the v1 metadata store and keeps heavy media processing on Modal. Temporary auth resolves `user_id` from `X-User-Id`, falling back to `ECLYPTE_DEFAULT_USER_ID`. CORS defaults to `https://eclypte.vercel.app`, `http://localhost:3000`, and `http://127.0.0.1:3000`; override with `ECLYPTE_CORS_ORIGINS`.
 
+### YouTube Song Import Notes
+
+- `/v1/music/youtube-imports` uses [api/youtube_download.py](api/youtube_download.py), not the older prototype script directly.
+- Keep the downloader provider order intentional: prototype-style `pytubefix` audio stream first, configured `pytubefix` PO-token mode when `ECLYPTE_YOUTUBE_VISITOR_DATA` and `ECLYPTE_YOUTUBE_PO_TOKEN` exist, `pytubefix` WEB fallback, then `yt-dlp` fallback.
+- Railway installs the repo-root [requirements.txt](requirements.txt), not [api/requirements.txt](api/requirements.txt). Runtime downloader deps such as `pytubefix`, `yt-dlp`, `imageio-ffmpeg`, and `pydub` must be in the root file.
+- Do not reintroduce broad speculative `yt-dlp` client matrices without provider-specific evidence. Diagnose production failures from `RunManifest.last_error` and `youtube_download_attempt` run events.
+- `ECLYPTE_YOUTUBE_COOKIES_B64` and `ECLYPTE_YOUTUBE_COOKIES` are used by the `yt-dlp` fallback. PO-token env vars are separate and only for the `pytubefix` PO-token path.
+- Production smoke on 2026-04-25 completed `run_9a16fbdfff0a` for `75qIYkMUGVE`, producing both `song_audio` and `music_analysis` outputs.
+
 Routes:
 
 - `GET /healthz`
