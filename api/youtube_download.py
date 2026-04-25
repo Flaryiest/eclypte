@@ -36,12 +36,13 @@ def download_youtube_wav(url: str, workdir: Path) -> YoutubeDownloadResult:
     workdir.mkdir(parents=True, exist_ok=True)
     attempts: list[YoutubeDownloadAttempt] = []
 
-    try:
-        title, wav_path = _download_with_pytubefix(url, workdir)
-        attempts.append(YoutubeDownloadAttempt("pytubefix", "succeeded", "downloaded audio stream"))
-        return YoutubeDownloadResult(title=title, wav_path=wav_path, attempts=attempts)
-    except Exception as exc:
-        attempts.append(YoutubeDownloadAttempt("pytubefix", "failed", _compact_error(exc)))
+    for provider, downloader in _pytubefix_downloaders(url, workdir):
+        try:
+            title, wav_path = downloader()
+            attempts.append(YoutubeDownloadAttempt(provider, "succeeded", "downloaded audio stream"))
+            return YoutubeDownloadResult(title=title, wav_path=wav_path, attempts=attempts)
+        except Exception as exc:
+            attempts.append(YoutubeDownloadAttempt(provider, "failed", _compact_error(exc)))
 
     try:
         title, wav_path = _download_with_ytdlp(url, workdir)
@@ -53,15 +54,47 @@ def download_youtube_wav(url: str, workdir: Path) -> YoutubeDownloadResult:
     raise YoutubeDownloadError(attempts)
 
 
-def _download_with_pytubefix(url: str, workdir: Path) -> tuple[str, Path]:
+def _pytubefix_downloaders(url: str, workdir: Path):
+    yield "pytubefix", lambda: _download_with_pytubefix(
+        url,
+        workdir,
+        provider="pytubefix",
+    )
+
+    po_token_verifier = _po_token_verifier_from_env()
+    if po_token_verifier is not None:
+        yield "pytubefix-po-token", lambda: _download_with_pytubefix(
+            url,
+            workdir,
+            provider="pytubefix-po-token",
+            client="WEB",
+            use_po_token=True,
+            po_token_verifier=po_token_verifier,
+        )
+
+    yield "pytubefix-web", lambda: _download_with_pytubefix(
+        url,
+        workdir,
+        provider="pytubefix-web",
+        client="WEB",
+    )
+
+
+def _download_with_pytubefix(
+    url: str,
+    workdir: Path,
+    *,
+    provider: str,
+    **youtube_kwargs,
+) -> tuple[str, Path]:
     from pytubefix import YouTube
 
-    yt = YouTube(url)
+    yt = YouTube(url, **youtube_kwargs)
     stream = yt.streams.get_audio_only()
     if stream is None:
         raise RuntimeError("no audio-only stream was available")
-    audio_path = Path(stream.download(str(workdir), "pytubefix_audio.m4a"))
-    wav_path = _convert_to_wav(audio_path, workdir / "pytubefix_audio.wav")
+    audio_path = Path(stream.download(str(workdir), f"{provider}.m4a"))
+    wav_path = _convert_to_wav(audio_path, workdir / f"{provider}.wav")
     return yt.title or "YouTube song", wav_path
 
 
@@ -130,6 +163,23 @@ def _youtube_cookiefile(workdir: Path) -> Path | None:
     cookie_path = workdir / "youtube_cookies.txt"
     cookie_path.write_text(cookie_text, encoding="utf-8", newline="\n")
     return cookie_path
+
+
+def _po_token_verifier_from_env():
+    visitor_data = os.environ.get("ECLYPTE_YOUTUBE_VISITOR_DATA")
+    po_token = os.environ.get("ECLYPTE_YOUTUBE_PO_TOKEN")
+    if not (visitor_data or po_token):
+        return None
+    if not (visitor_data and po_token):
+        return _raise_incomplete_po_token_config
+    return lambda: (visitor_data, po_token)
+
+
+def _raise_incomplete_po_token_config():
+    raise RuntimeError(
+        "both ECLYPTE_YOUTUBE_VISITOR_DATA and ECLYPTE_YOUTUBE_PO_TOKEN are required "
+        "to use pytubefix PO token mode"
+    )
 
 
 def _format_attempt_failures(attempts: list[YoutubeDownloadAttempt]) -> str:

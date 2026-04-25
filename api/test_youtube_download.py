@@ -61,11 +61,83 @@ def test_download_youtube_wav_uses_pytubefix_audio_stream_first(monkeypatch):
     ]
 
 
+def test_download_youtube_wav_tries_pytubefix_web_after_default_bot_gate(monkeypatch):
+    import api.youtube_download as youtube_download
+
+    class FakeStream:
+        def download(self, output_path, filename):
+            path = Path(output_path) / filename
+            path.write_bytes(b"source-audio")
+            return str(path)
+
+    class FakeYouTube:
+        def __init__(self, _url, client="ANDROID_VR", **_kwargs):
+            if client != "WEB":
+                raise RuntimeError("default client bot gate")
+            self.title = "Web Client Song"
+            self.streams = SimpleNamespace(get_audio_only=lambda: FakeStream())
+
+    monkeypatch.setitem(sys.modules, "pytubefix", SimpleNamespace(YouTube=FakeYouTube))
+    _install_ffmpeg(monkeypatch, youtube_download)
+
+    result = download_youtube_wav("https://www.youtube.com/watch?v=abc123", _workdir("pytubefix-web"))
+
+    assert result.title == "Web Client Song"
+    assert [(attempt.provider, attempt.status) for attempt in result.attempts] == [
+        ("pytubefix", "failed"),
+        ("pytubefix-web", "succeeded"),
+    ]
+
+
+def test_download_youtube_wav_uses_configured_po_token_before_web_auto(monkeypatch):
+    import api.youtube_download as youtube_download
+
+    monkeypatch.setenv("ECLYPTE_YOUTUBE_VISITOR_DATA", "visitor-data")
+    monkeypatch.setenv("ECLYPTE_YOUTUBE_PO_TOKEN", "po-token")
+    seen = []
+
+    class FakeStream:
+        def download(self, output_path, filename):
+            path = Path(output_path) / filename
+            path.write_bytes(b"source-audio")
+            return str(path)
+
+    class FakeYouTube:
+        def __init__(
+            self,
+            _url,
+            client="ANDROID_VR",
+            use_po_token=False,
+            po_token_verifier=None,
+            **_kwargs,
+        ):
+            seen.append((client, use_po_token, po_token_verifier() if po_token_verifier else None))
+            if not use_po_token:
+                raise RuntimeError("client needs po token")
+            self.title = "Po Token Song"
+            self.streams = SimpleNamespace(get_audio_only=lambda: FakeStream())
+
+    monkeypatch.setitem(sys.modules, "pytubefix", SimpleNamespace(YouTube=FakeYouTube))
+    _install_ffmpeg(monkeypatch, youtube_download)
+
+    result = download_youtube_wav("https://www.youtube.com/watch?v=abc123", _workdir("pytubefix-pot"))
+
+    assert result.title == "Po Token Song"
+    assert seen == [
+        ("ANDROID_VR", False, None),
+        ("WEB", True, ("visitor-data", "po-token")),
+    ]
+    assert [(attempt.provider, attempt.status) for attempt in result.attempts] == [
+        ("pytubefix", "failed"),
+        ("pytubefix-po-token", "succeeded"),
+    ]
+
+
 def test_download_youtube_wav_falls_back_to_ytdlp_after_pytubefix_failure(monkeypatch):
     import api.youtube_download as youtube_download
 
     class FakeYouTube:
-        def __init__(self, _url):
+        def __init__(self, _url, *_args, **_kwargs):
             raise RuntimeError("pytubefix bot gate")
 
     class FakeYoutubeDL:
@@ -99,6 +171,7 @@ def test_download_youtube_wav_falls_back_to_ytdlp_after_pytubefix_failure(monkey
     assert result.wav_path.read_bytes() == b"wav-bytes"
     assert [(attempt.provider, attempt.status) for attempt in result.attempts] == [
         ("pytubefix", "failed"),
+        ("pytubefix-web", "failed"),
         ("yt-dlp", "succeeded"),
     ]
 
@@ -113,7 +186,7 @@ def test_download_youtube_wav_passes_cookiefile_to_ytdlp(monkeypatch):
     )
 
     class FakeYouTube:
-        def __init__(self, _url):
+        def __init__(self, _url, *_args, **_kwargs):
             raise RuntimeError("pytubefix bot gate")
 
     class FakeYoutubeDL:
@@ -149,7 +222,7 @@ def test_download_youtube_wav_passes_cookiefile_to_ytdlp(monkeypatch):
 
 def test_download_youtube_wav_reports_all_provider_failures(monkeypatch):
     class FakeYouTube:
-        def __init__(self, _url):
+        def __init__(self, _url, *_args, **_kwargs):
             raise RuntimeError("pytubefix bot gate")
 
     class FakeYoutubeDL:
@@ -174,8 +247,10 @@ def test_download_youtube_wav_reports_all_provider_failures(monkeypatch):
 
     message = str(exc_info.value)
     assert "pytubefix failed: pytubefix bot gate" in message
+    assert "pytubefix-web failed: pytubefix bot gate" in message
     assert "yt-dlp failed: Sign in to confirm you're not a bot" in message
     assert [(attempt.provider, attempt.status) for attempt in exc_info.value.attempts] == [
         ("pytubefix", "failed"),
+        ("pytubefix-web", "failed"),
         ("yt-dlp", "failed"),
     ]
