@@ -75,8 +75,10 @@ export default function HeroLayers() {
             }
         }
 
-        // Handle cached images where onLoad already fired
-        if (imgRef.current?.complete) setLoaded(true)
+        // Handle cached images where onLoad already fired.
+        const cachedImageRaf = imgRef.current?.complete
+            ? requestAnimationFrame(() => setLoaded(true))
+            : 0
 
         window.addEventListener("scroll", onScroll, { passive: true })
         window.addEventListener("mousemove", onMouseMove, { passive: true })
@@ -85,6 +87,7 @@ export default function HeroLayers() {
             window.removeEventListener("scroll", onScroll)
             window.removeEventListener("mousemove", onMouseMove)
             cancelAnimationFrame(rafRef.current)
+            cancelAnimationFrame(cachedImageRaf)
         }
     }, [])
 

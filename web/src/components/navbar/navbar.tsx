@@ -16,7 +16,9 @@ export default function Navbar() {
     }, [])
 
     useEffect(() => {
-        if (window.location.hash.startsWith("#/")) setShowLogin(true)
+        if (!window.location.hash.startsWith("#/")) return
+        const timeout = window.setTimeout(() => setShowLogin(true), 0)
+        return () => window.clearTimeout(timeout)
     }, [])
 
     return (
