@@ -71,8 +71,18 @@ def test_health_and_cors_allow_vercel_origin():
         },
     )
 
-    assert health.json() == {"ok": True}
+    assert health.json() == {"ok": True, "youtube_cookies_configured": False}
     assert preflight.headers["access-control-allow-origin"] == "https://eclypte.vercel.app"
+
+
+def test_health_reports_youtube_cookies_configuration(monkeypatch):
+    monkeypatch.setenv("ECLYPTE_YOUTUBE_COOKIES_B64", "abc123")
+    client, _, _ = build_client()
+
+    health = client.get("/healthz")
+
+    assert health.status_code == 200
+    assert health.json()["youtube_cookies_configured"] is True
 
 
 def test_direct_upload_create_complete_metadata_and_download_url():

@@ -305,7 +305,13 @@ def create_app(
 
     @app.get("/healthz")
     def healthz() -> dict[str, bool]:
-        return {"ok": True}
+        return {
+            "ok": True,
+            "youtube_cookies_configured": bool(
+                os.environ.get("ECLYPTE_YOUTUBE_COOKIES_B64")
+                or os.environ.get("ECLYPTE_YOUTUBE_COOKIES")
+            ),
+        }
 
     @app.post(
         "/v1/uploads",

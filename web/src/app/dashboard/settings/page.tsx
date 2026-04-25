@@ -8,12 +8,14 @@ import styles from "../studio.module.css"
 import {
     ECLYPTE_API_BASE_URL,
     EclypteApiClient,
+    HealthResponse,
     SynthesisPromptState,
 } from "@/services/eclypteApi"
 
 export default function SettingsPage() {
     const { isLoaded, isSignedIn, user } = useUser()
     const [health, setHealth] = useState<"unknown" | "ok" | "failed">("unknown")
+    const [healthDetails, setHealthDetails] = useState<HealthResponse | null>(null)
     const [promptState, setPromptState] = useState<SynthesisPromptState | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [isChecking, setIsChecking] = useState(false)
@@ -32,9 +34,11 @@ export default function SettingsPage() {
                 api.getSynthesisPrompt(),
             ])
             setHealth(healthResponse.ok ? "ok" : "failed")
+            setHealthDetails(healthResponse)
             setPromptState(prompt)
         } catch (caught) {
             setHealth("failed")
+            setHealthDetails(null)
             setError(errorMessage(caught))
         } finally {
             setIsChecking(false)
@@ -90,6 +94,13 @@ export default function SettingsPage() {
                             <div>
                                 <span className={styles.settingLabel}>Signed-in user ID</span>
                                 <span className={styles.monoText}>{user.id}</span>
+                            </div>
+                        </div>
+                        <div className={styles.settingCard}>
+                            <Server size={18} />
+                            <div>
+                                <span className={styles.settingLabel}>YouTube cookies</span>
+                                <span>{healthDetails?.youtube_cookies_configured ? "Configured" : "Not configured"}</span>
                             </div>
                         </div>
                     </div>

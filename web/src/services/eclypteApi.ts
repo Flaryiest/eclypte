@@ -114,6 +114,11 @@ export type DownloadUrlResponse = {
     expires_in: number
 }
 
+export type HealthResponse = {
+    ok: boolean
+    youtube_cookies_configured?: boolean
+}
+
 export const ECLYPTE_API_BASE_URL =
     process.env.NEXT_PUBLIC_ECLYPTE_API_BASE_URL || "http://127.0.0.1:8000"
 
@@ -142,7 +147,7 @@ export class EclypteApiClient {
     }
 
     async health(signal?: AbortSignal) {
-        return this.request<{ ok: boolean }>("/healthz", { signal })
+        return this.request<HealthResponse>("/healthz", { signal })
     }
 
     async listAssets(kind?: ArtifactKind, signal?: AbortSignal) {
