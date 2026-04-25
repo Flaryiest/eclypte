@@ -15,6 +15,12 @@ from api.storage.factory import get_object_store, load_storage_env
 from api.storage.refs import FileRef, FileVersionRef, RunRef
 from api.storage.repository import StorageRepository
 
+YOUTUBE_FORMAT_SELECTORS = (
+    "bestaudio/best[acodec!=none]/best*[acodec!=none]",
+    "best*[acodec!=none]/best*",
+    None,
+)
+
 
 class WorkflowRunner(Protocol):
     def run_music_analysis(self, **kwargs) -> None: ...
@@ -461,8 +467,7 @@ def _download_youtube_wav(url: str, workdir: Path) -> tuple[str, Path]:
     import yt_dlp
 
     workdir.mkdir(parents=True, exist_ok=True)
-    ydl_opts = {
-        "format": "bestaudio/best",
+    ydl_opts_base = {
         "outtmpl": str(workdir / "%(id)s.%(ext)s"),
         "noplaylist": True,
         "quiet": True,
@@ -470,11 +475,9 @@ def _download_youtube_wav(url: str, workdir: Path) -> tuple[str, Path]:
     }
     cookiefile = _youtube_cookiefile(workdir)
     if cookiefile is not None:
-        ydl_opts["cookiefile"] = str(cookiefile)
+        ydl_opts_base["cookiefile"] = str(cookiefile)
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            downloaded = _yt_dlp_downloaded_path(info, ydl)
+        info, downloaded = _download_youtube_media(url, ydl_opts_base, yt_dlp)
     except Exception as exc:
         if _is_youtube_cookie_auth_error(exc):
             raise RuntimeError(_youtube_auth_error_message(cookiefile is not None)) from exc
@@ -494,6 +497,26 @@ def _download_youtube_wav(url: str, workdir: Path) -> tuple[str, Path]:
     return info.get("title") or "YouTube song", wav_path
 
 
+def _download_youtube_media(url: str, ydl_opts_base: dict, yt_dlp) -> tuple[dict, Path]:
+    last_format_error = None
+    for format_selector in YOUTUBE_FORMAT_SELECTORS:
+        ydl_opts = dict(ydl_opts_base)
+        if format_selector:
+            ydl_opts["format"] = format_selector
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                return info, _yt_dlp_downloaded_path(info, ydl)
+        except Exception as exc:
+            if _is_youtube_format_unavailable_error(exc):
+                last_format_error = exc
+                continue
+            raise
+    if last_format_error is not None:
+        raise last_format_error
+    raise RuntimeError("No YouTube format selectors configured")
+
+
 def _yt_dlp_downloaded_path(info: dict, ydl) -> Path:
     for download in info.get("requested_downloads") or []:
         filepath = download.get("filepath")
@@ -503,6 +526,10 @@ def _yt_dlp_downloaded_path(info: dict, ydl) -> Path:
     if filepath:
         return Path(filepath)
     return Path(ydl.prepare_filename(info))
+
+
+def _is_youtube_format_unavailable_error(exc: Exception) -> bool:
+    return "requested format is not available" in str(exc).lower()
 
 
 def _youtube_cookiefile(workdir: Path) -> Path | None:

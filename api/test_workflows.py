@@ -121,6 +121,56 @@ def test_youtube_download_uses_yt_dlp_and_converts_to_wav(monkeypatch):
         assert wav_path.read_bytes() == b"wav-bytes"
 
 
+def test_youtube_download_falls_back_when_requested_format_is_unavailable(monkeypatch):
+    monkeypatch.setenv("ECLYPTE_TEMP_DIR", str(Path.cwd() / ".pytest-tmp-youtube-worker"))
+    seen_formats = []
+
+    class FakeYoutubeDL:
+        def __init__(self, options):
+            self.options = options
+            seen_formats.append(options.get("format"))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def extract_info(self, _url, download):
+            assert download is True
+            if self.options.get("format") != "best*[acodec!=none]/best*":
+                raise RuntimeError("Requested format is not available")
+            media_path = Path(self.options["outtmpl"].replace("%(id)s", "abc123").replace("%(ext)s", "mp4"))
+            media_path.write_bytes(b"source-media")
+            return {
+                "id": "abc123",
+                "title": "Fallback Song",
+                "requested_downloads": [{"filepath": str(media_path)}],
+            }
+
+    monkeypatch.setitem(sys.modules, "yt_dlp", SimpleNamespace(YoutubeDL=FakeYoutubeDL))
+    monkeypatch.setitem(
+        sys.modules,
+        "imageio_ffmpeg",
+        SimpleNamespace(get_ffmpeg_exe=lambda: "fake-ffmpeg"),
+    )
+    monkeypatch.setattr(
+        workflows.subprocess,
+        "run",
+        lambda command, **_kwargs: Path(command[-1]).write_bytes(b"wav-bytes"),
+    )
+
+    with workflows._temporary_directory("eclypte_youtube_") as td:
+        title, wav_path = workflows._download_youtube_wav(
+            "https://www.youtube.com/watch?v=abc123",
+            Path(td),
+        )
+        assert title == "Fallback Song"
+        assert wav_path.read_bytes() == b"wav-bytes"
+
+    assert "best*[acodec!=none]/best*" in seen_formats
+
+
 def test_youtube_download_passes_cookiefile_from_base64_env(monkeypatch):
     cookie_text = "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tsecret\n"
     monkeypatch.setenv(
