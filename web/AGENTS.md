@@ -11,7 +11,7 @@ This version has breaking changes - APIs, conventions, and file structure may al
 - `src/app/pricing/page.tsx` is still lightweight.
 - `src/app/dashboard/page.tsx` redirects to the creator console default route at `/dashboard/new-edit`.
 - The dashboard console uses real App Router pages:
-  - `/dashboard/new-edit` selects existing song/video assets, reuses completed analyses when available, auto-runs missing analysis, then chains timeline planning, rendering, and final preview/download.
+  - `/dashboard/new-edit` selects existing song/video assets, reuses completed analyses when available, auto-runs missing analysis, then chains AI-agent timeline planning by default, rendering, and final preview/download. It also exposes a deterministic planning opt-out and optional creative brief.
   - `/dashboard/assets` uploads persistent WAV/MP4 assets to R2, lists the R2-backed library, starts manual analysis, and opens preview/download URLs.
   - `/dashboard/synthesis` queues Instagram Reel references, runs synthesis consolidation, exposes the effective system prompt, saves prompt versions, and reactivates older versions.
   - `/dashboard/renders` lists render runs and output MP4 assets with preview/download actions.
@@ -33,12 +33,14 @@ This version has breaking changes - APIs, conventions, and file structure may al
 - YouTube media download stays backend-side in `api/youtube_download.py`. The frontend should poll the returned run manifest and surface `RunManifest.last_error` for failures rather than attempting browser-side media extraction.
 - Backend YouTube import runs record provider-level `youtube_download_attempt` events, but the current dashboard client does not expose run events as a first-class UI view.
 - New Edit polls run manifests for music analysis, video analysis, timeline planning, and rendering, then requests the render download URL.
-- Synthesis prompt versions and reference records are stored under the current `X-User-Id` in R2. Synthesis v1 is prompt/library management; deeper prompt-aware timeline generation is still deferred.
+- Timeline planning now defaults to `planning_mode: "agent"`. Agent mode may create/reuse a `clip_index` asset, uses the active synthesis prompt version, and fails visibly through `RunManifest.last_error` if OpenAI/CLIP planning fails. Send `planning_mode: "deterministic"` to opt out.
+- Synthesis prompt versions and reference records are stored under the current `X-User-Id` in R2. The active prompt is used by future agent-mode timeline planning.
 - The frontend depends on these `RunManifest.outputs` keys:
   - `music_analysis_file_id`, `music_analysis_version_id`
   - `video_analysis_file_id`, `video_analysis_version_id`
   - `timeline_file_id`, `timeline_version_id`
   - `render_output_file_id`, `render_output_version_id`
+- Agent timeline runs may also return `clip_index_file_id`, `clip_index_version_id`, and `synthesis_prompt_version_id`.
 - R2 bucket CORS must allow browser `PUT` uploads and `GET`/range playback from local and deployed frontend origins. A missing bucket CORS config presents as a failed preflight on the presigned R2 URL, even when Railway API CORS is correct.
 
 ## Working Assumptions

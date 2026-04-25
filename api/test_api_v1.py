@@ -242,6 +242,124 @@ def test_workflow_endpoints_create_runs_and_schedule_background_tasks():
     assert events.json()[0]["event_type"] == "run_created"
 
 
+def test_timeline_endpoint_defaults_to_agent_planning_and_accepts_creative_brief():
+    client, store, runner = build_client()
+    repo = StorageRepository(store)
+    audio = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_audio",
+        kind="song_audio",
+        filename="song.wav",
+        content_type="audio/wav",
+    )
+    video = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_video",
+        kind="source_video",
+        filename="source.mp4",
+        content_type="video/mp4",
+    )
+    music_analysis = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_music_analysis",
+        kind="music_analysis",
+        filename="song.json",
+        content_type="application/json",
+    )
+    video_analysis = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_video_analysis",
+        kind="video_analysis",
+        filename="source.json",
+        content_type="application/json",
+    )
+
+    response = client.post(
+        "/v1/timelines",
+        headers={"X-User-Id": "user_123"},
+        json={
+            "audio": audio,
+            "source_video": video,
+            "music_analysis": music_analysis,
+            "video_analysis": video_analysis,
+            "creative_brief": "Open with the strongest action beat.",
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["workflow_type"] == "timeline_agent_plan"
+    assert [step["name"] for step in response.json()["steps"]] == [
+        "ensure_clip_index",
+        "agent_plan_timeline",
+        "publish_timeline",
+    ]
+    assert runner.calls[-1][0] == "timeline"
+    assert runner.calls[-1][1]["planning_mode"] == "agent"
+    assert runner.calls[-1][1]["creative_brief"] == "Open with the strongest action beat."
+
+
+def test_timeline_endpoint_supports_deterministic_opt_out():
+    client, store, runner = build_client()
+    repo = StorageRepository(store)
+    audio = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_audio",
+        kind="song_audio",
+        filename="song.wav",
+        content_type="audio/wav",
+    )
+    video = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_video",
+        kind="source_video",
+        filename="source.mp4",
+        content_type="video/mp4",
+    )
+    music_analysis = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_music_analysis",
+        kind="music_analysis",
+        filename="song.json",
+        content_type="application/json",
+    )
+    video_analysis = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_video_analysis",
+        kind="video_analysis",
+        filename="source.json",
+        content_type="application/json",
+    )
+
+    response = client.post(
+        "/v1/timelines",
+        headers={"X-User-Id": "user_123"},
+        json={
+            "audio": audio,
+            "source_video": video,
+            "music_analysis": music_analysis,
+            "video_analysis": video_analysis,
+            "planning_mode": "deterministic",
+            "creative_brief": "Ignored in deterministic mode.",
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["workflow_type"] == "timeline_plan"
+    assert [step["name"] for step in response.json()["steps"]] == [
+        "plan_timeline",
+        "publish_timeline",
+    ]
+    assert runner.calls[-1][1]["planning_mode"] == "deterministic"
+
+
 def test_youtube_song_import_endpoint_creates_run_and_schedules_background_task():
     client, _, runner = build_client()
 

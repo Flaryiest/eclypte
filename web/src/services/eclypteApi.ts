@@ -43,6 +43,7 @@ export type FileVersionMeta = {
 }
 
 export type RunStatus = "created" | "running" | "blocked" | "failed" | "completed"
+export type PlanningMode = "agent" | "deterministic"
 
 export type RunManifest = {
     run_id: string
@@ -216,6 +217,8 @@ export class EclypteApiClient {
             sourceVideo: FileVersionInput
             musicAnalysis: FileVersionInput
             videoAnalysis: FileVersionInput
+            planningMode?: PlanningMode
+            creativeBrief?: string
         },
         signal?: AbortSignal,
     ) {
@@ -226,6 +229,8 @@ export class EclypteApiClient {
                 source_video: input.sourceVideo,
                 music_analysis: input.musicAnalysis,
                 video_analysis: input.videoAnalysis,
+                planning_mode: input.planningMode,
+                creative_brief: input.creativeBrief,
             }),
             signal,
         })

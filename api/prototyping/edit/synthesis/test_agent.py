@@ -65,3 +65,35 @@ def test_run_synthesis_loop():
         second_input = second_kwargs["input"]
         assert any(i.get("type") == "function_call_output" and i.get("call_id") == "call_1" for i in second_input)
         assert any(i.get("type") == "message" and "Reminder" in i.get("content", "") for i in second_input)
+
+
+def test_run_synthesis_loop_accepts_injected_prompt_and_query_function():
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+
+        first = _fake_response(
+            [_function_call("query_clips", '{"query": "opening strike", "top_k": 3}', "call_1")],
+            response_id="resp_1",
+        )
+        second = _fake_response(
+            [_function_call(
+                "finish_edit",
+                '{"timeline": [{"start_time": 0, "end_time": 2, "source_timestamp": 6.0}]}',
+                "call_2",
+            )],
+            response_id="resp_2",
+        )
+        mock_client.responses.create = MagicMock(side_effect=[first, second])
+        query_fn = MagicMock(return_value=[{"timestamp": 6.0, "score": 0.95}])
+
+        timeline = run_synthesis_loop(
+            "source.mp4",
+            "make it sharp",
+            system_prompt="ACTIVE PROMPT",
+            query_clips_fn=query_fn,
+        )
+
+        assert timeline[0]["source_timestamp"] == 6.0
+        query_fn.assert_called_with("opening strike", "source.mp4", 3)
+        assert mock_client.responses.create.call_args_list[0].kwargs["instructions"] == "ACTIVE PROMPT"

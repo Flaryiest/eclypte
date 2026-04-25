@@ -9,6 +9,7 @@ import {
     AssetSummary,
     EclypteApiClient,
     FileVersionInput,
+    PlanningMode,
     RunManifest,
 } from "@/services/eclypteApi"
 
@@ -32,6 +33,8 @@ export default function NewEditPage() {
     const [assets, setAssets] = useState<AssetSummary[]>([])
     const [audioId, setAudioId] = useState("")
     const [videoId, setVideoId] = useState("")
+    const [planningMode, setPlanningMode] = useState<PlanningMode>("agent")
+    const [creativeBrief, setCreativeBrief] = useState("")
     const [isLoading, setIsLoading] = useState(false)
     const [isRunning, setIsRunning] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -110,11 +113,18 @@ export default function NewEditPage() {
                 }),
             ])
 
-            setStage("timeline", "active", "Planning beat-aligned edit")
+            setStage("timeline", "active", planningMode === "agent" ? "Planning with AI agent" : "Planning beat-aligned edit")
             const timelineRun = await waitForRun(
                 api,
                 await api.createTimelinePlan(
-                    { audio, sourceVideo, musicAnalysis, videoAnalysis },
+                    {
+                        audio,
+                        sourceVideo,
+                        musicAnalysis,
+                        videoAnalysis,
+                        planningMode,
+                        creativeBrief: creativeBrief.trim(),
+                    },
                     controller.signal,
                 ),
                 "timeline",
@@ -235,6 +245,39 @@ export default function NewEditPage() {
                                 ))}
                             </select>
                         </label>
+                        <div className={styles.fieldLabel}>
+                            Planning mode
+                            <div className={styles.segmentedControl} role="group" aria-label="Planning mode">
+                                <button
+                                    className={planningMode === "agent" ? styles.segmentActive : styles.segmentButton}
+                                    type="button"
+                                    onClick={() => setPlanningMode("agent")}
+                                    disabled={isRunning}
+                                >
+                                    AI Agent
+                                </button>
+                                <button
+                                    className={planningMode === "deterministic" ? styles.segmentActive : styles.segmentButton}
+                                    type="button"
+                                    onClick={() => setPlanningMode("deterministic")}
+                                    disabled={isRunning}
+                                >
+                                    Deterministic
+                                </button>
+                            </div>
+                        </div>
+                        {planningMode === "agent" && (
+                            <label className={styles.fieldLabel}>
+                                Creative brief
+                                <textarea
+                                    className={`${styles.textarea} ${styles.compactTextarea}`}
+                                    value={creativeBrief}
+                                    onChange={(event) => setCreativeBrief(event.target.value)}
+                                    placeholder="Fast hook, cinematic pacing, follow the character arc."
+                                    disabled={isRunning}
+                                />
+                            </label>
+                        )}
                     </div>
                     <div className={styles.assetGrid}>
                         {selectedAssets.map((asset) => (

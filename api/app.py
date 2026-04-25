@@ -83,6 +83,8 @@ class TimelineRequest(BaseModel):
     source_video: FileVersionInput
     music_analysis: FileVersionInput
     video_analysis: FileVersionInput
+    planning_mode: Literal["agent", "deterministic"] = "agent"
+    creative_brief: str = ""
     max_duration_sec: float | None = Field(default=None, gt=0)
 
 
@@ -508,17 +510,25 @@ def create_app(
         load_version(repo, uid, request.source_video, "source_video")
         load_version(repo, uid, request.music_analysis, "music_analysis")
         load_version(repo, uid, request.video_analysis, "video_analysis")
+        planning_mode = request.planning_mode
+        steps = (
+            ["ensure_clip_index", "agent_plan_timeline", "publish_timeline"]
+            if planning_mode == "agent"
+            else ["plan_timeline", "publish_timeline"]
+        )
+        workflow_type = "timeline_agent_plan" if planning_mode == "agent" else "timeline_plan"
         run = create_workflow_run(
             repo,
             uid,
-            "timeline_plan",
+            workflow_type,
             {
                 "audio_version_id": request.audio.version_id,
                 "source_video_version_id": request.source_video.version_id,
                 "music_analysis_version_id": request.music_analysis.version_id,
                 "video_analysis_version_id": request.video_analysis.version_id,
+                "planning_mode": planning_mode,
             },
-            ["plan_timeline", "publish_timeline"],
+            steps,
         )
         background_tasks.add_task(
             runner.run_timeline_plan,
@@ -528,6 +538,8 @@ def create_app(
             source_video=request.source_video.model_dump(),
             music_analysis=request.music_analysis.model_dump(),
             video_analysis=request.video_analysis.model_dump(),
+            planning_mode=planning_mode,
+            creative_brief=request.creative_brief,
             max_duration_sec=request.max_duration_sec,
         )
         return run

@@ -220,6 +220,16 @@ modal deploy edit/index/query_modal.py
 
 (The `PYTHONIOENCODING` prefix only matters when Modal's pip output hits Unicode characters; harmless otherwise.)
 
+Deploy the R2-backed API index/query app used by `/v1/timelines` agent mode:
+
+```powershell
+cd api/prototyping
+$env:PYTHONIOENCODING="utf-8"
+modal deploy edit/index/storage_modal.py
+```
+
+The cloud API builds missing `clip_index` artifacts on demand, reuses existing ones derived from the selected source video version, and stores them in R2. The older `eclypte-edit` volume commands above are still for local/prototype CLI runs.
+
 ---
 
 ## Plan a timeline (Phase-1: deterministic)

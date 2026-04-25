@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+from typing import Callable
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -110,7 +111,13 @@ def _format_song_context(song: dict) -> str:
     return "\n".join(lines)
 
 
-def _create(client: OpenAI, *, previous_response_id: str | None = None, input_):
+def _create(
+    client: OpenAI,
+    *,
+    previous_response_id: str | None = None,
+    input_,
+    system_prompt: str = SYSTEM_PROMPT,
+):
     kwargs = {
         "model": MODEL,
         "input": input_,
@@ -120,7 +127,7 @@ def _create(client: OpenAI, *, previous_response_id: str | None = None, input_):
         "text": {"verbosity": VERBOSITY},
     }
     if previous_response_id is None:
-        kwargs["instructions"] = SYSTEM_PROMPT
+        kwargs["instructions"] = system_prompt
     else:
         kwargs["previous_response_id"] = previous_response_id
     return client.responses.create(**kwargs)
@@ -130,7 +137,9 @@ def run_synthesis_loop(
     video_filename: str,
     instructions: str,
     song: dict | None = None,
-    openai_api_key: str = None,
+    openai_api_key: str | None = None,
+    system_prompt: str | None = None,
+    query_clips_fn: Callable[[str, str, int], list[dict]] | None = None,
 ) -> list[dict]:
     """
     Runs an LLM agent loop to construct an AMV timeline based on instructions.
@@ -147,13 +156,15 @@ def run_synthesis_loop(
     """
     load_dotenv(_ENV_PATH)
     client = OpenAI(api_key=openai_api_key or os.environ.get("OPENAI_API_KEY"))
+    active_system_prompt = system_prompt or SYSTEM_PROMPT
+    clip_query = query_clips_fn or query_clips
 
     user_content = instructions
     if song is not None:
         user_content = _format_song_context(song) + "\n\nUser brief:\n" + instructions
 
     print(f"Agent thinking (loop 1)...")
-    response = _create(client, input_=user_content)
+    response = _create(client, input_=user_content, system_prompt=active_system_prompt)
 
     for loop_i in range(MAX_LOOPS):
         tool_calls = [it for it in response.output if getattr(it, "type", None) == "function_call"]
@@ -181,7 +192,7 @@ def run_synthesis_loop(
             print(f"Agent called tool: {tc.name} with args: {args}")
 
             if tc.name == "query_clips":
-                result = query_clips(args["query"], video_filename, args.get("top_k", 5))
+                result = clip_query(args["query"], video_filename, args.get("top_k", 5))
                 tool_outputs.append({
                     "type": "function_call_output",
                     "call_id": tc.call_id,

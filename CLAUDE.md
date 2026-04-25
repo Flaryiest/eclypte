@@ -155,13 +155,16 @@ Routes:
 
 Direct uploads are browser-to-R2: `POST /v1/uploads` reserves a file/version/blob key and returns a presigned PUT URL; `POST /v1/uploads/{upload_id}/complete` validates the object with R2 `head`, requires client-provided SHA-256, records `FileVersionMeta`, and promotes it to current.
 
-Workflow endpoints create a `RunManifest` with `status="running"` and return `202` immediately. FastAPI `BackgroundTasks` call `DefaultWorkflowRunner`; run status, events, outputs, and errors are persisted back to R2. Music analysis reuses `eclypte-analysis::analyze_remote`; video analysis calls `eclypte-video-r2::analyze_r2`; rendering calls `eclypte-render-r2::render_r2`; deterministic timeline planning runs locally because it only consumes JSON artifacts.
+Workflow endpoints create a `RunManifest` with `status="running"` and return `202` immediately. FastAPI `BackgroundTasks` call `DefaultWorkflowRunner`; run status, events, outputs, and errors are persisted back to R2. Music analysis reuses `eclypte-analysis::analyze_remote`; video analysis calls `eclypte-video-r2::analyze_r2`; rendering calls `eclypte-render-r2::render_r2`.
+
+`POST /v1/timelines` defaults to `planning_mode="agent"`: it ensures a R2-backed CLIP index with `eclypte-clip-index-r2::build_index_r2`, queries it with `eclypte-clip-index-r2::query_index_r2`, loads the active synthesis prompt, calls the OpenAI synthesis loop, adapts the result into the existing timeline schema, and publishes the same `timeline_file_id` / `timeline_version_id` outputs. Pass `planning_mode="deterministic"` to opt out and use the local planner. Agent failures are surfaced as failed runs; there is no silent deterministic fallback.
 
 Important files:
 
 - [api/app.py](api/app.py) - app factory, CORS, request/response models, v1 routes.
 - [api/workflows.py](api/workflows.py) - background orchestration and workflow adapters.
 - [api/prototyping/video/storage_modal.py](api/prototyping/video/storage_modal.py) - R2-aware Modal video analysis.
+- [api/prototyping/edit/index/storage_modal.py](api/prototyping/edit/index/storage_modal.py) - R2-aware Modal CLIP index build/query for API agent planning.
 - [api/prototyping/edit/render_storage_modal.py](api/prototyping/edit/render_storage_modal.py) - R2-aware Modal rendering.
 - [api/storage/](api/storage/) - canonical R2 metadata/artifact store: file manifests, upload reservations, run manifests/events, presigned URLs, and staging helpers.
 
