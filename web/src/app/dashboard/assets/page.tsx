@@ -61,6 +61,10 @@ export default function AssetsPage() {
         void loadAssets()
     }, [loadAssets])
 
+    useEffect(() => {
+        return () => abortRef.current?.abort()
+    }, [])
+
     const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
         const next = event.target.files?.[0] ?? null
         setFile(next)

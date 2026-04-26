@@ -167,6 +167,33 @@ def test_near_duplicate_within_tolerance_dropped():
     assert tl.shots[1].source.start_sec == 60.0
 
 
+def test_source_timestamps_one_second_apart_are_dropped():
+    agent = [
+        {"start_time": 0.0, "end_time": 2.0, "source_timestamp": 100.0},
+        {"start_time": 2.0, "end_time": 4.0, "source_timestamp": 101.0},
+        {"start_time": 4.0, "end_time": 6.0, "source_timestamp": 60.0},
+    ]
+    tl = adapt(agent, SONG, VIDEO, SRC_PATH, AUDIO_PATH)
+
+    assert len(tl.shots) == 2
+    assert tl.shots[0].source.start_sec == pytest.approx(100.0)
+    assert tl.shots[1].source.start_sec == 60.0
+
+
+def test_source_timestamps_more_than_one_second_apart_are_kept():
+    agent = [
+        {"start_time": 0.0, "end_time": 2.0, "source_timestamp": 100.0},
+        {"start_time": 2.0, "end_time": 4.0, "source_timestamp": 101.001},
+        {"start_time": 4.0, "end_time": 6.0, "source_timestamp": 60.0},
+    ]
+    tl = adapt(agent, SONG, VIDEO, SRC_PATH, AUDIO_PATH)
+
+    assert len(tl.shots) == 3
+    assert tl.shots[0].source.start_sec == pytest.approx(100.0)
+    assert tl.shots[1].source.start_sec == pytest.approx(101.001)
+    assert tl.shots[2].source.start_sec == 60.0
+
+
 def test_duplicates_not_adjacent_dropped():
     agent = [
         {"start_time": 0.0, "end_time": 2.0, "source_timestamp": 10.0},

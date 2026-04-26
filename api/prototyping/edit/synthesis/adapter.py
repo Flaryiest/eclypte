@@ -9,6 +9,8 @@ from .timeline_schema import (
 )
 from .validators import validate_timeline
 
+SOURCE_TIMESTAMP_UNIQUENESS_SEC = 1.0
+
 
 def adapt(
     agent_output: list[dict],
@@ -65,15 +67,16 @@ def adapt(
             )
         )
 
-    DEDUPE_TOLERANCE_SEC = 0.1
-    seen: set[float] = set()
+    seen_source_starts: list[float] = []
     deduped: list[Shot] = []
     for shot in shots:
-        key = round(shot.source.start_sec / DEDUPE_TOLERANCE_SEC) * DEDUPE_TOLERANCE_SEC
-        if key in seen:
+        if any(
+            abs(shot.source.start_sec - seen) <= SOURCE_TIMESTAMP_UNIQUENESS_SEC
+            for seen in seen_source_starts
+        ):
             print(f"adapter: dropped duplicate source_timestamp {shot.source.start_sec:.3f}")
             continue
-        seen.add(key)
+        seen_source_starts.append(shot.source.start_sec)
         deduped.append(shot)
     if not deduped:
         raise ValueError("all shots were duplicates")

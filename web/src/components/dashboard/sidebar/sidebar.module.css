@@ -43,7 +43,7 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	transition: all 160ms ease;
+	transition: background-color 160ms ease, color 160ms ease;
 	flex-shrink: 0;
 }
 
@@ -103,7 +103,7 @@
 	text-align: left;
 	border-radius: 4px;
 	position: relative;
-	transition: all 160ms ease;
+	transition: background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
 }
 
 .navItem:hover {
@@ -196,7 +196,7 @@
 	display: flex;
 	align-items: center;
 	gap: 0.58rem;
-	transition: all 160ms ease;
+	transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 	font-family: var(--font-neue), sans-serif;
 }
 

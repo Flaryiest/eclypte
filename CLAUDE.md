@@ -172,8 +172,6 @@ Important files:
 
 MVP audio analysis lives in the prototyping sandbox. Scripts are wired together by [api/prototyping/music/main.py](api/prototyping/music/main.py).
 
-Note the name collision: [api/prototyping/music.py](api/prototyping/music.py) (a top-level file, not the `music/` directory) is an unused 10-line librosa `beat_track` scratch — ignore it when tracing the pipeline.
-
 - **[ytdownload.py](api/prototyping/music/ytdownload.py)** — `main(video_url) -> title`. Downloads YouTube audio via `pytubefix` to `content/output.m4a`, transcodes to `content/output.wav` via `pydub`. The URL is currently a module-level `url` constant.
 - **[analysis.py](api/prototyping/music/analysis.py)** — `analyze(audio_path, out_path=None) -> dict`. Pure function producing the "song map" JSON (`schema_version: 1`) with tempo, beats, downbeats, a 10Hz normalized energy curve, and structural segments. Uses `allin1` (PyTorch model) as the single source of truth for beats/downbeats/segments; `librosa` only for audio loading and RMS. All timestamps use the `_sec` suffix — no frame indices escape the module. **Does not import `modal`** — it runs inside the Modal container via `add_local_python_source`.
 - **[analysis_modal.py](api/prototyping/music/analysis_modal.py)** — Modal image definition + `analyze_remote(audio_bytes, filename) -> dict`. Thin wrapper: writes bytes to a tempfile in-container, calls `analysis.analyze()`, returns the dict. One round-trip, stateless. T4 GPU, 600s timeout, `allin1-cache` Volume mounted at `/root/.cache`.
