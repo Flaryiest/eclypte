@@ -40,6 +40,7 @@ def render_timeline(
     preview: bool = False,
     encode_preset: str = DEFAULT_ENCODE_PRESET,
     threads: int | None = None,
+    progress_callback=None,
 ) -> Path:
     total_started = time.perf_counter()
     timeline_path = Path(timeline_path)
@@ -60,11 +61,13 @@ def render_timeline(
     source = VideoFileClip(timeline.source.video)
     audio = AudioFileClip(timeline.audio.path)
     _log_timing("open media", open_started)
+    _report(progress_callback, 10, "Opened media")
 
     try:
         build_started = time.perf_counter()
         shot_clips = _build_shot_clips(source, timeline.shots, target_size, timeline.output.crop)
         _log_timing("build shot clips", build_started)
+        _report(progress_callback, 30, "Built shot clips")
 
         concat_started = time.perf_counter()
         concat = concatenate_videoclips(shot_clips, method="compose")
@@ -74,9 +77,11 @@ def render_timeline(
         )
         final = concat.with_audio(audio_slice).with_duration(timeline.output.duration_sec)
         _log_timing("concat/compose", concat_started)
+        _report(progress_callback, 45, "Composed timeline")
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         write_started = time.perf_counter()
+        _report(progress_callback, 55, "Encoding MP4")
         final.write_videofile(
             str(out_path),
             fps=target_fps,
@@ -87,6 +92,7 @@ def render_timeline(
             ffmpeg_params=["-movflags", "+faststart"],
         )
         _log_timing("write_videofile", write_started)
+        _report(progress_callback, 100, "Encoded MP4")
     finally:
         if final is not None:
             final.close()
@@ -101,6 +107,11 @@ def render_timeline(
 
     _log_timing("total render_timeline", total_started)
     return out_path
+
+
+def _report(progress_callback, percent, detail):
+    if progress_callback is not None:
+        progress_callback(percent, detail)
 
 
 def _load_timeline(path: Path) -> Timeline:

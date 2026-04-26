@@ -110,6 +110,42 @@ export type SynthesisPromptState = {
     versions: SynthesisPromptVersion[]
 }
 
+export type RunProgressEvent = {
+    stage: string
+    percent: number
+    detail: string
+}
+
+export type EditJobStage = {
+    id: string
+    label: string
+    status: "pending" | "running" | "completed" | "failed"
+    percent: number
+    detail: string
+}
+
+export type EditJobStatus = {
+    run_id: string
+    workflow_type: "edit_pipeline"
+    status: RunStatus
+    title: string
+    progress_percent: number
+    stages: EditJobStage[]
+    child_runs: Record<string, string>
+    render_output: FileVersionInput | null
+    last_error: string | null
+    created_at: string
+    updated_at: string
+}
+
+export type EditJobRequest = {
+    audio: FileVersionInput
+    sourceVideo: FileVersionInput
+    planningMode?: PlanningMode
+    creativeBrief?: string
+    title?: string
+}
+
 export type DownloadUrlResponse = {
     download_url: string
     expires_in: number
@@ -253,6 +289,28 @@ export class EclypteApiClient {
             }),
             signal,
         })
+    }
+
+    async createEditJob(input: EditJobRequest, signal?: AbortSignal) {
+        return this.request<EditJobStatus>("/v1/edits", {
+            method: "POST",
+            body: JSON.stringify({
+                audio: input.audio,
+                source_video: input.sourceVideo,
+                planning_mode: input.planningMode,
+                creative_brief: input.creativeBrief,
+                title: input.title,
+            }),
+            signal,
+        })
+    }
+
+    async listEditJobs(signal?: AbortSignal) {
+        return this.request<EditJobStatus[]>("/v1/edits", { signal })
+    }
+
+    async getEditJob(runId: string, signal?: AbortSignal) {
+        return this.request<EditJobStatus>(`/v1/edits/${runId}`, { signal })
     }
 
     async getRun(runId: string, signal?: AbortSignal) {

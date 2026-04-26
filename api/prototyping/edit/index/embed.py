@@ -40,7 +40,7 @@ def _coerce_feature_tensor(value):
     return value
 
 
-def embed_frames(frames: List[np.ndarray], batch_size: int = 32) -> np.ndarray:
+def embed_frames(frames: List[np.ndarray], batch_size: int = 32, on_progress=None) -> np.ndarray:
     """
     Embed a list of BGR numpy frames (from cv2) using CLIP ViT-L/14.
     Returns an array of shape (N, 768) for ViT-L/14.
@@ -67,8 +67,11 @@ def embed_frames(frames: List[np.ndarray], batch_size: int = 32) -> np.ndarray:
 
         image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
         all_features.append(image_features.cpu().numpy())
+        processed = min(i + batch_size, total)
+        if on_progress is not None:
+            on_progress(processed, total)
         
-        print(f"  Embedded batch {i // batch_size + 1}/{(total + batch_size - 1) // batch_size} ({min(i + batch_size, total)}/{total} frames)")
+        print(f"  Embedded batch {i // batch_size + 1}/{(total + batch_size - 1) // batch_size} ({processed}/{total} frames)")
     
     return np.concatenate(all_features, axis=0)
 

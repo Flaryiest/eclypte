@@ -14,7 +14,7 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("ffmpeg")
     .pip_install("moviepy>=2", "pydantic>=2", "pyyaml", "numpy", "imageio-ffmpeg", "boto3")
-    .add_local_python_source("edit")
+    .add_local_python_source("edit", "progress_events")
 )
 
 app = modal.App("eclypte-render-r2")
@@ -66,8 +66,10 @@ def render_r2(
     audio_key: str,
     output_key: str,
     output_filename: str = "output.mp4",
+    progress_context: dict | None = None,
 ) -> dict:
     from edit.render.renderer import render_timeline
+    from progress_events import emit_progress
 
     client = _s3_client(r2_config)
     bucket = r2_config["bucket"]
@@ -78,10 +80,14 @@ def render_r2(
         audio_path = workdir / "song.wav"
         output_path = workdir / Path(output_filename).name
 
+        emit_progress(progress_context, 5, "Downloading timeline")
         _download(client, bucket, timeline_key, timeline_path)
+        emit_progress(progress_context, 12, "Downloading source video")
         _download(client, bucket, source_video_key, source_path)
+        emit_progress(progress_context, 18, "Downloading audio")
         _download(client, bucket, audio_key, audio_path)
 
+        emit_progress(progress_context, 25, "Preparing timeline")
         timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
         timeline_path.write_text(
             json.dumps(
@@ -94,21 +100,29 @@ def render_r2(
             encoding="utf-8",
         )
 
+        emit_progress(progress_context, 35, "Rendering video")
         render_timeline(
             timeline_path,
             output_path,
             preview=False,
             encode_preset="medium",
             threads=RENDER_PROFILES["standard"]["threads"],
+            progress_callback=lambda percent, detail: emit_progress(
+                progress_context,
+                35 + int((percent / 100) * 50),
+                detail,
+            ),
         )
 
         body = output_path.read_bytes()
+        emit_progress(progress_context, 92, "Uploading rendered MP4")
         client.put_object(
             Bucket=bucket,
             Key=output_key,
             Body=body,
             ContentType="video/mp4",
         )
+        emit_progress(progress_context, 100, "Render uploaded")
         return {
             "storage_key": output_key,
             "size_bytes": len(body),

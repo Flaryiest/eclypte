@@ -77,6 +77,33 @@ def test_repository_updates_run_status_outputs_and_events():
     assert events[0].event_type == "run_completed"
 
 
+def test_repository_appends_run_progress_events():
+    from api.storage.repository import StorageRepository
+
+    repo = StorageRepository(InMemoryObjectStore())
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="edit_pipeline",
+        inputs={"audio_version_id": "ver_audio"},
+        steps=["assets", "music", "video", "timeline", "render", "result"],
+    )
+
+    event = repo.append_run_progress(
+        run_ref=RunRef(user_id="user_123", run_id=run.run_id),
+        stage="music",
+        percent=45,
+        detail="Analyzing beats",
+    )
+
+    events = repo.list_run_events(RunRef(user_id="user_123", run_id=run.run_id))
+    assert event.event_type == "progress"
+    assert events[0].payload == {
+        "stage": "music",
+        "percent": 45,
+        "detail": "Analyzing beats",
+    }
+
+
 def test_repository_records_existing_blob_version_written_by_worker():
     from api.storage.repository import StorageRepository
 

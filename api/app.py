@@ -34,6 +34,15 @@ DEFAULT_CORS_ORIGINS = (
 )
 UPLOAD_URL_EXPIRES_IN = 900
 DOWNLOAD_URL_EXPIRES_IN = 900
+EDIT_STAGE_LABELS = {
+    "assets": "Asset prep",
+    "music": "Music analysis",
+    "video": "Video analysis",
+    "timeline": "Timeline plan",
+    "render": "Render",
+    "result": "Result",
+}
+EDIT_STAGE_ORDER = list(EDIT_STAGE_LABELS)
 
 
 class FileVersionInput(BaseModel):
@@ -92,6 +101,36 @@ class RenderRequest(BaseModel):
     timeline: FileVersionInput
     audio: FileVersionInput
     source_video: FileVersionInput
+
+
+class EditJobRequest(BaseModel):
+    audio: FileVersionInput
+    source_video: FileVersionInput
+    planning_mode: Literal["agent", "deterministic"] = "agent"
+    creative_brief: str = ""
+    title: str | None = None
+
+
+class EditJobStage(BaseModel):
+    id: str
+    label: str
+    status: str
+    percent: int
+    detail: str
+
+
+class EditJobStatus(BaseModel):
+    run_id: str
+    workflow_type: str
+    status: RunStatus
+    title: str
+    progress_percent: int
+    stages: list[EditJobStage]
+    child_runs: dict[str, str]
+    render_output: FileVersionInput | None
+    last_error: str | None
+    created_at: str
+    updated_at: str
 
 
 class AssetSummary(BaseModel):
@@ -219,6 +258,71 @@ def create_app(
             payload={"workflow_type": workflow_type},
         )
         return run
+
+    def edit_child_runs(run: RunManifest) -> dict[str, str]:
+        child_runs: dict[str, str] = {}
+        for stage in ("music", "video", "timeline", "render"):
+            run_id = run.outputs.get(f"{stage}_run_id")
+            if run_id:
+                child_runs[stage] = run_id
+        return child_runs
+
+    def edit_render_output(run: RunManifest) -> FileVersionInput | None:
+        file_id = run.outputs.get("render_output_file_id")
+        version_id = run.outputs.get("render_output_version_id")
+        if not file_id or not version_id:
+            return None
+        return FileVersionInput(file_id=file_id, version_id=version_id)
+
+    def edit_status_from_run(
+        repo: StorageRepository,
+        uid: str,
+        run: RunManifest,
+    ) -> EditJobStatus:
+        latest_progress: dict[str, dict] = {}
+        for event in repo.list_run_events(RunRef(user_id=uid, run_id=run.run_id)):
+            if event.event_type == "progress":
+                stage = str(event.payload.get("stage", ""))
+                if stage:
+                    latest_progress[stage] = event.payload
+
+        step_statuses = {step.name: step.status for step in run.steps}
+        stages: list[EditJobStage] = []
+        for stage_id in EDIT_STAGE_ORDER:
+            progress = latest_progress.get(stage_id, {})
+            status_value = step_statuses.get(stage_id, "pending")
+            if run.status == "completed":
+                status_value = "completed"
+            if run.status == "failed" and run.current_step == stage_id:
+                status_value = "failed"
+            percent = int(progress.get("percent", 0))
+            if status_value == "completed":
+                percent = 100
+            stages.append(
+                EditJobStage(
+                    id=stage_id,
+                    label=EDIT_STAGE_LABELS[stage_id],
+                    status=status_value,
+                    percent=max(0, min(100, percent)),
+                    detail=str(progress.get("detail") or status_value),
+                )
+            )
+        progress_percent = 100 if run.status == "completed" else round(
+            sum(stage.percent for stage in stages) / len(stages)
+        )
+        return EditJobStatus(
+            run_id=run.run_id,
+            workflow_type=run.workflow_type,
+            status=run.status,
+            title=run.inputs.get("title") or "Untitled edit",
+            progress_percent=progress_percent,
+            stages=stages,
+            child_runs=edit_child_runs(run),
+            render_output=edit_render_output(run),
+            last_error=run.last_error,
+            created_at=run.created_at,
+            updated_at=run.updated_at,
+        )
 
     def file_version_input(file_id: str | None, version_id: str | None) -> FileVersionInput | None:
         if not file_id or not version_id:
@@ -574,6 +678,69 @@ def create_app(
             source_video=request.source_video.model_dump(),
         )
         return run
+
+    @app.post("/v1/edits", response_model=EditJobStatus, status_code=202)
+    def create_edit_job(
+        request: EditJobRequest,
+        background_tasks: BackgroundTasks,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> EditJobStatus:
+        load_version(repo, uid, request.audio, "song_audio")
+        load_version(repo, uid, request.source_video, "source_video")
+        title = (request.title or "").strip() or "Untitled edit"
+        run = create_workflow_run(
+            repo,
+            uid,
+            "edit_pipeline",
+            {
+                "title": title,
+                "audio_file_id": request.audio.file_id,
+                "audio_version_id": request.audio.version_id,
+                "source_video_file_id": request.source_video.file_id,
+                "source_video_version_id": request.source_video.version_id,
+                "planning_mode": request.planning_mode,
+                "creative_brief": request.creative_brief,
+            },
+            EDIT_STAGE_ORDER,
+        )
+        background_tasks.add_task(
+            runner.run_edit_pipeline,
+            user_id=uid,
+            run_id=run.run_id,
+            audio=request.audio.model_dump(),
+            source_video=request.source_video.model_dump(),
+            planning_mode=request.planning_mode,
+            creative_brief=request.creative_brief,
+            title=title,
+        )
+        return edit_status_from_run(repo, uid, run)
+
+    @app.get("/v1/edits", response_model=list[EditJobStatus])
+    def list_edit_jobs(
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> list[EditJobStatus]:
+        runs = [
+            run
+            for run in repo.list_run_manifests(uid)
+            if run.workflow_type == "edit_pipeline"
+        ]
+        return [edit_status_from_run(repo, uid, run) for run in runs]
+
+    @app.get("/v1/edits/{run_id}", response_model=EditJobStatus)
+    def get_edit_job(
+        run_id: str,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> EditJobStatus:
+        try:
+            run = repo.load_run_manifest(RunRef(user_id=uid, run_id=run_id))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="edit job not found") from exc
+        if run.workflow_type != "edit_pipeline":
+            raise HTTPException(status_code=404, detail="edit job not found")
+        return edit_status_from_run(repo, uid, run)
 
     @app.get("/v1/runs", response_model=list[RunManifest])
     def list_runs(

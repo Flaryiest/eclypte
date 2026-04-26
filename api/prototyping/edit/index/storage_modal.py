@@ -19,7 +19,7 @@ image = (
         "pillow",
         "boto3",
     )
-    .add_local_python_source("edit")
+    .add_local_python_source("edit", "progress_events")
 )
 
 app = modal.App("eclypte-clip-index-r2")
@@ -52,9 +52,11 @@ def build_index_r2(
     source_key: str,
     filename: str,
     output_key: str,
+    progress_context: dict | None = None,
 ) -> dict:
     from edit.index.embed import embed_frames
     from edit.index.frames import extract_frames
+    from progress_events import emit_progress
     import numpy as np
 
     client = _s3_client(r2_config)
@@ -65,22 +67,33 @@ def build_index_r2(
         source_path = workdir / f"source{suffix}"
         index_path = workdir / "clip_index.npz"
 
+        emit_progress(progress_context, 5, "Downloading source video")
         _download(client, bucket, source_key, source_path)
         frames_data = extract_frames(source_path, fps=1)
         if not frames_data:
             raise ValueError(f"No frames extracted from {filename}")
+        emit_progress(progress_context, 25, f"Extracted {len(frames_data)} frames")
 
         timestamps = np.array([frame[0] for frame in frames_data], dtype=np.float32)
-        embeddings = embed_frames([frame[1] for frame in frames_data])
+        embeddings = embed_frames(
+            [frame[1] for frame in frames_data],
+            on_progress=lambda processed, total: emit_progress(
+                progress_context,
+                25 + int((processed / max(total, 1)) * 60),
+                f"Embedded {processed}/{total} frames",
+            ),
+        )
         np.savez(index_path, timestamps=timestamps, embeddings=embeddings)
 
         body = index_path.read_bytes()
+        emit_progress(progress_context, 90, "Uploading CLIP index")
         client.put_object(
             Bucket=bucket,
             Key=output_key,
             Body=body,
             ContentType=CLIP_INDEX_CONTENT_TYPE,
         )
+        emit_progress(progress_context, 100, "CLIP index ready")
         return {
             "storage_key": output_key,
             "size_bytes": len(body),

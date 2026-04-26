@@ -1,50 +1,35 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useUser } from "@clerk/nextjs"
-import { Download, RefreshCw, WandSparkles } from "lucide-react"
-import { DashboardPage, StatusBadge, formatBytes, kindLabel, versionRef } from "../dashboardCommon"
+import { Download, Eye, RefreshCw, WandSparkles } from "lucide-react"
+import { DashboardPage, StatusBadge, formatBytes, formatDate, kindLabel, versionRef } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import { downloadSignedUrl, safeDownloadFilename } from "@/services/downloadFile"
 import {
     AssetSummary,
     EclypteApiClient,
-    FileVersionInput,
+    EditJobStage,
+    EditJobStatus,
     PlanningMode,
-    RunManifest,
 } from "@/services/eclypteApi"
 
-type StageId = "assets" | "music" | "video" | "timeline" | "render" | "result"
-type StageStatus = "pending" | "active" | "complete" | "failed"
-type Stage = { label: string; status: StageStatus; detail: string }
-
-const STAGES: StageId[] = ["assets", "music", "video", "timeline", "render", "result"]
-const STAGE_LABELS: Record<StageId, string> = {
-    assets: "Asset prep",
-    music: "Music analysis",
-    video: "Video analysis",
-    timeline: "Timeline plan",
-    render: "Render",
-    result: "Result",
-}
 const POLL_INTERVAL_MS = 3000
 
 export default function NewEditPage() {
     const { isLoaded, isSignedIn, user } = useUser()
     const [assets, setAssets] = useState<AssetSummary[]>([])
+    const [jobs, setJobs] = useState<EditJobStatus[]>([])
     const [audioId, setAudioId] = useState("")
     const [videoId, setVideoId] = useState("")
     const [planningMode, setPlanningMode] = useState<PlanningMode>("agent")
     const [creativeBrief, setCreativeBrief] = useState("")
-    const [isLoading, setIsLoading] = useState(false)
-    const [isRunning, setIsRunning] = useState(false)
+    const [title, setTitle] = useState("")
     const [error, setError] = useState<string | null>(null)
-    const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
-    const [downloadRef, setDownloadRef] = useState<FileVersionInput | null>(null)
-    const [downloadFilename, setDownloadFilename] = useState("eclypte-amv.mp4")
-    const [isDownloading, setIsDownloading] = useState(false)
-    const [stages, setStages] = useState<Record<StageId, Stage>>(initialStages)
-    const abortRef = useRef<AbortController | null>(null)
+    const [isLoading, setIsLoading] = useState(false)
+    const [isCreating, setIsCreating] = useState(false)
+    const [downloadingId, setDownloadingId] = useState<string | null>(null)
+    const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({})
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
     const songs = assets.filter((asset) => asset.kind === "song_audio")
@@ -54,19 +39,31 @@ export default function NewEditPage() {
     const selectedAssets = [selectedSong, selectedVideo].filter(
         (asset): asset is AssetSummary => Boolean(asset),
     )
-    const canStart = Boolean(api && selectedSong && selectedVideo && !isRunning)
+    const hasActiveJobs = jobs.some(isJobActive)
+    const canStart = Boolean(api && selectedSong && selectedVideo && !isCreating)
 
-    const loadAssets = useCallback(async () => {
+    const loadJobs = useCallback(async () => {
+        if (!api) {
+            return
+        }
+        setJobs(await api.listEditJobs())
+    }, [api])
+
+    const loadDashboard = useCallback(async () => {
         if (!api) {
             return
         }
         setIsLoading(true)
         setError(null)
         try {
-            const next = await api.listAssets()
-            setAssets(next)
-            setAudioId((current) => current || next.find((asset) => asset.kind === "song_audio")?.file_id || "")
-            setVideoId((current) => current || next.find((asset) => asset.kind === "source_video")?.file_id || "")
+            const [nextAssets, nextJobs] = await Promise.all([
+                api.listAssets(),
+                api.listEditJobs(),
+            ])
+            setAssets(nextAssets)
+            setJobs(nextJobs)
+            setAudioId((current) => current || nextAssets.find((asset) => asset.kind === "song_audio")?.file_id || "")
+            setVideoId((current) => current || nextAssets.find((asset) => asset.kind === "source_video")?.file_id || "")
         } catch (caught) {
             setError(errorMessage(caught))
         } finally {
@@ -75,8 +72,18 @@ export default function NewEditPage() {
     }, [api])
 
     useEffect(() => {
-        void loadAssets()
-    }, [loadAssets])
+        void loadDashboard()
+    }, [loadDashboard])
+
+    useEffect(() => {
+        if (!api || !hasActiveJobs) {
+            return
+        }
+        const interval = window.setInterval(() => {
+            void loadJobs().catch((caught) => setError(errorMessage(caught)))
+        }, POLL_INTERVAL_MS)
+        return () => window.clearInterval(interval)
+    }, [api, hasActiveJobs, loadJobs])
 
     const startEdit = async () => {
         if (!api || !selectedSong || !selectedVideo || !canStart) {
@@ -88,128 +95,56 @@ export default function NewEditPage() {
             setError("Selected assets do not have current versions.")
             return
         }
-
-        const controller = new AbortController()
-        abortRef.current = controller
-        setIsRunning(true)
-        setError(null)
-        setDownloadUrl(null)
-        setStages(initialStages())
-
-        try {
-            setStage("assets", "complete", "Selected saved assets")
-            const [musicAnalysis, videoAnalysis] = await Promise.all([
-                ensureAnalysis({
-                    api,
-                    asset: selectedSong,
-                    source: audio,
-                    kind: "music",
-                    signal: controller.signal,
-                    setStage,
-                }),
-                ensureAnalysis({
-                    api,
-                    asset: selectedVideo,
-                    source: sourceVideo,
-                    kind: "video",
-                    signal: controller.signal,
-                    setStage,
-                }),
-            ])
-
-            setStage("timeline", "active", planningMode === "agent" ? "Planning with AI agent" : "Planning beat-aligned edit")
-            const timelineRun = await waitForRun(
-                api,
-                await api.createTimelinePlan(
-                    {
-                        audio,
-                        sourceVideo,
-                        musicAnalysis,
-                        videoAnalysis,
-                        planningMode,
-                        creativeBrief: creativeBrief.trim(),
-                    },
-                    controller.signal,
-                ),
-                "timeline",
-                controller.signal,
-                setStage,
-            )
-            const timeline = outputRef(timelineRun, "timeline_file_id", "timeline_version_id", "timeline")
-
-            setStage("render", "active", "Rendering final MP4")
-            const renderRun = await waitForRun(
-                api,
-                await api.createRender({ timeline, audio, sourceVideo }, controller.signal),
-                "render",
-                controller.signal,
-                setStage,
-            )
-            const render = outputRef(renderRun, "render_output_file_id", "render_output_version_id", "render")
-            const download = await api.getDownloadUrl(render, controller.signal)
-            setDownloadRef(render)
-            setDownloadUrl(download.download_url)
-            setDownloadFilename(safeDownloadFilename(`eclypte-${render.version_id}.mp4`, "eclypte-amv.mp4"))
-            setStage("result", "complete", "AMV is ready")
-            void loadAssets()
-        } catch (caught) {
-            if (!isAbortError(caught)) {
-                const message = errorMessage(caught)
-                setError(message)
-                failActiveStage(message)
-            }
-        } finally {
-            if (abortRef.current === controller) {
-                abortRef.current = null
-            }
-            setIsRunning(false)
-        }
-    }
-
-    const reset = () => {
-        abortRef.current?.abort()
-        abortRef.current = null
-        setIsRunning(false)
-        setError(null)
-        setDownloadUrl(null)
-        setDownloadRef(null)
-        setDownloadFilename("eclypte-amv.mp4")
-        setStages(initialStages())
-    }
-
-    const downloadRender = async () => {
-        if (!downloadUrl) {
-            return
-        }
-        setIsDownloading(true)
+        setIsCreating(true)
         setError(null)
         try {
-            const url = api && downloadRef
-                ? (await api.getDownloadUrl(downloadRef)).download_url
-                : downloadUrl
-            await downloadSignedUrl({ url, filename: downloadFilename })
+            const job = await api.createEditJob({
+                audio,
+                sourceVideo,
+                planningMode,
+                creativeBrief: creativeBrief.trim(),
+                title: title.trim() || `${selectedSong.display_name} x ${selectedVideo.display_name}`,
+            })
+            setJobs((current) => [job, ...current.filter((item) => item.run_id !== job.run_id)])
+            setTitle("")
+            setCreativeBrief("")
         } catch (caught) {
             setError(errorMessage(caught))
         } finally {
-            setIsDownloading(false)
+            setIsCreating(false)
         }
     }
 
-    const setStage = (stageId: StageId, status: StageStatus, detail: string) => {
-        setStages((current) => ({
-            ...current,
-            [stageId]: { ...current[stageId], status, detail },
-        }))
+    const openPreview = async (job: EditJobStatus) => {
+        if (!api || !job.render_output) {
+            return
+        }
+        setError(null)
+        try {
+            const download = await api.getDownloadUrl(job.render_output)
+            setPreviewUrls((current) => ({ ...current, [job.run_id]: download.download_url }))
+        } catch (caught) {
+            setError(errorMessage(caught))
+        }
     }
 
-    const failActiveStage = (detail: string) => {
-        setStages((current) => {
-            const active = STAGES.find((stageId) => current[stageId].status === "active")
-            if (!active) {
-                return current
-            }
-            return { ...current, [active]: { ...current[active], status: "failed", detail } }
-        })
+    const downloadRender = async (job: EditJobStatus) => {
+        if (!api || !job.render_output) {
+            return
+        }
+        setDownloadingId(job.run_id)
+        setError(null)
+        try {
+            const download = await api.getDownloadUrl(job.render_output)
+            await downloadSignedUrl({
+                url: download.download_url,
+                filename: safeDownloadFilename(`${job.title || job.run_id}.mp4`, "eclypte-amv.mp4"),
+            })
+        } catch (caught) {
+            setError(errorMessage(caught))
+        } finally {
+            setDownloadingId(null)
+        }
     }
 
     if (!isLoaded) {
@@ -227,14 +162,14 @@ export default function NewEditPage() {
         <DashboardPage
             eyebrow="New edit"
             title="Create from assets"
-            subtitle="Choose saved song and video assets. Existing analyses are reused; missing analyses run automatically."
+            subtitle="Launch durable edit jobs from saved assets. Active jobs keep updating after refresh."
             action={
                 <>
-                    <button className={styles.secondaryButton} type="button" onClick={loadAssets} disabled={isLoading || isRunning}>
+                    <button className={styles.secondaryButton} type="button" onClick={loadDashboard} disabled={isLoading || isCreating}>
                         <RefreshCw size={16} /> Refresh
                     </button>
                     <button className={styles.primaryButton} type="button" onClick={startEdit} disabled={!canStart}>
-                        <WandSparkles size={16} /> {isRunning ? "Creating" : "Create AMV"}
+                        <WandSparkles size={16} /> {isCreating ? "Starting" : "Create AMV"}
                     </button>
                 </>
             }
@@ -244,14 +179,24 @@ export default function NewEditPage() {
                     <div className={styles.panelHeader}>
                         <div>
                             <h2>Asset selection</h2>
-                            <p>Use the Assets page to upload more songs and source videos.</p>
+                            <p>Use analyzed or uploaded songs and source videos.</p>
                         </div>
                     </div>
                     {error && <div className={styles.errorBanner}>{error}</div>}
                     <div className={styles.fieldStack}>
                         <label className={styles.fieldLabel}>
+                            Edit title
+                            <input
+                                className={styles.input}
+                                value={title}
+                                onChange={(event) => setTitle(event.target.value)}
+                                placeholder="Weekend hook edit"
+                                disabled={isCreating}
+                            />
+                        </label>
+                        <label className={styles.fieldLabel}>
                             Song asset
-                            <select className={styles.select} value={audioId} onChange={(event) => setAudioId(event.target.value)} disabled={isRunning}>
+                            <select className={styles.select} value={audioId} onChange={(event) => setAudioId(event.target.value)} disabled={isCreating}>
                                 <option value="">Choose a WAV song</option>
                                 {songs.map((asset) => (
                                     <option key={asset.file_id} value={asset.file_id}>
@@ -262,7 +207,7 @@ export default function NewEditPage() {
                         </label>
                         <label className={styles.fieldLabel}>
                             Source video asset
-                            <select className={styles.select} value={videoId} onChange={(event) => setVideoId(event.target.value)} disabled={isRunning}>
+                            <select className={styles.select} value={videoId} onChange={(event) => setVideoId(event.target.value)} disabled={isCreating}>
                                 <option value="">Choose an MP4 video</option>
                                 {videos.map((asset) => (
                                     <option key={asset.file_id} value={asset.file_id}>
@@ -278,7 +223,7 @@ export default function NewEditPage() {
                                     className={planningMode === "agent" ? styles.segmentActive : styles.segmentButton}
                                     type="button"
                                     onClick={() => setPlanningMode("agent")}
-                                    disabled={isRunning}
+                                    disabled={isCreating}
                                 >
                                     AI Agent
                                 </button>
@@ -286,7 +231,7 @@ export default function NewEditPage() {
                                     className={planningMode === "deterministic" ? styles.segmentActive : styles.segmentButton}
                                     type="button"
                                     onClick={() => setPlanningMode("deterministic")}
-                                    disabled={isRunning}
+                                    disabled={isCreating}
                                 >
                                     Deterministic
                                 </button>
@@ -300,160 +245,147 @@ export default function NewEditPage() {
                                     value={creativeBrief}
                                     onChange={(event) => setCreativeBrief(event.target.value)}
                                     placeholder="Fast hook, cinematic pacing, follow the character arc."
-                                    disabled={isRunning}
+                                    disabled={isCreating}
                                 />
                             </label>
                         )}
-                    </div>
-                    <div className={styles.assetGrid}>
-                        {selectedAssets.map((asset) => (
-                            <article className={styles.assetCard} key={asset.file_id}>
-                                <div className={styles.cardTop}>
-                                    <div>
-                                        <h3>{asset.display_name}</h3>
-                                        <p className={styles.smallText}>{kindLabel(asset.kind)}</p>
-                                    </div>
-                                    <StatusBadge label={asset.analysis ? "Ready" : "Uploaded"} tone={asset.analysis ? "ready" : "uploaded"} />
-                                </div>
-                            </article>
-                        ))}
                     </div>
                 </div>
 
                 <div className={`${styles.panel} ${styles.side}`}>
                     <div className={styles.panelHeader}>
                         <div>
-                            <h2>Pipeline</h2>
-                            <p>{isRunning ? "Running" : downloadUrl ? "Complete" : "Ready"}</p>
+                            <h2>Selected assets</h2>
+                            <p>{selectedAssets.length}/2 ready</p>
                         </div>
-                        {(isRunning || downloadUrl || error) && (
-                            <button className={styles.ghostButton} type="button" onClick={reset}>
-                                Start over
-                            </button>
+                    </div>
+                    <div className={styles.assetList}>
+                        {selectedAssets.length === 0 ? (
+                            <div className={styles.emptyState}>Choose a song and video.</div>
+                        ) : (
+                            selectedAssets.map((asset) => (
+                                <article className={styles.listCard} key={asset.file_id}>
+                                    <div className={styles.cardTop}>
+                                        <div>
+                                            <h3>{asset.display_name}</h3>
+                                            <p className={styles.smallText}>{kindLabel(asset.kind)}</p>
+                                        </div>
+                                        <StatusBadge label={asset.analysis ? "Ready" : "Uploaded"} tone={asset.analysis ? "ready" : "uploaded"} />
+                                    </div>
+                                </article>
+                            ))
                         )}
                     </div>
-                    <ol className={styles.stageList}>
-                        {STAGES.map((stageId) => (
-                            <li key={stageId} className={`${styles.stageItem} ${stageClass(stages[stageId].status)}`}>
-                                <span className={styles.stageDot} aria-hidden />
-                                <div>
-                                    <span className={styles.stageLabel}>{stages[stageId].label}</span>
-                                    <span className={styles.stageDetail}>{stages[stageId].detail}</span>
-                                </div>
-                            </li>
-                        ))}
-                    </ol>
                 </div>
 
-                {downloadUrl && (
-                    <div className={`${styles.panel} ${styles.full}`}>
-                        <div className={styles.panelHeader}>
-                            <div>
-                                <h2>Rendered output</h2>
-                                <p>Your final MP4 is ready for preview and download.</p>
-                            </div>
-                            <button className={styles.primaryButton} type="button" onClick={downloadRender} disabled={isDownloading}>
-                                <Download size={16} /> {isDownloading ? "Downloading" : "Download MP4"}
-                            </button>
+                <div className={`${styles.panel} ${styles.full}`}>
+                    <div className={styles.panelHeader}>
+                        <div>
+                            <h2>Edit jobs</h2>
+                            <p>{jobs.length} job{jobs.length === 1 ? "" : "s"} tracked</p>
                         </div>
-                        <video className={styles.previewMedia} controls src={downloadUrl} />
                     </div>
-                )}
+                    {jobs.length === 0 ? (
+                        <div className={styles.emptyState}>No edit jobs yet.</div>
+                    ) : (
+                        <div className={styles.jobList}>
+                            {jobs.map((job) => (
+                                <EditJobCard
+                                    key={job.run_id}
+                                    job={job}
+                                    previewUrl={previewUrls[job.run_id]}
+                                    isDownloading={downloadingId === job.run_id}
+                                    onPreview={() => openPreview(job)}
+                                    onDownload={() => downloadRender(job)}
+                                />
+                            ))}
+                        </div>
+                    )}
+                </div>
             </section>
         </DashboardPage>
     )
 }
 
-async function ensureAnalysis({
-    api,
-    asset,
-    source,
-    kind,
-    signal,
-    setStage,
+function EditJobCard({
+    job,
+    previewUrl,
+    isDownloading,
+    onPreview,
+    onDownload,
 }: {
-    api: EclypteApiClient
-    asset: AssetSummary
-    source: FileVersionInput
-    kind: "music" | "video"
-    signal: AbortSignal
-    setStage: (stageId: StageId, status: StageStatus, detail: string) => void
+    job: EditJobStatus
+    previewUrl?: string
+    isDownloading: boolean
+    onPreview: () => void
+    onDownload: () => void
 }) {
-    const stageId = kind
-    if (asset.analysis) {
-        setStage(stageId, "complete", "Reused existing analysis")
-        return asset.analysis
-    }
-    setStage(stageId, "active", `Starting ${kind} analysis`)
-    const started = kind === "music"
-        ? await api.createMusicAnalysis(source, signal)
-        : await api.createVideoAnalysis(source, signal)
-    const completed = await waitForRun(api, started, stageId, signal, setStage)
-    return kind === "music"
-        ? outputRef(completed, "music_analysis_file_id", "music_analysis_version_id", "music analysis")
-        : outputRef(completed, "video_analysis_file_id", "video_analysis_version_id", "video analysis")
+    const isComplete = job.status === "completed" && job.render_output
+    return (
+        <article className={styles.jobCard}>
+            <div className={styles.cardTop}>
+                <div>
+                    <h3>{job.title}</h3>
+                    <p className={styles.smallText}>{job.run_id} - {formatDate(job.updated_at)}</p>
+                </div>
+                <StatusBadge label={job.status} tone={job.status} />
+            </div>
+            <div className={styles.progressHeader}>
+                <span>{job.progress_percent}%</span>
+                <span>{job.status}</span>
+            </div>
+            <div className={styles.progressTrack} aria-label={`${job.title} progress`}>
+                <div className={styles.progressFill} style={{ width: `${clampPercent(job.progress_percent)}%` }} />
+            </div>
+            <div className={styles.stageProgressList}>
+                {job.stages.map((stage) => (
+                    <StageProgress key={stage.id} stage={stage} />
+                ))}
+            </div>
+            {job.last_error && <div className={styles.errorBanner}>{job.last_error}</div>}
+            {isComplete && (
+                <div className={styles.cardActions}>
+                    <button className={styles.secondaryButton} type="button" onClick={onPreview}>
+                        <Eye size={16} /> Preview
+                    </button>
+                    <button className={styles.primaryButton} type="button" onClick={onDownload} disabled={isDownloading}>
+                        <Download size={16} /> {isDownloading ? "Downloading" : "Download MP4"}
+                    </button>
+                </div>
+            )}
+            {previewUrl && <video className={styles.previewMedia} controls src={previewUrl} />}
+        </article>
+    )
 }
 
-async function waitForRun(
-    api: EclypteApiClient,
-    initialRun: RunManifest,
-    stageId: StageId,
-    signal: AbortSignal,
-    setStage: (stageId: StageId, status: StageStatus, detail: string) => void,
-) {
-    let run = initialRun
-    setStage(stageId, "active", runDetail(run))
-    while (run.status === "created" || run.status === "running" || run.status === "blocked") {
-        await delay(POLL_INTERVAL_MS, signal)
-        run = await api.getRun(run.run_id, signal)
-        setStage(stageId, "active", runDetail(run))
-    }
-    if (run.status === "failed") {
-        throw new Error(run.last_error || `${STAGE_LABELS[stageId]} failed`)
-    }
-    setStage(stageId, "complete", `${STAGE_LABELS[stageId]} complete`)
-    return run
+function StageProgress({ stage }: { stage: EditJobStage }) {
+    return (
+        <div className={`${styles.stageProgressRow} ${stageClass(stage.status)}`}>
+            <div className={styles.stageProgressMeta}>
+                <span>{stage.label}</span>
+                <span>{clampPercent(stage.percent)}%</span>
+            </div>
+            <div className={styles.progressTrack}>
+                <div className={styles.progressFill} style={{ width: `${clampPercent(stage.percent)}%` }} />
+            </div>
+            <span className={styles.stageDetail}>{stage.detail}</span>
+        </div>
+    )
 }
 
-function outputRef(run: RunManifest, fileKey: string, versionKey: string, label: string) {
-    const fileId = run.outputs[fileKey]
-    const versionId = run.outputs[versionKey]
-    if (!fileId || !versionId) {
-        throw new Error(`Completed ${label} run did not return an output file`)
-    }
-    return { file_id: fileId, version_id: versionId }
+function isJobActive(job: EditJobStatus) {
+    return job.status === "created" || job.status === "running" || job.status === "blocked"
 }
 
-function initialStages(): Record<StageId, Stage> {
-    return STAGES.reduce((acc, stageId) => {
-        acc[stageId] = { label: STAGE_LABELS[stageId], status: "pending", detail: "Waiting" }
-        return acc
-    }, {} as Record<StageId, Stage>)
-}
-
-function stageClass(status: StageStatus) {
-    if (status === "active") return styles.activeStage
-    if (status === "complete") return styles.completeStage
+function stageClass(status: EditJobStage["status"]) {
+    if (status === "running") return styles.activeStage
+    if (status === "completed") return styles.completeStage
     if (status === "failed") return styles.failedStage
     return ""
 }
 
-function runDetail(run: RunManifest) {
-    return run.current_step ? `${run.status} - ${run.current_step}` : run.status
-}
-
-function delay(ms: number, signal: AbortSignal) {
-    return new Promise<void>((resolve, reject) => {
-        const timeout = window.setTimeout(resolve, ms)
-        signal.addEventListener("abort", () => {
-            window.clearTimeout(timeout)
-            reject(new DOMException("Aborted", "AbortError"))
-        }, { once: true })
-    })
-}
-
-function isAbortError(error: unknown) {
-    return error instanceof DOMException && error.name === "AbortError"
+function clampPercent(value: number) {
+    return Math.max(0, Math.min(100, Math.round(value)))
 }
 
 function errorMessage(error: unknown) {

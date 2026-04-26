@@ -12,15 +12,19 @@ MIN_DURATION_SEC = 5.0
 SCHEMA_VERSION = 1
 
 
-def analyze(audio_path, out_path=None):
+def analyze(audio_path, out_path=None, progress_callback=None):
     audio_path = Path(audio_path)
+    _report(progress_callback, 10, "Loading audio")
     y, sr = _load_audio(audio_path)
     duration_sec = len(y) / sr
     if duration_sec < MIN_DURATION_SEC:
         raise ValueError("audio too short for analysis")
 
     energy_values = _energy_curve(y, sr, rate_hz=ENERGY_RATE_HZ)
+    _report(progress_callback, 30, "Computed energy curve")
+    _report(progress_callback, 55, "Running structure analysis")
     structure = _beats_and_structure(audio_path)
+    _report(progress_callback, 85, "Structure analysis complete")
 
     result = _assemble(
         source_path=str(audio_path),
@@ -34,7 +38,13 @@ def analyze(audio_path, out_path=None):
     if out_path is None:
         out_path = audio_path.with_suffix(".json")
     Path(out_path).write_text(json.dumps(result, indent=2))
+    _report(progress_callback, 100, "Music analysis complete")
     return result
+
+
+def _report(progress_callback, percent, detail):
+    if progress_callback is not None:
+        progress_callback(percent, detail)
 
 
 def _load_audio(path):

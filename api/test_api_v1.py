@@ -23,6 +23,9 @@ class RecordingWorkflowRunner:
     def run_render(self, **kwargs):
         self.calls.append(("render", kwargs))
 
+    def run_edit_pipeline(self, **kwargs):
+        self.calls.append(("edit_pipeline", kwargs))
+
     def run_synthesis_reference_ingest(self, **kwargs):
         self.calls.append(("synthesis_reference", kwargs))
 
@@ -358,6 +361,154 @@ def test_timeline_endpoint_supports_deterministic_opt_out():
         "publish_timeline",
     ]
     assert runner.calls[-1][1]["planning_mode"] == "deterministic"
+
+
+def test_edit_job_endpoint_creates_parent_run_and_schedules_pipeline():
+    client, store, runner = build_client()
+    repo = StorageRepository(store)
+    audio = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_audio",
+        kind="song_audio",
+        filename="song.wav",
+        content_type="audio/wav",
+    )
+    video = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_video",
+        kind="source_video",
+        filename="source.mp4",
+        content_type="video/mp4",
+    )
+
+    response = client.post(
+        "/v1/edits",
+        headers={"X-User-Id": "user_123"},
+        json={
+            "audio": audio,
+            "source_video": video,
+            "planning_mode": "agent",
+            "creative_brief": "Cut fast on the hook.",
+            "title": "Hook edit",
+        },
+    )
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["workflow_type"] == "edit_pipeline"
+    assert body["title"] == "Hook edit"
+    assert body["progress_percent"] == 0
+    assert [stage["id"] for stage in body["stages"]] == [
+        "assets",
+        "music",
+        "video",
+        "timeline",
+        "render",
+        "result",
+    ]
+    assert [call[0] for call in runner.calls] == ["edit_pipeline"]
+    assert runner.calls[0][1]["run_id"] == body["run_id"]
+    assert runner.calls[0][1]["creative_brief"] == "Cut fast on the hook."
+
+
+def test_edit_jobs_list_recovers_multiple_jobs_and_progress_from_r2_events():
+    client, store, _ = build_client()
+    repo = StorageRepository(store)
+    first = repo.create_run(
+        user_id="user_123",
+        workflow_type="edit_pipeline",
+        inputs={
+            "title": "First edit",
+            "audio_file_id": "file_audio_a",
+            "audio_version_id": "ver_audio_a",
+            "source_video_file_id": "file_video_a",
+            "source_video_version_id": "ver_video_a",
+            "planning_mode": "agent",
+        },
+        steps=["assets", "music", "video", "timeline", "render", "result"],
+    )
+    second = repo.create_run(
+        user_id="user_123",
+        workflow_type="edit_pipeline",
+        inputs={
+            "title": "Second edit",
+            "audio_file_id": "file_audio_b",
+            "audio_version_id": "ver_audio_b",
+            "source_video_file_id": "file_video_b",
+            "source_video_version_id": "ver_video_b",
+            "planning_mode": "deterministic",
+        },
+        steps=["assets", "music", "video", "timeline", "render", "result"],
+    )
+    repo.append_run_progress(
+        run_ref=RunRef(user_id="user_123", run_id=first.run_id),
+        stage="music",
+        percent=45,
+        detail="Analyzing beats",
+    )
+    repo.append_run_progress(
+        run_ref=RunRef(user_id="user_123", run_id=second.run_id),
+        stage="render",
+        percent=80,
+        detail="Encoding video",
+    )
+
+    response = client.get("/v1/edits", headers={"X-User-Id": "user_123"})
+
+    assert response.status_code == 200
+    jobs = response.json()
+    by_title = {job["title"]: job for job in jobs}
+    assert set(by_title) == {"First edit", "Second edit"}
+    assert by_title["Second edit"]["run_id"] == second.run_id
+    assert by_title["Second edit"]["stages"][4]["percent"] == 80
+    assert by_title["Second edit"]["stages"][4]["detail"] == "Encoding video"
+    assert by_title["First edit"]["stages"][1]["percent"] == 45
+    assert by_title["First edit"]["progress_percent"] > 0
+
+
+def test_edit_job_detail_includes_final_render_ref_and_download_status():
+    client, store, _ = build_client()
+    repo = StorageRepository(store)
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="edit_pipeline",
+        inputs={
+            "title": "Done edit",
+            "audio_file_id": "file_audio",
+            "audio_version_id": "ver_audio",
+            "source_video_file_id": "file_video",
+            "source_video_version_id": "ver_video",
+            "planning_mode": "agent",
+        },
+        steps=["assets", "music", "video", "timeline", "render", "result"],
+    )
+    completed = repo.update_run_status(
+        RunRef(user_id="user_123", run_id=run.run_id),
+        status="completed",
+        current_step=None,
+        outputs={
+            "render_output_file_id": "file_render",
+            "render_output_version_id": "ver_render",
+            "render_run_id": "run_render",
+        },
+    )
+
+    response = client.get(
+        f"/v1/edits/{completed.run_id}",
+        headers={"X-User-Id": "user_123"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["progress_percent"] == 100
+    assert body["render_output"] == {
+        "file_id": "file_render",
+        "version_id": "ver_render",
+    }
+    assert body["child_runs"]["render"] == "run_render"
 
 
 def test_youtube_song_import_endpoint_creates_run_and_schedules_background_task():

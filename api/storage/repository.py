@@ -214,6 +214,26 @@ class StorageRepository:
         self._store.put_json(key, event.model_dump(mode="json"))
         return event
 
+    def append_run_progress(
+        self,
+        *,
+        run_ref: RunRef,
+        stage: str,
+        percent: int,
+        detail: str,
+    ) -> RunEvent:
+        return self.append_run_event(
+            run_ref=run_ref,
+            event_type="progress",
+            timestamp=_utc_now(),
+            event_id=f"evt_progress_{uuid.uuid4().hex[:12]}",
+            payload={
+                "stage": stage,
+                "percent": max(0, min(100, int(percent))),
+                "detail": detail,
+            },
+        )
+
     def list_run_events(self, run_ref: RunRef) -> list[RunEvent]:
         prefix = f"users/{run_ref.user_id}/runs/{run_ref.run_id}/events/"
         keys = self._store.list_keys(prefix)
@@ -442,6 +462,18 @@ class StorageRepository:
                 step.model_copy(update={"status": "completed"})
                 for step in manifest.steps
             ]
+        elif status == "running" and current_step is not None:
+            seen_current = False
+            next_steps = []
+            for step in manifest.steps:
+                if step.name == current_step:
+                    seen_current = True
+                    next_steps.append(step.model_copy(update={"status": "running"}))
+                elif seen_current:
+                    next_steps.append(step.model_copy(update={"status": "pending"}))
+                else:
+                    next_steps.append(step.model_copy(update={"status": "completed"}))
+            step_updates = next_steps
         elif status == "failed":
             failed_step = current_step or manifest.current_step
             step_updates = [

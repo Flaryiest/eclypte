@@ -104,6 +104,84 @@ def _publish_timeline_inputs(repo: StorageRepository):
     return audio, source_video, music_analysis, video_analysis
 
 
+def _complete_analysis_run(
+    repo: StorageRepository,
+    *,
+    run_id: str,
+    file_id: str,
+    kind: str,
+    filename: str,
+    file_key: str,
+    version_key: str,
+):
+    artifact = _publish_artifact(
+        repo,
+        file_id=file_id,
+        kind=kind,
+        filename=filename,
+        body=b"{}",
+        content_type="application/json",
+    )
+    repo.update_run_status(
+        RunRef(user_id="user_123", run_id=run_id),
+        status="completed",
+        current_step=None,
+        outputs={
+            file_key: artifact["file_id"],
+            version_key: artifact["version_id"],
+        },
+    )
+    return artifact
+
+
+def _fake_timeline_runner(repo: StorageRepository):
+    def run_timeline_plan(**kwargs):
+        run_id = kwargs["run_id"]
+        artifact = _publish_artifact(
+            repo,
+            file_id=f"file_timeline_{run_id}",
+            kind="timeline",
+            filename=f"{run_id}.timeline.json",
+            body=b"{}",
+            content_type="application/json",
+        )
+        repo.update_run_status(
+            RunRef(user_id="user_123", run_id=run_id),
+            status="completed",
+            current_step=None,
+            outputs={
+                "timeline_file_id": artifact["file_id"],
+                "timeline_version_id": artifact["version_id"],
+            },
+        )
+
+    return run_timeline_plan
+
+
+def _fake_render_runner(repo: StorageRepository):
+    def run_render(**kwargs):
+        run_id = kwargs["run_id"]
+        artifact = _publish_artifact(
+            repo,
+            file_id=f"file_render_{run_id}",
+            kind="render_output",
+            filename=f"{run_id}.mp4",
+            body=b"mp4",
+            content_type="video/mp4",
+        )
+        repo.update_run_status(
+            RunRef(user_id="user_123", run_id=run_id),
+            status="completed",
+            current_step=None,
+            outputs={
+                "render_output_file_id": artifact["file_id"],
+                "render_output_version_id": artifact["version_id"],
+            },
+        )
+
+    return run_render
+
+
 def test_youtube_song_import_publishes_audio_and_analysis(monkeypatch):
     store = InMemoryObjectStore()
     repo = StorageRepository(store)
@@ -334,4 +412,190 @@ def test_agent_timeline_failure_does_not_fallback_to_deterministic(monkeypatch):
     completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=run.run_id))
     assert completed.status == "failed"
     assert completed.last_error == "agent failed"
-    assert "timeline_file_id" not in completed.outputs
+
+
+def test_edit_pipeline_reuses_existing_analyses_and_publishes_render(monkeypatch):
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    audio, source_video, music_analysis, video_analysis = _publish_timeline_inputs(repo)
+    music_run = repo.create_run(
+        user_id="user_123",
+        workflow_type="music_analysis",
+        inputs={"audio_version_id": audio["version_id"]},
+        steps=["analyze_music", "publish_analysis"],
+    )
+    video_run = repo.create_run(
+        user_id="user_123",
+        workflow_type="video_analysis",
+        inputs={"source_video_version_id": source_video["version_id"]},
+        steps=["analyze_video", "publish_analysis"],
+    )
+    repo.update_run_status(
+        RunRef(user_id="user_123", run_id=music_run.run_id),
+        status="completed",
+        current_step=None,
+        outputs={
+            "music_analysis_file_id": music_analysis["file_id"],
+            "music_analysis_version_id": music_analysis["version_id"],
+        },
+    )
+    repo.update_run_status(
+        RunRef(user_id="user_123", run_id=video_run.run_id),
+        status="completed",
+        current_step=None,
+        outputs={
+            "video_analysis_file_id": video_analysis["file_id"],
+            "video_analysis_version_id": video_analysis["version_id"],
+        },
+    )
+    parent = repo.create_run(
+        user_id="user_123",
+        workflow_type="edit_pipeline",
+        inputs={
+            "title": "Reuse edit",
+            "audio_file_id": audio["file_id"],
+            "audio_version_id": audio["version_id"],
+            "source_video_file_id": source_video["file_id"],
+            "source_video_version_id": source_video["version_id"],
+            "planning_mode": "agent",
+            "creative_brief": "",
+        },
+        steps=["assets", "music", "video", "timeline", "render", "result"],
+    )
+    monkeypatch.setattr(runner, "run_music_analysis", lambda **_: (_ for _ in ()).throw(AssertionError("music should be reused")))
+    monkeypatch.setattr(runner, "run_video_analysis", lambda **_: (_ for _ in ()).throw(AssertionError("video should be reused")))
+    monkeypatch.setattr(runner, "run_timeline_plan", _fake_timeline_runner(repo))
+    monkeypatch.setattr(runner, "run_render", _fake_render_runner(repo))
+
+    runner.run_edit_pipeline(
+        user_id="user_123",
+        run_id=parent.run_id,
+        audio=audio,
+        source_video=source_video,
+        planning_mode="agent",
+        creative_brief="",
+        title="Reuse edit",
+    )
+
+    completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=parent.run_id))
+    events = repo.list_run_events(RunRef(user_id="user_123", run_id=parent.run_id))
+    assert completed.status == "completed"
+    assert completed.outputs["music_analysis_version_id"] == music_analysis["version_id"]
+    assert completed.outputs["video_analysis_version_id"] == video_analysis["version_id"]
+    assert completed.outputs["timeline_run_id"].startswith("run_")
+    assert completed.outputs["render_output_file_id"].startswith("file_render_")
+    assert any(event.event_type == "progress" and event.payload["stage"] == "render" for event in events)
+
+
+def test_edit_pipeline_creates_missing_analysis_child_runs(monkeypatch):
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    audio, source_video, _, _ = _publish_timeline_inputs(repo)
+    parent = repo.create_run(
+        user_id="user_123",
+        workflow_type="edit_pipeline",
+        inputs={
+            "title": "Fresh edit",
+            "audio_file_id": audio["file_id"],
+            "audio_version_id": audio["version_id"],
+            "source_video_file_id": source_video["file_id"],
+            "source_video_version_id": source_video["version_id"],
+            "planning_mode": "deterministic",
+            "creative_brief": "",
+        },
+        steps=["assets", "music", "video", "timeline", "render", "result"],
+    )
+
+    def run_music_analysis(**kwargs):
+        _complete_analysis_run(
+            repo,
+            run_id=kwargs["run_id"],
+            file_id=f"file_music_analysis_{kwargs['run_id']}",
+            kind="music_analysis",
+            filename="song.json",
+            file_key="music_analysis_file_id",
+            version_key="music_analysis_version_id",
+        )
+
+    def run_video_analysis(**kwargs):
+        _complete_analysis_run(
+            repo,
+            run_id=kwargs["run_id"],
+            file_id=f"file_video_analysis_{kwargs['run_id']}",
+            kind="video_analysis",
+            filename="source.json",
+            file_key="video_analysis_file_id",
+            version_key="video_analysis_version_id",
+        )
+
+    monkeypatch.setattr(runner, "run_music_analysis", run_music_analysis)
+    monkeypatch.setattr(runner, "run_video_analysis", run_video_analysis)
+    monkeypatch.setattr(runner, "run_timeline_plan", _fake_timeline_runner(repo))
+    monkeypatch.setattr(runner, "run_render", _fake_render_runner(repo))
+
+    runner.run_edit_pipeline(
+        user_id="user_123",
+        run_id=parent.run_id,
+        audio=audio,
+        source_video=source_video,
+        planning_mode="deterministic",
+        creative_brief="",
+        title="Fresh edit",
+    )
+
+    completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=parent.run_id))
+    assert completed.status == "completed"
+    assert completed.outputs["music_run_id"].startswith("run_")
+    assert completed.outputs["video_run_id"].startswith("run_")
+    assert completed.outputs["render_output_version_id"].startswith("ver_")
+
+
+def test_edit_pipeline_fails_parent_when_child_run_fails(monkeypatch):
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    audio, source_video, _, _ = _publish_timeline_inputs(repo)
+    parent = repo.create_run(
+        user_id="user_123",
+        workflow_type="edit_pipeline",
+        inputs={
+            "title": "Broken edit",
+            "audio_file_id": audio["file_id"],
+            "audio_version_id": audio["version_id"],
+            "source_video_file_id": source_video["file_id"],
+            "source_video_version_id": source_video["version_id"],
+            "planning_mode": "agent",
+            "creative_brief": "",
+        },
+        steps=["assets", "music", "video", "timeline", "render", "result"],
+    )
+
+    def run_music_analysis(**kwargs):
+        repo.update_run_status(
+            RunRef(user_id="user_123", run_id=kwargs["run_id"]),
+            status="failed",
+            last_error="music exploded",
+        )
+
+    monkeypatch.setattr(runner, "run_music_analysis", run_music_analysis)
+
+    runner.run_edit_pipeline(
+        user_id="user_123",
+        run_id=parent.run_id,
+        audio=audio,
+        source_video=source_video,
+        planning_mode="agent",
+        creative_brief="",
+        title="Broken edit",
+    )
+
+    failed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=parent.run_id))
+    assert failed.status == "failed"
+    assert failed.current_step == "music"
+    assert failed.last_error == "music exploded"
+    assert "timeline_file_id" not in failed.outputs

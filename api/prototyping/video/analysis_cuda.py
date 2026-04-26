@@ -11,7 +11,7 @@ from impact import impacts_per_scene
 SCHEMA_VERSION = 1
 
 
-def analyze_cuda(video_path, out_path=None):
+def analyze_cuda(video_path, out_path=None, progress_callback=None):
     video_path = Path(video_path)
     src_meta = _video_metadata(video_path)
     fps_hz = src_meta["fps_hz"]
@@ -20,9 +20,11 @@ def analyze_cuda(video_path, out_path=None):
 
     print(f"[analysis_cuda] {video_path.name}: {src_meta['duration_sec']:.1f}s "
           f"@ {fps_hz}fps, {src_meta['resolution']}")
+    _report(progress_callback, 5, "Loaded video metadata")
 
     scenes = detect_scenes(video_path, src_meta["duration_sec"])
     print(f"[analysis_cuda] detected {len(scenes)} scenes")
+    _report(progress_callback, 15, f"Detected {len(scenes)} scenes")
 
     farneback = cv2.cuda.FarnebackOpticalFlow.create(
         numLevels=3, pyrScale=0.5, winSize=15, numIters=3,
@@ -67,6 +69,12 @@ def analyze_cuda(video_path, out_path=None):
             if fi % report_every == 0:
                 print(f"[analysis_cuda] {fi}/{total_frames} frames "
                       f"(scene {cur_idx + 1}/{len(scenes)})")
+                frame_percent = 15 + int(min(1.0, fi / max(total_frames, 1)) * 70)
+                _report(
+                    progress_callback,
+                    frame_percent,
+                    f"Processed {fi}/{total_frames} frames",
+                )
     finally:
         cap.release()
 
@@ -78,10 +86,12 @@ def analyze_cuda(video_path, out_path=None):
         )
         impacts = impacts_per_scene((start_sec, end_sec), motion, fps_hz)
         scene_dicts.append(_assemble_scene(i, start_sec, end_sec, motion, impacts))
+    _report(progress_callback, 95, "Assembled video analysis")
 
     result = {"schema_version": SCHEMA_VERSION, "source": src_meta, "scenes": scene_dicts}
     if out_path:
         Path(out_path).write_text(json.dumps(result, indent=2))
+    _report(progress_callback, 100, "Video analysis complete")
     return result
 
 
@@ -99,6 +109,11 @@ class _SceneAccumulator:
         self.vys.append(vy)
         self.rads.append(rad)
         self.diffs.append(diff)
+
+
+def _report(progress_callback, percent, detail):
+    if progress_callback is not None:
+        progress_callback(percent, detail)
 
 
 def _video_metadata(video_path):
