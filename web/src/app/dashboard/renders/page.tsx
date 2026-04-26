@@ -11,6 +11,7 @@ import {
     versionRef,
 } from "../dashboardCommon"
 import styles from "../studio.module.css"
+import { downloadSignedUrl, safeDownloadFilename } from "@/services/downloadFile"
 import { AssetSummary, EclypteApiClient, RunSummary } from "@/services/eclypteApi"
 
 type RenderPreview = { asset: AssetSummary; url: string }
@@ -22,6 +23,7 @@ export default function RendersPage() {
     const [preview, setPreview] = useState<RenderPreview | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState(false)
+    const [downloadingId, setDownloadingId] = useState<string | null>(null)
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
 
@@ -64,6 +66,30 @@ export default function RendersPage() {
             setPreview({ asset, url: download.download_url })
         } catch (caught) {
             setError(errorMessage(caught))
+        }
+    }
+
+    const downloadAsset = async (asset: AssetSummary) => {
+        if (!api) {
+            return
+        }
+        const ref = versionRef(asset)
+        if (!ref) {
+            setError("Render output has no current version.")
+            return
+        }
+        setDownloadingId(asset.file_id)
+        setError(null)
+        try {
+            const downloadUrl = (await api.getDownloadUrl(ref)).download_url
+            await downloadSignedUrl({
+                url: downloadUrl,
+                filename: safeDownloadFilename(asset.current_version?.original_filename || asset.display_name, "eclypte-render.mp4"),
+            })
+        } catch (caught) {
+            setError(errorMessage(caught))
+        } finally {
+            setDownloadingId(null)
         }
     }
 
@@ -118,9 +144,14 @@ export default function RendersPage() {
                                             <Film size={16} /> Preview
                                         </button>
                                         {preview?.asset.file_id === asset.file_id && (
-                                            <a className={styles.ghostButton} href={preview.url}>
-                                                <Download size={16} /> Download
-                                            </a>
+                                            <button
+                                                className={styles.ghostButton}
+                                                type="button"
+                                                onClick={() => downloadAsset(asset)}
+                                                disabled={downloadingId === asset.file_id}
+                                            >
+                                                <Download size={16} /> {downloadingId === asset.file_id ? "Downloading" : "Download"}
+                                            </button>
                                         )}
                                     </div>
                                 </article>
@@ -163,9 +194,14 @@ export default function RendersPage() {
                                 <h2>{preview.asset.display_name}</h2>
                                 <p>Presigned preview URL for the latest render version.</p>
                             </div>
-                            <a className={styles.primaryButton} href={preview.url}>
-                                <Download size={16} /> Download MP4
-                            </a>
+                            <button
+                                className={styles.primaryButton}
+                                type="button"
+                                onClick={() => downloadAsset(preview.asset)}
+                                disabled={downloadingId === preview.asset.file_id}
+                            >
+                                <Download size={16} /> {downloadingId === preview.asset.file_id ? "Downloading" : "Download MP4"}
+                            </button>
                         </div>
                         <video className={styles.previewMedia} controls src={preview.url} />
                     </div>

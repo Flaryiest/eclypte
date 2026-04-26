@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
-import { RefreshCw, WandSparkles } from "lucide-react"
+import { Download, RefreshCw, WandSparkles } from "lucide-react"
 import { DashboardPage, StatusBadge, formatBytes, kindLabel, versionRef } from "../dashboardCommon"
 import styles from "../studio.module.css"
+import { downloadSignedUrl, safeDownloadFilename } from "@/services/downloadFile"
 import {
     AssetSummary,
     EclypteApiClient,
@@ -39,6 +40,9 @@ export default function NewEditPage() {
     const [isRunning, setIsRunning] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
+    const [downloadRef, setDownloadRef] = useState<FileVersionInput | null>(null)
+    const [downloadFilename, setDownloadFilename] = useState("eclypte-amv.mp4")
+    const [isDownloading, setIsDownloading] = useState(false)
     const [stages, setStages] = useState<Record<StageId, Stage>>(initialStages)
     const abortRef = useRef<AbortController | null>(null)
 
@@ -143,7 +147,9 @@ export default function NewEditPage() {
             )
             const render = outputRef(renderRun, "render_output_file_id", "render_output_version_id", "render")
             const download = await api.getDownloadUrl(render, controller.signal)
+            setDownloadRef(render)
             setDownloadUrl(download.download_url)
+            setDownloadFilename(safeDownloadFilename(`eclypte-${render.version_id}.mp4`, "eclypte-amv.mp4"))
             setStage("result", "complete", "AMV is ready")
             void loadAssets()
         } catch (caught) {
@@ -166,7 +172,27 @@ export default function NewEditPage() {
         setIsRunning(false)
         setError(null)
         setDownloadUrl(null)
+        setDownloadRef(null)
+        setDownloadFilename("eclypte-amv.mp4")
         setStages(initialStages())
+    }
+
+    const downloadRender = async () => {
+        if (!downloadUrl) {
+            return
+        }
+        setIsDownloading(true)
+        setError(null)
+        try {
+            const url = api && downloadRef
+                ? (await api.getDownloadUrl(downloadRef)).download_url
+                : downloadUrl
+            await downloadSignedUrl({ url, filename: downloadFilename })
+        } catch (caught) {
+            setError(errorMessage(caught))
+        } finally {
+            setIsDownloading(false)
+        }
     }
 
     const setStage = (stageId: StageId, status: StageStatus, detail: string) => {
@@ -326,7 +352,9 @@ export default function NewEditPage() {
                                 <h2>Rendered output</h2>
                                 <p>Your final MP4 is ready for preview and download.</p>
                             </div>
-                            <a className={styles.primaryButton} href={downloadUrl}>Download MP4</a>
+                            <button className={styles.primaryButton} type="button" onClick={downloadRender} disabled={isDownloading}>
+                                <Download size={16} /> {isDownloading ? "Downloading" : "Download MP4"}
+                            </button>
                         </div>
                         <video className={styles.previewMedia} controls src={downloadUrl} />
                     </div>

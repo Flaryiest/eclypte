@@ -12,6 +12,7 @@ import {
     versionRef,
 } from "../dashboardCommon"
 import styles from "../studio.module.css"
+import { downloadSignedUrl, safeDownloadFilename } from "@/services/downloadFile"
 import {
     ArtifactKind,
     AssetSummary,
@@ -37,6 +38,7 @@ export default function AssetsPage() {
     const [isUploading, setIsUploading] = useState(false)
     const [isImporting, setIsImporting] = useState(false)
     const [busyAssetId, setBusyAssetId] = useState<string | null>(null)
+    const [downloadingId, setDownloadingId] = useState<string | null>(null)
     const abortRef = useRef<AbortController | null>(null)
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
@@ -180,6 +182,30 @@ export default function AssetsPage() {
         setPreview({ asset, url: download.download_url })
     }
 
+    const downloadAsset = async (asset: AssetSummary) => {
+        if (!api) {
+            return
+        }
+        const ref = versionRef(asset)
+        if (!ref) {
+            setError("Asset has no current version.")
+            return
+        }
+        setDownloadingId(asset.file_id)
+        setError(null)
+        try {
+            const downloadUrl = (await api.getDownloadUrl(ref)).download_url
+            await downloadSignedUrl({
+                url: downloadUrl,
+                filename: safeDownloadFilename(asset.current_version?.original_filename || asset.display_name, "eclypte-asset"),
+            })
+        } catch (caught) {
+            setError(errorMessage(caught))
+        } finally {
+            setDownloadingId(null)
+        }
+    }
+
     if (!isLoaded) {
         return <DashboardPage eyebrow="Assets" title="Loading assets"><div /></DashboardPage>
     }
@@ -307,13 +333,27 @@ export default function AssetsPage() {
                     )}
                 </div>
 
-                {preview && <AssetPreview preview={preview} />}
+                {preview && (
+                    <AssetPreview
+                        preview={preview}
+                        isDownloading={downloadingId === preview.asset.file_id}
+                        onDownload={() => downloadAsset(preview.asset)}
+                    />
+                )}
             </section>
         </DashboardPage>
     )
 }
 
-function AssetPreview({ preview }: { preview: PreviewState }) {
+function AssetPreview({
+    preview,
+    isDownloading,
+    onDownload,
+}: {
+    preview: PreviewState
+    isDownloading: boolean
+    onDownload: () => void
+}) {
     const contentType = preview.asset.current_version?.content_type || ""
     const isAudio = contentType.startsWith("audio/")
     const isVideo = contentType.startsWith("video/")
@@ -325,7 +365,9 @@ function AssetPreview({ preview }: { preview: PreviewState }) {
                     <h2>Preview</h2>
                     <p>Presigned URLs expire; refresh preview if playback stops.</p>
                 </div>
-                <a className={styles.primaryButton} href={preview.url}>Download</a>
+                <button className={styles.primaryButton} type="button" onClick={onDownload} disabled={isDownloading}>
+                    <Download size={16} /> {isDownloading ? "Downloading" : "Download"}
+                </button>
             </div>
             {isAudio && <audio className={styles.previewMedia} controls src={preview.url} />}
             {isVideo && <video className={styles.previewMedia} controls src={preview.url} />}
