@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useUser } from "@clerk/nextjs"
-import { Download, Eye, RefreshCw, WandSparkles } from "lucide-react"
+import { Download, Eye, RefreshCw, RotateCcw, Trash2, WandSparkles, XCircle } from "lucide-react"
 import { DashboardPage, StatusBadge, formatBytes, formatDate, kindLabel, versionRef } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import { downloadSignedUrl, safeDownloadFilename } from "@/services/downloadFile"
@@ -29,11 +29,14 @@ export default function NewEditPage() {
     const [isLoading, setIsLoading] = useState(false)
     const [isCreating, setIsCreating] = useState(false)
     const [downloadingId, setDownloadingId] = useState<string | null>(null)
+    const [cancelingId, setCancelingId] = useState<string | null>(null)
+    const [deletingId, setDeletingId] = useState<string | null>(null)
+    const [redoingId, setRedoingId] = useState<string | null>(null)
     const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({})
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
-    const songs = assets.filter((asset) => asset.kind === "song_audio")
-    const videos = assets.filter((asset) => asset.kind === "source_video")
+    const songs = assets.filter((asset) => asset.kind === "song_audio" && asset.current_version_id && !asset.archived_at)
+    const videos = assets.filter((asset) => asset.kind === "source_video" && asset.current_version_id && !asset.archived_at)
     const selectedSong = songs.find((asset) => asset.file_id === audioId) ?? null
     const selectedVideo = videos.find((asset) => asset.file_id === videoId) ?? null
     const selectedAssets = [selectedSong, selectedVideo].filter(
@@ -185,6 +188,59 @@ export default function NewEditPage() {
         }
     }
 
+    const cancelJob = async (job: EditJobStatus) => {
+        if (!api) {
+            return
+        }
+        setCancelingId(job.run_id)
+        setError(null)
+        try {
+            const next = await api.cancelEditJob(job.run_id)
+            setJobs((current) => current.map((item) => item.run_id === next.run_id ? next : item))
+        } catch (caught) {
+            setError(errorMessage(caught))
+        } finally {
+            setCancelingId(null)
+        }
+    }
+
+    const deleteJob = async (job: EditJobStatus) => {
+        if (!api) {
+            return
+        }
+        setDeletingId(job.run_id)
+        setError(null)
+        try {
+            await api.deleteEditJob(job.run_id)
+            setJobs((current) => current.filter((item) => item.run_id !== job.run_id))
+            setPreviewUrls((current) => {
+                const next = { ...current }
+                delete next[job.run_id]
+                return next
+            })
+        } catch (caught) {
+            setError(errorMessage(caught))
+        } finally {
+            setDeletingId(null)
+        }
+    }
+
+    const redoJob = async (job: EditJobStatus) => {
+        if (!api) {
+            return
+        }
+        setRedoingId(job.run_id)
+        setError(null)
+        try {
+            const next = await api.redoEditJob(job.run_id)
+            setJobs((current) => [next, ...current])
+        } catch (caught) {
+            setError(errorMessage(caught))
+        } finally {
+            setRedoingId(null)
+        }
+    }
+
     if (!isLoaded) {
         return <DashboardPage eyebrow="New edit" title="Preparing studio"><div /></DashboardPage>
     }
@@ -317,8 +373,14 @@ export default function NewEditPage() {
                                     job={job}
                                     previewUrl={previewUrls[job.run_id]}
                                     isDownloading={downloadingId === job.run_id}
+                                    isCanceling={cancelingId === job.run_id}
+                                    isDeleting={deletingId === job.run_id}
+                                    isRedoing={redoingId === job.run_id}
                                     onPreview={() => openPreview(job)}
                                     onDownload={() => downloadRender(job)}
+                                    onCancel={() => cancelJob(job)}
+                                    onDelete={() => deleteJob(job)}
+                                    onRedo={() => redoJob(job)}
                                 />
                             ))}
                         </div>
@@ -333,16 +395,31 @@ function EditJobCard({
     job,
     previewUrl,
     isDownloading,
+    isCanceling,
+    isDeleting,
+    isRedoing,
     onPreview,
     onDownload,
+    onCancel,
+    onDelete,
+    onRedo,
 }: {
     job: EditJobStatus
     previewUrl?: string
     isDownloading: boolean
+    isCanceling: boolean
+    isDeleting: boolean
+    isRedoing: boolean
     onPreview: () => void
     onDownload: () => void
+    onCancel: () => void
+    onDelete: () => void
+    onRedo: () => void
 }) {
     const isComplete = job.status === "completed" && job.render_output
+    const isActive = isJobActive(job)
+    const canRedo = job.status === "failed" || job.status === "canceled"
+    const canDelete = job.status === "failed" || job.status === "canceled" || job.status === "completed"
     return (
         <article className={styles.jobCard}>
             <div className={styles.cardTop}>
@@ -365,14 +442,33 @@ function EditJobCard({
                 ))}
             </div>
             {job.last_error && <div className={styles.errorBanner}>{job.last_error}</div>}
-            {isComplete && (
+            {(isComplete || isActive || canRedo || canDelete) && (
                 <div className={styles.cardActions}>
-                    <button className={styles.secondaryButton} type="button" onClick={onPreview}>
-                        <Eye size={16} /> Preview
-                    </button>
-                    <button className={styles.primaryButton} type="button" onClick={onDownload} disabled={isDownloading}>
-                        <Download size={16} /> {isDownloading ? "Downloading" : "Download MP4"}
-                    </button>
+                    {isActive && (
+                        <button className={styles.secondaryButton} type="button" onClick={onCancel} disabled={isCanceling}>
+                            <XCircle size={16} /> {isCanceling ? "Canceling" : "Cancel"}
+                        </button>
+                    )}
+                    {canRedo && (
+                        <button className={styles.secondaryButton} type="button" onClick={onRedo} disabled={isRedoing}>
+                            <RotateCcw size={16} /> {isRedoing ? "Starting" : "Redo"}
+                        </button>
+                    )}
+                    {canDelete && (
+                        <button className={styles.dangerButton} type="button" onClick={onDelete} disabled={isDeleting}>
+                            <Trash2 size={16} /> {isDeleting ? "Deleting" : "Delete"}
+                        </button>
+                    )}
+                    {isComplete && (
+                        <>
+                            <button className={styles.secondaryButton} type="button" onClick={onPreview}>
+                                <Eye size={16} /> Preview
+                            </button>
+                            <button className={styles.primaryButton} type="button" onClick={onDownload} disabled={isDownloading}>
+                                <Download size={16} /> {isDownloading ? "Downloading" : "Download MP4"}
+                            </button>
+                        </>
+                    )}
                 </div>
             )}
             {previewUrl && <video className={styles.previewMedia} controls src={previewUrl} />}
@@ -403,6 +499,7 @@ function stageClass(status: EditJobStage["status"]) {
     if (status === "running") return styles.activeStage
     if (status === "completed") return styles.completeStage
     if (status === "failed") return styles.failedStage
+    if (status === "canceled") return styles.failedStage
     return ""
 }
 

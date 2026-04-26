@@ -216,12 +216,14 @@ class DefaultWorkflowRunner:
         detail: str,
         outputs: dict[str, str] | None = None,
     ) -> None:
-        repo.update_run_status(
+        updated = repo.update_run_status(
             parent_ref,
             status="running",
             current_step=stage,
             outputs=outputs,
         )
+        if updated.status == "canceled":
+            return
         repo.append_run_progress(
             run_ref=parent_ref,
             stage=stage,

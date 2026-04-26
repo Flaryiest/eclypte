@@ -483,6 +483,12 @@
 	box-shadow: 0 0 0 3px rgba(22, 20, 18, 0.06);
 }
 
+.canceled .badgeDot,
+.archived .badgeDot {
+	background: var(--ec-ink-muted);
+	box-shadow: 0 0 0 3px rgba(22, 20, 18, 0.06);
+}
+
 .uploaded .badgeDot,
 .created .badgeDot,
 .blocked .badgeDot {

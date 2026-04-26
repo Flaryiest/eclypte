@@ -47,7 +47,10 @@ export function StatusBadge({
 }
 
 export function formatBytes(bytes: number | null | undefined) {
-    if (!bytes) {
+    if (bytes === null || bytes === undefined) {
+        return "—"
+    }
+    if (bytes === 0) {
         return "0 B"
     }
     const units = ["B", "KB", "MB", "GB"]

@@ -2,7 +2,7 @@
 
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
-import { Activity, Download, Link2, RefreshCw, Upload } from "lucide-react"
+import { Activity, Download, Link2, RefreshCw, RotateCcw, Trash2, Upload } from "lucide-react"
 import {
     DashboardPage,
     StatusBadge,
@@ -25,11 +25,12 @@ import {
 type UploadSlot = "audio" | "video"
 type PreviewState = { asset: AssetSummary; url: string }
 type Disclosure = "upload" | "youtube" | null
+type LibraryTab = "source" | "derived" | "hidden"
 
 export default function AssetsPage() {
     const { isLoaded, isSignedIn, user } = useUser()
     const [assets, setAssets] = useState<AssetSummary[]>([])
-    const [filter, setFilter] = useState<"all" | ArtifactKind>("all")
+    const [activeTab, setActiveTab] = useState<LibraryTab>("source")
     const [file, setFile] = useState<File | null>(null)
     const [slot, setSlot] = useState<UploadSlot>("audio")
     const [youtubeUrl, setYoutubeUrl] = useState("")
@@ -42,12 +43,17 @@ export default function AssetsPage() {
     const [isImporting, setIsImporting] = useState(false)
     const [busyAssetId, setBusyAssetId] = useState<string | null>(null)
     const [downloadingId, setDownloadingId] = useState<string | null>(null)
+    const [deletingId, setDeletingId] = useState<string | null>(null)
+    const [restoringId, setRestoringId] = useState<string | null>(null)
     const abortRef = useRef<AbortController | null>(null)
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
-    const visibleAssets = filter === "all" ? assets : assets.filter((asset) => asset.kind === filter)
+    const sourceAssets = assets.filter((asset) => !asset.archived_at && isSourceKind(asset.kind))
+    const derivedAssets = assets.filter((asset) => !asset.archived_at && !isSourceKind(asset.kind) && asset.kind !== "render_output")
+    const hiddenAssets = assets.filter((asset) => Boolean(asset.archived_at))
+    const visibleAssets = activeTab === "source" ? sourceAssets : activeTab === "derived" ? derivedAssets : hiddenAssets
     const isWorking = isUploading || isImporting
-    const selectedAsset = selectedFileId ? assets.find((asset) => asset.file_id === selectedFileId) ?? null : null
+    const selectedAsset = selectedFileId ? visibleAssets.find((asset) => asset.file_id === selectedFileId) ?? null : null
 
     const loadAssets = useCallback(async () => {
         if (!api) {
@@ -55,7 +61,7 @@ export default function AssetsPage() {
         }
         setError(null)
         try {
-            setAssets(await api.listAssets())
+            setAssets(await api.listAssets({ includeArchived: true }))
         } catch (caught) {
             setError(errorMessage(caught))
         }
@@ -138,7 +144,7 @@ export default function AssetsPage() {
             })
             setStatus("YouTube song imported and analyzed")
             setYoutubeUrl("")
-            setFilter("song_audio")
+            setActiveTab("source")
             await loadAssets()
         } catch (caught) {
             if (!isAbortError(caught)) {
@@ -218,6 +224,45 @@ export default function AssetsPage() {
             setError(errorMessage(caught))
         } finally {
             setDownloadingId(null)
+        }
+    }
+
+    const deleteAsset = async (asset: AssetSummary) => {
+        if (!api) {
+            return
+        }
+        setDeletingId(asset.file_id)
+        setError(null)
+        try {
+            await api.deleteAsset(asset.file_id)
+            setStatus(`${asset.display_name} removed from the library`)
+            if (selectedFileId === asset.file_id) {
+                setSelectedFileId(null)
+                setPreview(null)
+            }
+            await loadAssets()
+        } catch (caught) {
+            setError(errorMessage(caught))
+        } finally {
+            setDeletingId(null)
+        }
+    }
+
+    const restoreAsset = async (asset: AssetSummary) => {
+        if (!api) {
+            return
+        }
+        setRestoringId(asset.file_id)
+        setError(null)
+        try {
+            await api.restoreAsset(asset.file_id)
+            setStatus(`${asset.display_name} restored`)
+            setActiveTab(isSourceKind(asset.kind) ? "source" : "derived")
+            await loadAssets()
+        } catch (caught) {
+            setError(errorMessage(caught))
+        } finally {
+            setRestoringId(null)
         }
     }
 
@@ -343,18 +388,41 @@ export default function AssetsPage() {
                             <h2>Library</h2>
                             <p>{visibleAssets.length} asset{visibleAssets.length === 1 ? "" : "s"}</p>
                         </div>
-                        <select className={styles.select} value={filter} onChange={(event) => setFilter(event.target.value as "all" | ArtifactKind)} style={{ maxWidth: 240 }}>
-                            <option value="all">All assets</option>
-                            <option value="song_audio">Songs</option>
-                            <option value="source_video">Videos</option>
-                            <option value="music_analysis">Music analyses</option>
-                            <option value="video_analysis">Video analyses</option>
-                            <option value="timeline">Timelines</option>
-                            <option value="render_output">Renders</option>
-                        </select>
+                        <div className={styles.segmentedControl} role="tablist" aria-label="Asset library">
+                            <button
+                                className={activeTab === "source" ? styles.segmentActive : styles.segmentButton}
+                                type="button"
+                                onClick={() => {
+                                    setActiveTab("source")
+                                    setSelectedFileId(null)
+                                }}
+                            >
+                                Sources ({sourceAssets.length})
+                            </button>
+                            <button
+                                className={activeTab === "derived" ? styles.segmentActive : styles.segmentButton}
+                                type="button"
+                                onClick={() => {
+                                    setActiveTab("derived")
+                                    setSelectedFileId(null)
+                                }}
+                            >
+                                Derived ({derivedAssets.length})
+                            </button>
+                            <button
+                                className={activeTab === "hidden" ? styles.segmentActive : styles.segmentButton}
+                                type="button"
+                                onClick={() => {
+                                    setActiveTab("hidden")
+                                    setSelectedFileId(null)
+                                }}
+                            >
+                                Hidden ({hiddenAssets.length})
+                            </button>
+                        </div>
                     </div>
                     {visibleAssets.length === 0 ? (
-                        <div className={styles.emptyState}>No assets yet.</div>
+                        <div className={styles.emptyState}>{emptyAssetMessage(activeTab)}</div>
                     ) : (
                         <div className={styles.assetTable}>
                             <div className={styles.assetTableHeader}>
@@ -401,6 +469,10 @@ export default function AssetsPage() {
                             onAnalyze={() => analyzeAsset(selectedAsset)}
                             onPreview={() => openPreview(selectedAsset)}
                             onDownload={() => downloadAsset(selectedAsset)}
+                            onDelete={() => deleteAsset(selectedAsset)}
+                            onRestore={() => restoreAsset(selectedAsset)}
+                            isDeleting={deletingId === selectedAsset.file_id}
+                            isRestoring={restoringId === selectedAsset.file_id}
                         />
                     )}
                 </div>
@@ -414,20 +486,29 @@ function AssetDetail({
     preview,
     isAnalyzing,
     isDownloading,
+    isDeleting,
+    isRestoring,
     onAnalyze,
     onPreview,
     onDownload,
+    onDelete,
+    onRestore,
 }: {
     asset: AssetSummary
     preview: PreviewState | null
     isAnalyzing: boolean
     isDownloading: boolean
+    isDeleting: boolean
+    isRestoring: boolean
     onAnalyze: () => void
     onPreview: () => void
     onDownload: () => void
+    onDelete: () => void
+    onRestore: () => void
 }) {
     const state = assetState(asset)
-    const canAnalyze = (asset.kind === "song_audio" || asset.kind === "source_video") && !asset.analysis
+    const isArchived = Boolean(asset.archived_at)
+    const canAnalyze = (asset.kind === "song_audio" || asset.kind === "source_video") && !asset.analysis && !isArchived
     const contentType = asset.current_version?.content_type || ""
     const isAudio = contentType.startsWith("audio/")
     const isVideo = contentType.startsWith("video/")
@@ -463,14 +544,23 @@ function AssetDetail({
                         <Activity size={16} /> {isAnalyzing ? "Analyzing" : "Analyze"}
                     </button>
                 )}
-                {asset.current_version_id && !preview && (
+                {asset.current_version_id && !preview && !isArchived && (
                     <button className={styles.secondaryButton} type="button" onClick={onPreview}>
                         <Download size={16} /> Preview
                     </button>
                 )}
-                {asset.current_version_id && (
+                {asset.current_version_id && !isArchived && (
                     <button className={styles.primaryButton} type="button" onClick={onDownload} disabled={isDownloading}>
                         <Download size={16} /> {isDownloading ? "Downloading" : "Download"}
+                    </button>
+                )}
+                {isArchived ? (
+                    <button className={styles.secondaryButton} type="button" onClick={onRestore} disabled={isRestoring}>
+                        <RotateCcw size={16} /> {isRestoring ? "Restoring" : "Restore"}
+                    </button>
+                ) : (
+                    <button className={styles.dangerButton} type="button" onClick={onDelete} disabled={isDeleting}>
+                        <Trash2 size={16} /> {isDeleting ? "Deleting" : "Delete"}
                     </button>
                 )}
             </div>
@@ -482,6 +572,9 @@ function validateUpload(file: File | null, slot: UploadSlot) {
     if (!file) {
         return null
     }
+    if (file.size <= 0) {
+        return "Use a non-empty file."
+    }
     const extension = file.name.toLowerCase().split(".").pop()
     if (slot === "audio" && file.type !== "audio/wav" && extension !== "wav") {
         return "Use a WAV file."
@@ -490,6 +583,20 @@ function validateUpload(file: File | null, slot: UploadSlot) {
         return "Use an MP4 file."
     }
     return null
+}
+
+function isSourceKind(kind: ArtifactKind) {
+    return kind === "song_audio" || kind === "source_video"
+}
+
+function emptyAssetMessage(tab: LibraryTab) {
+    if (tab === "source") {
+        return "No source uploads yet."
+    }
+    if (tab === "derived") {
+        return "No derived analysis or timeline files yet."
+    }
+    return "No hidden assets."
 }
 
 function validateYouTubeUrl(value: string) {

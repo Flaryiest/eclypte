@@ -46,7 +46,11 @@ class FakePostgresCursor:
         normalized = " ".join(sql.lower().split())
         params = params or ()
 
-        if normalized.startswith("create table") or normalized.startswith("create index"):
+        if (
+            normalized.startswith("create table")
+            or normalized.startswith("create index")
+            or normalized.startswith("alter table")
+        ):
             return
 
         if normalized.startswith("insert into run_manifests"):
@@ -62,6 +66,8 @@ class FakePostgresCursor:
                 last_error,
                 created_at,
                 updated_at,
+                archived_at,
+                archived_reason,
             ) = params
             self.pool.manifests[(owner_user_id, run_id)] = {
                 "owner_user_id": owner_user_id,
@@ -75,6 +81,8 @@ class FakePostgresCursor:
                 "last_error": last_error,
                 "created_at": created_at,
                 "updated_at": updated_at,
+                "archived_at": archived_at,
+                "archived_reason": archived_reason,
             }
             return
 

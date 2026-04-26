@@ -4,6 +4,7 @@
 .worktrees/
 .pytest_cache/
 .pytest-tmp*/
+.pytest-basetemp*/
 pytest-tmp*/
 pytest-temp-root*/
 .pytest

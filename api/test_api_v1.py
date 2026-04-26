@@ -122,6 +122,10 @@ def test_direct_upload_create_complete_metadata_and_download_url():
     body = created.json()
     assert body["upload_url"].startswith("memory://put/")
     assert body["required_headers"]["Content-Type"] == "audio/wav"
+    assert client.get(
+        "/v1/assets",
+        headers={"X-User-Id": "user_123"},
+    ).json() == []
 
     blob_key = file_version_blob_key(
         user_id="user_123",
@@ -169,6 +173,38 @@ def test_completing_upload_before_object_exists_returns_clear_error():
 
     assert response.status_code == 400
     assert "has not been uploaded" in response.json()["detail"]
+
+
+def test_deleting_upload_reservation_cleans_staged_blob_and_keeps_assets_empty():
+    client, store, _ = build_client()
+
+    created = client.post(
+        "/v1/uploads",
+        headers={"X-User-Id": "user_123"},
+        json={
+            "kind": "source_video",
+            "filename": "source.mp4",
+            "content_type": "video/mp4",
+            "size_bytes": 5,
+        },
+    )
+    body = created.json()
+    blob_key = file_version_blob_key(
+        user_id="user_123",
+        file_id=body["file_id"],
+        version_id=body["version_id"],
+    )
+    store.put_bytes(blob_key, b"video", content_type="video/mp4")
+
+    deleted = client.delete(
+        f"/v1/uploads/{body['upload_id']}",
+        headers={"X-User-Id": "user_123"},
+    )
+    assets = client.get("/v1/assets", headers={"X-User-Id": "user_123"})
+
+    assert deleted.status_code == 204
+    assert blob_key not in store.objects
+    assert assets.json() == []
 
 
 def test_workflow_endpoints_create_runs_and_schedule_background_tasks():
@@ -646,6 +682,134 @@ def test_edit_job_detail_includes_final_render_ref_and_download_status():
     assert body["child_runs"]["render"] == "run_render"
 
 
+def test_cancel_edit_job_is_idempotent_and_blocks_late_completion():
+    client, store, _ = build_client()
+    repo = StorageRepository(store)
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="edit_pipeline",
+        inputs={
+            "title": "Cancelable",
+            "audio_file_id": "file_audio",
+            "audio_version_id": "ver_audio",
+            "source_video_file_id": "file_video",
+            "source_video_version_id": "ver_video",
+            "planning_mode": "agent",
+        },
+        steps=["assets", "music", "video", "timeline", "render", "result"],
+    )
+
+    canceled = client.post(
+        f"/v1/edits/{run.run_id}/cancel",
+        headers={"X-User-Id": "user_123"},
+    )
+    repeated = client.post(
+        f"/v1/edits/{run.run_id}/cancel",
+        headers={"X-User-Id": "user_123"},
+    )
+    repo.update_run_status(
+        RunRef(user_id="user_123", run_id=run.run_id),
+        status="completed",
+        outputs={"render_output_file_id": "file_render"},
+    )
+    detail = client.get(
+        f"/v1/edits/{run.run_id}",
+        headers={"X-User-Id": "user_123"},
+    )
+
+    assert canceled.status_code == 200
+    assert canceled.json()["status"] == "canceled"
+    assert repeated.status_code == 200
+    assert detail.json()["status"] == "canceled"
+    assert detail.json()["render_output"] is None
+
+
+def test_delete_edit_job_hides_it_from_edit_list():
+    client, store, _ = build_client()
+    repo = StorageRepository(store)
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="edit_pipeline",
+        inputs={
+            "title": "Hide me",
+            "audio_file_id": "file_audio",
+            "audio_version_id": "ver_audio",
+            "source_video_file_id": "file_video",
+            "source_video_version_id": "ver_video",
+            "planning_mode": "agent",
+        },
+        steps=["assets", "music", "video", "timeline", "render", "result"],
+    )
+
+    deleted = client.delete(
+        f"/v1/edits/{run.run_id}",
+        headers={"X-User-Id": "user_123"},
+    )
+    jobs = client.get("/v1/edits", headers={"X-User-Id": "user_123"})
+    detail = client.get(
+        f"/v1/edits/{run.run_id}",
+        headers={"X-User-Id": "user_123"},
+    )
+
+    assert deleted.status_code == 204
+    assert jobs.json() == []
+    assert detail.status_code == 404
+
+
+def test_redo_edit_job_creates_new_job_from_original_inputs():
+    client, store, runner = build_client()
+    repo = StorageRepository(store)
+    audio = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_audio",
+        kind="song_audio",
+        filename="song.wav",
+        content_type="audio/wav",
+    )
+    video = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_video",
+        kind="source_video",
+        filename="source.mp4",
+        content_type="video/mp4",
+    )
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="edit_pipeline",
+        inputs={
+            "title": "Redo me",
+            "audio_file_id": audio["file_id"],
+            "audio_version_id": audio["version_id"],
+            "source_video_file_id": video["file_id"],
+            "source_video_version_id": video["version_id"],
+            "planning_mode": "deterministic",
+            "creative_brief": "Retry this.",
+        },
+        steps=["assets", "music", "video", "timeline", "render", "result"],
+    )
+    repo.update_run_status(
+        RunRef(user_id="user_123", run_id=run.run_id),
+        status="failed",
+        current_step="render",
+        last_error="Render failed",
+    )
+
+    response = client.post(
+        f"/v1/edits/{run.run_id}/redo",
+        headers={"X-User-Id": "user_123"},
+    )
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["run_id"] != run.run_id
+    assert body["title"] == "Redo me"
+    assert runner.calls[-1][0] == "edit_pipeline"
+    assert runner.calls[-1][1]["planning_mode"] == "deterministic"
+    assert runner.calls[-1][1]["creative_brief"] == "Retry this."
+
+
 def test_youtube_song_import_endpoint_creates_run_and_schedules_background_task():
     client, _, runner = build_client()
 
@@ -776,8 +940,103 @@ def test_assets_list_returns_current_version_metadata_and_kind_filter():
             },
             "latest_run": None,
             "analysis": None,
+            "archived_at": None,
+            "archived_reason": None,
         }
     ]
+
+
+def test_assets_list_excludes_renders_and_incomplete_files_by_default():
+    client, store, _ = build_client()
+    repo = StorageRepository(store)
+    publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_video",
+        kind="source_video",
+        filename="source.mp4",
+        body=b"video",
+        content_type="video/mp4",
+    )
+    render = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_render",
+        kind="render_output",
+        filename="render.mp4",
+        body=b"render",
+        content_type="video/mp4",
+    )
+    repo.create_file_manifest(
+        file_ref=FileRef(user_id="user_123", file_id="file_incomplete"),
+        kind="song_audio",
+        display_name="stalled.wav",
+    )
+
+    default_response = client.get("/v1/assets", headers={"X-User-Id": "user_123"})
+    renders_response = client.get(
+        "/v1/assets?kind=render_output",
+        headers={"X-User-Id": "user_123"},
+    )
+
+    assert default_response.status_code == 200
+    assert [asset["file_id"] for asset in default_response.json()] == ["file_video"]
+    assert renders_response.status_code == 200
+    assert renders_response.json()[0]["file_id"] == render["file_id"]
+
+
+def test_asset_delete_archives_completed_asset_and_restore_relists_it():
+    client, store, _ = build_client()
+    repo = StorageRepository(store)
+    publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_audio",
+        kind="song_audio",
+        filename="song.wav",
+        body=b"song",
+        content_type="audio/wav",
+    )
+
+    deleted = client.delete(
+        "/v1/assets/file_audio",
+        headers={"X-User-Id": "user_123"},
+    )
+    hidden = client.get(
+        "/v1/assets?include_archived=true",
+        headers={"X-User-Id": "user_123"},
+    )
+    visible = client.get("/v1/assets", headers={"X-User-Id": "user_123"})
+    restored = client.post(
+        "/v1/assets/file_audio/restore",
+        headers={"X-User-Id": "user_123"},
+    )
+
+    assert deleted.status_code == 204
+    assert visible.json() == []
+    assert hidden.json()[0]["archived_at"] is not None
+    assert restored.status_code == 200
+    assert restored.json()["archived_at"] is None
+    assert client.get("/v1/assets", headers={"X-User-Id": "user_123"}).json()[0]["file_id"] == "file_audio"
+
+
+def test_asset_delete_hard_deletes_incomplete_legacy_asset():
+    client, store, _ = build_client()
+    repo = StorageRepository(store)
+    file_ref = FileRef(user_id="user_123", file_id="file_incomplete")
+    repo.create_file_manifest(
+        file_ref=file_ref,
+        kind="song_audio",
+        display_name="stalled.wav",
+    )
+
+    response = client.delete(
+        "/v1/assets/file_incomplete",
+        headers={"X-User-Id": "user_123"},
+    )
+
+    assert response.status_code == 204
+    assert file_ref.manifest_key not in store.objects
 
 
 def test_runs_list_supports_workflow_and_status_filters():

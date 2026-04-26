@@ -5,7 +5,7 @@ import secrets
 from typing import Literal
 from urllib.parse import urlparse
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -63,7 +63,7 @@ class UploadCreateRequest(BaseModel):
     kind: Literal["song_audio", "source_video"]
     filename: str = Field(min_length=1)
     content_type: str = Field(min_length=1)
-    size_bytes: int | None = Field(default=None, ge=0)
+    size_bytes: int | None = Field(default=None, gt=0)
 
 
 class UploadCreateResponse(BaseModel):
@@ -162,6 +162,8 @@ class AssetSummary(BaseModel):
     current_version: FileVersionMeta | None
     latest_run: RunManifest | None
     analysis: FileVersionInput | None
+    archived_at: str | None
+    archived_reason: str | None
 
 
 class SynthesisReferencesRequest(BaseModel):
@@ -268,6 +270,8 @@ def create_app(
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="file version not found") from exc
+        if manifest.archived_at is not None:
+            raise HTTPException(status_code=400, detail="file is archived")
         if manifest.kind != expected_kind:
             raise HTTPException(
                 status_code=400,
@@ -312,6 +316,18 @@ def create_app(
             return None
         return FileVersionInput(file_id=file_id, version_id=version_id)
 
+    def is_active_run(run: RunManifest) -> bool:
+        return run.status in {"created", "running", "blocked"}
+
+    def load_edit_run(repo: StorageRepository, uid: str, run_id: str) -> RunManifest:
+        try:
+            run = repo.load_run_manifest(RunRef(user_id=uid, run_id=run_id))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="edit job not found") from exc
+        if run.workflow_type != "edit_pipeline":
+            raise HTTPException(status_code=404, detail="edit job not found")
+        return run
+
     def edit_status_from_run(
         repo: StorageRepository,
         uid: str,
@@ -326,6 +342,11 @@ def create_app(
             status_value = step_statuses.get(stage_id, "pending")
             if run.status == "completed":
                 status_value = "completed"
+            if run.status == "canceled":
+                if stage_id == run.current_step or status_value == "running":
+                    status_value = "canceled"
+                elif status_value != "completed":
+                    status_value = "pending"
             if run.status == "failed" and run.current_step == stage_id:
                 status_value = "failed"
             percent = int(progress.get("percent", 0))
@@ -440,7 +461,46 @@ def create_app(
             current_version=current_version,
             latest_run=latest_run,
             analysis=analysis,
+            archived_at=manifest.archived_at,
+            archived_reason=manifest.archived_reason,
         )
+
+    def start_edit_job(
+        *,
+        request: EditJobRequest,
+        background_tasks: BackgroundTasks,
+        repo: StorageRepository,
+        uid: str,
+    ) -> EditJobStatus:
+        load_version(repo, uid, request.audio, "song_audio")
+        load_version(repo, uid, request.source_video, "source_video")
+        title = (request.title or "").strip() or "Untitled edit"
+        run = create_workflow_run(
+            repo,
+            uid,
+            "edit_pipeline",
+            {
+                "title": title,
+                "audio_file_id": request.audio.file_id,
+                "audio_version_id": request.audio.version_id,
+                "source_video_file_id": request.source_video.file_id,
+                "source_video_version_id": request.source_video.version_id,
+                "planning_mode": request.planning_mode,
+                "creative_brief": request.creative_brief,
+            },
+            EDIT_STAGE_ORDER,
+        )
+        background_tasks.add_task(
+            runner.run_edit_pipeline,
+            user_id=uid,
+            run_id=run.run_id,
+            audio=request.audio.model_dump(),
+            source_video=request.source_video.model_dump(),
+            planning_mode=request.planning_mode,
+            creative_brief=request.creative_brief,
+            title=title,
+        )
+        return edit_status_from_run(repo, uid, run)
 
     @app.get("/healthz")
     def healthz() -> dict[str, bool]:
@@ -529,6 +589,18 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return repo.load_file_version_meta(version_ref)
 
+    @app.delete("/v1/uploads/{upload_id}", status_code=status.HTTP_204_NO_CONTENT)
+    def delete_upload(
+        upload_id: str,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> Response:
+        try:
+            repo.delete_upload_reservation(upload_id=upload_id, user_id=uid)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
     @app.get("/v1/files/{file_id}", response_model=FileManifest)
     def get_file(
         file_id: str,
@@ -543,14 +615,63 @@ def create_app(
     @app.get("/v1/assets", response_model=list[AssetSummary])
     def list_assets(
         kind: ArtifactKind | None = None,
+        include_archived: bool = False,
         repo: StorageRepository = Depends(repository),
         uid: str = Depends(user_id),
     ) -> list[AssetSummary]:
         manifests = repo.list_file_manifests(uid)
         if kind is not None:
             manifests = [manifest for manifest in manifests if manifest.kind == kind]
+        else:
+            manifests = [manifest for manifest in manifests if manifest.kind != "render_output"]
+        if not include_archived:
+            manifests = [manifest for manifest in manifests if manifest.archived_at is None]
+        manifests = [manifest for manifest in manifests if manifest.current_version_id is not None]
         runs = repo.list_run_manifests(uid)
         return [summarize_asset(repo, manifest, runs, uid) for manifest in manifests]
+
+    @app.delete("/v1/assets/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+    def delete_asset(
+        file_id: str,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> Response:
+        file_ref = FileRef(user_id=uid, file_id=file_id)
+        try:
+            manifest = repo.load_file_manifest(file_ref)
+        except KeyError:
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        should_hard_delete = manifest.current_version_id is None
+        if manifest.current_version_id is not None:
+            try:
+                repo.load_file_version_meta(
+                    FileVersionRef(
+                        user_id=uid,
+                        file_id=file_id,
+                        version_id=manifest.current_version_id,
+                    )
+                )
+            except KeyError:
+                should_hard_delete = True
+        if should_hard_delete:
+            repo.delete_file_tree(file_ref)
+        else:
+            repo.archive_file_manifest(file_ref, reason="user_deleted")
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.post("/v1/assets/{file_id}/restore", response_model=AssetSummary)
+    def restore_asset(
+        file_id: str,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> AssetSummary:
+        file_ref = FileRef(user_id=uid, file_id=file_id)
+        try:
+            manifest = repo.restore_file_manifest(file_ref)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="asset not found") from exc
+        runs = repo.list_run_manifests(uid)
+        return summarize_asset(repo, manifest, runs, uid)
 
     @app.get("/v1/files/{file_id}/versions/{version_id}", response_model=FileVersionMeta)
     def get_file_version(
@@ -742,35 +863,12 @@ def create_app(
         repo: StorageRepository = Depends(repository),
         uid: str = Depends(user_id),
     ) -> EditJobStatus:
-        load_version(repo, uid, request.audio, "song_audio")
-        load_version(repo, uid, request.source_video, "source_video")
-        title = (request.title or "").strip() or "Untitled edit"
-        run = create_workflow_run(
-            repo,
-            uid,
-            "edit_pipeline",
-            {
-                "title": title,
-                "audio_file_id": request.audio.file_id,
-                "audio_version_id": request.audio.version_id,
-                "source_video_file_id": request.source_video.file_id,
-                "source_video_version_id": request.source_video.version_id,
-                "planning_mode": request.planning_mode,
-                "creative_brief": request.creative_brief,
-            },
-            EDIT_STAGE_ORDER,
+        return start_edit_job(
+            request=request,
+            background_tasks=background_tasks,
+            repo=repo,
+            uid=uid,
         )
-        background_tasks.add_task(
-            runner.run_edit_pipeline,
-            user_id=uid,
-            run_id=run.run_id,
-            audio=request.audio.model_dump(),
-            source_video=request.source_video.model_dump(),
-            planning_mode=request.planning_mode,
-            creative_brief=request.creative_brief,
-            title=title,
-        )
-        return edit_status_from_run(repo, uid, run)
 
     @app.get("/v1/edits", response_model=list[EditJobStatus])
     def list_edit_jobs(
@@ -780,7 +878,7 @@ def create_app(
         runs = [
             run
             for run in repo.list_run_manifests(uid)
-            if run.workflow_type == "edit_pipeline"
+            if run.workflow_type == "edit_pipeline" and run.archived_at is None
         ]
         return [edit_status_from_run(repo, uid, run) for run in runs]
 
@@ -790,22 +888,107 @@ def create_app(
         repo: StorageRepository = Depends(repository),
         uid: str = Depends(user_id),
     ) -> EditJobStatus:
-        try:
-            run = repo.load_run_manifest(RunRef(user_id=uid, run_id=run_id))
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail="edit job not found") from exc
-        if run.workflow_type != "edit_pipeline":
+        run = load_edit_run(repo, uid, run_id)
+        if run.archived_at is not None:
             raise HTTPException(status_code=404, detail="edit job not found")
         return edit_status_from_run(repo, uid, run)
+
+    @app.post("/v1/edits/{run_id}/cancel", response_model=EditJobStatus)
+    def cancel_edit_job(
+        run_id: str,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> EditJobStatus:
+        run = load_edit_run(repo, uid, run_id)
+        if run.archived_at is not None:
+            raise HTTPException(status_code=404, detail="edit job not found")
+        if is_active_run(run):
+            current_stage = run.current_step or "result"
+            repo.append_run_progress(
+                run_ref=RunRef(user_id=uid, run_id=run_id),
+                stage=current_stage,
+                percent=0,
+                detail="Canceled by user",
+            )
+            run = repo.update_run_status(
+                RunRef(user_id=uid, run_id=run_id),
+                status="canceled",
+                current_step=current_stage,
+                last_error=None,
+            )
+            repo.append_run_event(
+                run_ref=RunRef(user_id=uid, run_id=run_id),
+                event_type="run_canceled",
+                timestamp=run.updated_at,
+                event_id="evt_canceled",
+                payload={},
+            )
+        return edit_status_from_run(repo, uid, repo.load_run_manifest(RunRef(user_id=uid, run_id=run_id)))
+
+    @app.delete("/v1/edits/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
+    def delete_edit_job(
+        run_id: str,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> Response:
+        run = load_edit_run(repo, uid, run_id)
+        run_ref = RunRef(user_id=uid, run_id=run_id)
+        if is_active_run(run):
+            repo.update_run_status(
+                run_ref,
+                status="canceled",
+                current_step=run.current_step,
+                last_error=None,
+            )
+        repo.archive_run(run_ref, reason="user_deleted")
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.post("/v1/edits/{run_id}/redo", response_model=EditJobStatus, status_code=202)
+    def redo_edit_job(
+        run_id: str,
+        background_tasks: BackgroundTasks,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> EditJobStatus:
+        run = load_edit_run(repo, uid, run_id)
+        if run.archived_at is not None:
+            raise HTTPException(status_code=404, detail="edit job not found")
+        audio_file_id = run.inputs.get("audio_file_id")
+        audio_version_id = run.inputs.get("audio_version_id")
+        source_video_file_id = run.inputs.get("source_video_file_id")
+        source_video_version_id = run.inputs.get("source_video_version_id")
+        if not all([audio_file_id, audio_version_id, source_video_file_id, source_video_version_id]):
+            raise HTTPException(status_code=400, detail="edit job cannot be redone because inputs are incomplete")
+        return start_edit_job(
+            request=EditJobRequest(
+                audio=FileVersionInput(
+                    file_id=str(audio_file_id),
+                    version_id=str(audio_version_id),
+                ),
+                source_video=FileVersionInput(
+                    file_id=str(source_video_file_id),
+                    version_id=str(source_video_version_id),
+                ),
+                planning_mode=run.inputs.get("planning_mode", "agent"),
+                creative_brief=run.inputs.get("creative_brief", ""),
+                title=run.inputs.get("title"),
+            ),
+            background_tasks=background_tasks,
+            repo=repo,
+            uid=uid,
+        )
 
     @app.get("/v1/runs", response_model=list[RunManifest])
     def list_runs(
         workflow_type: str | None = None,
         status: RunStatus | None = None,
+        include_archived: bool = False,
         repo: StorageRepository = Depends(repository),
         uid: str = Depends(user_id),
     ) -> list[RunManifest]:
         runs = repo.list_run_manifests(uid)
+        if not include_archived:
+            runs = [run for run in runs if run.archived_at is None]
         if workflow_type is not None:
             runs = [run for run in runs if run.workflow_type == workflow_type]
         if status is not None:

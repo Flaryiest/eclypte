@@ -83,6 +83,16 @@ class StorageRepository:
         self._store.put_json(file_ref.manifest_key, manifest.model_dump(mode="json"))
         return manifest
 
+    def save_file_manifest(self, manifest: FileManifest) -> FileManifest:
+        self._store.put_json(
+            FileRef(
+                user_id=manifest.owner_user_id,
+                file_id=manifest.file_id,
+            ).manifest_key,
+            manifest.model_dump(mode="json"),
+        )
+        return manifest
+
     def load_file_manifest(self, file_ref: FileRef) -> FileManifest:
         return FileManifest.model_validate(self._store.get_json(file_ref.manifest_key))
 
@@ -98,6 +108,38 @@ class StorageRepository:
             for key in keys
         ]
         return sorted(manifests, key=lambda item: item.updated_at, reverse=True)
+
+    def archive_file_manifest(
+        self,
+        file_ref: FileRef,
+        *,
+        reason: str = "user_deleted",
+    ) -> FileManifest:
+        manifest = self.load_file_manifest(file_ref)
+        archived = manifest.model_copy(
+            update={
+                "archived_at": manifest.archived_at or _utc_now(),
+                "archived_reason": reason,
+                "updated_at": _utc_now(),
+            }
+        )
+        return self.save_file_manifest(archived)
+
+    def restore_file_manifest(self, file_ref: FileRef) -> FileManifest:
+        manifest = self.load_file_manifest(file_ref)
+        restored = manifest.model_copy(
+            update={
+                "archived_at": None,
+                "archived_reason": None,
+                "updated_at": _utc_now(),
+            }
+        )
+        return self.save_file_manifest(restored)
+
+    def delete_file_tree(self, file_ref: FileRef) -> None:
+        prefix = f"users/{file_ref.user_id}/files/{file_ref.file_id}/"
+        for key in self._store.list_keys(prefix):
+            self._store.delete(key)
 
     def save_run_manifest(self, manifest: RunManifest) -> RunManifest:
         saved = self._run_store.save_run_manifest(manifest)
@@ -217,6 +259,23 @@ class StorageRepository:
         percent: int,
         detail: str,
     ) -> RunEvent:
+        try:
+            manifest = self.load_run_manifest(run_ref)
+            if manifest.status == "canceled":
+                return RunEvent(
+                    run_id=run_ref.run_id,
+                    owner_user_id=run_ref.user_id,
+                    event_type="progress",
+                    timestamp=_utc_event_now(),
+                    event_id=f"evt_progress_{uuid.uuid4().hex[:12]}",
+                    payload={
+                        "stage": stage,
+                        "percent": max(0, min(100, int(percent))),
+                        "detail": detail,
+                    },
+                )
+        except KeyError:
+            pass
         return self.append_run_event(
             run_ref=run_ref,
             event_type="progress",
@@ -264,16 +323,10 @@ class StorageRepository:
         upload_id = f"upl_{uuid.uuid4().hex[:12]}"
         file_id = f"file_{uuid.uuid4().hex[:12]}"
         version_id = f"ver_{uuid.uuid4().hex[:12]}"
-        file_ref = FileRef(user_id=user_id, file_id=file_id)
         version_ref = FileVersionRef(
             user_id=user_id,
             file_id=file_id,
             version_id=version_id,
-        )
-        self.create_file_manifest(
-            file_ref=file_ref,
-            kind=kind,
-            display_name=filename,
         )
         now = _utc_now()
         reservation = UploadReservation(
@@ -295,6 +348,33 @@ class StorageRepository:
             reservation.model_dump(mode="json"),
         )
         return reservation
+
+    def delete_upload_reservation(
+        self,
+        *,
+        upload_id: str,
+        user_id: str | None = None,
+    ) -> None:
+        try:
+            reservation = UploadReservation.model_validate(
+                self._store.get_json(upload_reservation_key(upload_id=upload_id))
+            )
+        except KeyError:
+            return
+        if user_id is not None and reservation.owner_user_id != user_id:
+            raise PermissionError("upload reservation does not belong to user")
+        if reservation.status == "completed":
+            self._store.delete(upload_reservation_key(upload_id=upload_id))
+            return
+        self._store.delete(reservation.blob_key)
+        self._store.delete(upload_reservation_key(upload_id=upload_id))
+        file_ref = FileRef(user_id=reservation.owner_user_id, file_id=reservation.file_id)
+        try:
+            manifest = self.load_file_manifest(file_ref)
+        except KeyError:
+            return
+        if manifest.current_version_id is None:
+            self.delete_file_tree(file_ref)
 
     def load_upload_reservation(
         self,
@@ -324,6 +404,9 @@ class StorageRepository:
             head = self._store.head(reservation.blob_key)
         except KeyError as exc:
             raise ValueError("uploaded object has not been uploaded") from exc
+        if head.size_bytes <= 0:
+            self._store.delete(reservation.blob_key)
+            raise ValueError("uploaded object is empty")
         if reservation.size_bytes is not None and head.size_bytes != reservation.size_bytes:
             raise ValueError(
                 f"uploaded object size {head.size_bytes} did not match "
@@ -359,7 +442,14 @@ class StorageRepository:
             user_id=reservation.owner_user_id,
             file_id=reservation.file_id,
         )
-        manifest = self.load_file_manifest(file_ref)
+        try:
+            manifest = self.load_file_manifest(file_ref)
+        except KeyError:
+            manifest = self.create_file_manifest(
+                file_ref=file_ref,
+                kind=reservation.kind,
+                display_name=reservation.filename,
+            )
         promoted = manifest.model_copy(
             update={
                 "current_version_id": reservation.version_id,
@@ -468,6 +558,8 @@ class StorageRepository:
         last_error: str | None = None,
     ) -> RunManifest:
         manifest = self.load_run_manifest(run_ref)
+        if manifest.status == "canceled" and status != "canceled":
+            return manifest
         step_updates = manifest.steps
         if status == "completed":
             step_updates = [
@@ -510,6 +602,33 @@ class StorageRepository:
             }
         )
         return self.save_run_manifest(updated)
+
+    def archive_run(
+        self,
+        run_ref: RunRef,
+        *,
+        reason: str = "user_deleted",
+    ) -> RunManifest:
+        manifest = self.load_run_manifest(run_ref)
+        archived = manifest.model_copy(
+            update={
+                "archived_at": manifest.archived_at or _utc_now(),
+                "archived_reason": reason,
+                "updated_at": _utc_now(),
+            }
+        )
+        return self.save_run_manifest(archived)
+
+    def restore_run(self, run_ref: RunRef) -> RunManifest:
+        manifest = self.load_run_manifest(run_ref)
+        restored = manifest.model_copy(
+            update={
+                "archived_at": None,
+                "archived_reason": None,
+                "updated_at": _utc_now(),
+            }
+        )
+        return self.save_run_manifest(restored)
 
     def create_synthesis_reference(
         self,

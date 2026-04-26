@@ -19,6 +19,8 @@ RUN_MANIFEST_COLUMNS = (
     "last_error",
     "created_at",
     "updated_at",
+    "archived_at",
+    "archived_reason",
 )
 RUN_EVENT_COLUMNS = (
     "event_id",
@@ -62,9 +64,13 @@ class PostgresRunStore:
                 last_error TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
+                archived_at TEXT,
+                archived_reason TEXT,
                 PRIMARY KEY (owner_user_id, run_id)
             )
             """,
+            "ALTER TABLE run_manifests ADD COLUMN IF NOT EXISTS archived_at TEXT",
+            "ALTER TABLE run_manifests ADD COLUMN IF NOT EXISTS archived_reason TEXT",
             """
             CREATE INDEX IF NOT EXISTS idx_run_manifests_owner_updated
             ON run_manifests (owner_user_id, updated_at DESC)
@@ -119,9 +125,11 @@ class PostgresRunStore:
                         current_step,
                         last_error,
                         created_at,
-                        updated_at
+                        updated_at,
+                        archived_at,
+                        archived_reason
                     )
-                    VALUES (%s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (owner_user_id, run_id)
                     DO UPDATE SET
                         workflow_type = EXCLUDED.workflow_type,
@@ -132,7 +140,9 @@ class PostgresRunStore:
                         current_step = EXCLUDED.current_step,
                         last_error = EXCLUDED.last_error,
                         created_at = EXCLUDED.created_at,
-                        updated_at = EXCLUDED.updated_at
+                        updated_at = EXCLUDED.updated_at,
+                        archived_at = EXCLUDED.archived_at,
+                        archived_reason = EXCLUDED.archived_reason
                     """,
                     (
                         manifest.owner_user_id,
@@ -146,6 +156,8 @@ class PostgresRunStore:
                         manifest.last_error,
                         manifest.created_at,
                         manifest.updated_at,
+                        manifest.archived_at,
+                        manifest.archived_reason,
                     ),
                 )
         return manifest
@@ -322,6 +334,8 @@ def _manifest_from_row(row) -> RunManifest:
             "last_error": _value(row, "last_error", 8),
             "created_at": _value(row, "created_at", 9),
             "updated_at": _value(row, "updated_at", 10),
+            "archived_at": _value(row, "archived_at", 11),
+            "archived_reason": _value(row, "archived_reason", 12),
         }
     )
 

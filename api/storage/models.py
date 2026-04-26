@@ -12,7 +12,7 @@ ArtifactKind = Literal[
     "timeline",
     "render_output",
 ]
-RunStatus = Literal["created", "running", "blocked", "failed", "completed"]
+RunStatus = Literal["created", "running", "blocked", "failed", "completed", "canceled"]
 StepStatus = Literal["pending", "running", "completed", "failed"]
 UploadStatus = Literal["created", "completed"]
 SynthesisReferenceStatus = Literal["queued", "running", "completed", "failed"]
@@ -39,6 +39,8 @@ class FileManifest(BaseModel):
     created_at: str
     updated_at: str
     tags: list[str] = Field(default_factory=list)
+    archived_at: str | None = None
+    archived_reason: str | None = None
 
 
 class FileVersionMeta(BaseModel):
@@ -78,6 +80,8 @@ class RunManifest(BaseModel):
     last_error: str | None = None
     created_at: str
     updated_at: str
+    archived_at: str | None = None
+    archived_reason: str | None = None
 
 
 class RunEvent(BaseModel):

@@ -42,7 +42,7 @@ export type FileVersionMeta = {
     storage_key: string
 }
 
-export type RunStatus = "created" | "running" | "blocked" | "failed" | "completed"
+export type RunStatus = "created" | "running" | "blocked" | "failed" | "completed" | "canceled"
 export type PlanningMode = "agent" | "deterministic"
 
 export type RunManifest = {
@@ -57,9 +57,11 @@ export type RunManifest = {
     last_error: string | null
     created_at: string
     updated_at: string
+    archived_at: string | null
+    archived_reason: string | null
 }
 
-export type AssetState = "uploaded" | "analyzing" | "ready" | "failed"
+export type AssetState = "uploaded" | "analyzing" | "ready" | "failed" | "archived"
 
 export type AssetSummary = {
     file_id: string
@@ -73,6 +75,8 @@ export type AssetSummary = {
     current_version: FileVersionMeta | null
     latest_run: RunManifest | null
     analysis: FileVersionInput | null
+    archived_at: string | null
+    archived_reason: string | null
 }
 
 export type RunSummary = RunManifest
@@ -133,7 +137,7 @@ export type RunStreamMessage =
 export type EditJobStage = {
     id: string
     label: string
-    status: "pending" | "running" | "completed" | "failed"
+    status: "pending" | "running" | "completed" | "failed" | "canceled"
     percent: number
     detail: string
 }
@@ -202,8 +206,22 @@ export class EclypteApiClient {
         return this.request<HealthResponse>("/healthz", { signal })
     }
 
-    async listAssets(kind?: ArtifactKind, signal?: AbortSignal) {
-        const query = kind ? `?kind=${encodeURIComponent(kind)}` : ""
+    async listAssets(
+        kindOrOptions?: ArtifactKind | { kind?: ArtifactKind; includeArchived?: boolean },
+        signal?: AbortSignal,
+    ) {
+        const params = new URLSearchParams()
+        if (typeof kindOrOptions === "string") {
+            params.set("kind", kindOrOptions)
+        } else if (kindOrOptions) {
+            if (kindOrOptions.kind) {
+                params.set("kind", kindOrOptions.kind)
+            }
+            if (kindOrOptions.includeArchived) {
+                params.set("include_archived", "true")
+            }
+        }
+        const query = params.size ? `?${params.toString()}` : ""
         return this.request<AssetSummary[]>(`/v1/assets${query}`, { signal })
     }
 
@@ -234,6 +252,27 @@ export class EclypteApiClient {
         return this.request<FileVersionMeta>(`/v1/uploads/${uploadId}/complete`, {
             method: "POST",
             body: JSON.stringify({ sha256 }),
+            signal,
+        })
+    }
+
+    async deleteUpload(uploadId: string, signal?: AbortSignal) {
+        await this.requestNoBody(`/v1/uploads/${encodeURIComponent(uploadId)}`, {
+            method: "DELETE",
+            signal,
+        })
+    }
+
+    async deleteAsset(fileId: string, signal?: AbortSignal) {
+        await this.requestNoBody(`/v1/assets/${encodeURIComponent(fileId)}`, {
+            method: "DELETE",
+            signal,
+        })
+    }
+
+    async restoreAsset(fileId: string, signal?: AbortSignal) {
+        return this.request<AssetSummary>(`/v1/assets/${encodeURIComponent(fileId)}/restore`, {
+            method: "POST",
             signal,
         })
     }
@@ -326,6 +365,27 @@ export class EclypteApiClient {
 
     async getEditJob(runId: string, signal?: AbortSignal) {
         return this.request<EditJobStatus>(`/v1/edits/${runId}`, { signal })
+    }
+
+    async cancelEditJob(runId: string, signal?: AbortSignal) {
+        return this.request<EditJobStatus>(`/v1/edits/${encodeURIComponent(runId)}/cancel`, {
+            method: "POST",
+            signal,
+        })
+    }
+
+    async deleteEditJob(runId: string, signal?: AbortSignal) {
+        await this.requestNoBody(`/v1/edits/${encodeURIComponent(runId)}`, {
+            method: "DELETE",
+            signal,
+        })
+    }
+
+    async redoEditJob(runId: string, signal?: AbortSignal) {
+        return this.request<EditJobStatus>(`/v1/edits/${encodeURIComponent(runId)}/redo`, {
+            method: "POST",
+            signal,
+        })
     }
 
     async getRun(runId: string, signal?: AbortSignal) {
@@ -431,6 +491,21 @@ export class EclypteApiClient {
 
         return response.json() as Promise<T>
     }
+
+    private async requestNoBody(path: string, init: RequestInit = {}): Promise<void> {
+        const response = await fetch(`${this.baseUrl}${path}`, {
+            ...init,
+            headers: {
+                "Content-Type": "application/json",
+                "X-User-Id": this.userId,
+                ...init.headers,
+            },
+        })
+
+        if (!response.ok) {
+            throw new EclypteApiError(await readErrorMessage(response), response.status)
+        }
+    }
 }
 
 export async function uploadAsset(
@@ -450,22 +525,25 @@ export async function uploadAsset(
     },
 ): Promise<FileVersionInput> {
     onStatus?.("Preparing upload")
-    const [reservation, sha256] = await Promise.all([
-        api.createUpload(
-            {
-                kind,
-                filename: file.name,
-                content_type: contentType,
-                size_bytes: file.size,
-            },
-            signal,
-        ),
-        sha256File(file),
-    ])
-    onStatus?.("Uploading to R2")
-    await uploadToPresignedUrl(reservation.upload_url, file, reservation.required_headers, signal)
-    onStatus?.("Completing upload")
-    await api.completeUpload(reservation.upload_id, sha256, signal)
+    const reservation = await api.createUpload(
+        {
+            kind,
+            filename: file.name,
+            content_type: contentType,
+            size_bytes: file.size,
+        },
+        signal,
+    )
+    try {
+        const sha256 = await sha256File(file)
+        onStatus?.("Uploading to R2")
+        await uploadToPresignedUrl(reservation.upload_url, file, reservation.required_headers, signal)
+        onStatus?.("Completing upload")
+        await api.completeUpload(reservation.upload_id, sha256, signal)
+    } catch (caught) {
+        await api.deleteUpload(reservation.upload_id).catch(() => undefined)
+        throw caught
+    }
     return {
         file_id: reservation.file_id,
         version_id: reservation.version_id,
@@ -473,6 +551,9 @@ export async function uploadAsset(
 }
 
 export function assetState(asset: AssetSummary): AssetState {
+    if (asset.archived_at) {
+        return "archived"
+    }
     if (asset.latest_run?.status === "failed") {
         return "failed"
     }

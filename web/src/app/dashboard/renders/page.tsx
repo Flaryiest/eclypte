@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useUser } from "@clerk/nextjs"
-import { Download, RefreshCw } from "lucide-react"
+import { Download, RefreshCw, Trash2 } from "lucide-react"
 import {
     DashboardPage,
     StatusBadge,
@@ -24,6 +24,7 @@ export default function RendersPage() {
     const [error, setError] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState(false)
     const [downloadingId, setDownloadingId] = useState<string | null>(null)
+    const [deletingId, setDeletingId] = useState<string | null>(null)
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
     const hasActiveRuns = runs.some(isRunActive)
@@ -145,6 +146,25 @@ export default function RendersPage() {
         }
     }
 
+    const deleteRender = async (asset: AssetSummary) => {
+        if (!api) {
+            return
+        }
+        setDeletingId(asset.file_id)
+        setError(null)
+        try {
+            await api.deleteAsset(asset.file_id)
+            if (preview?.asset.file_id === asset.file_id) {
+                setPreview(null)
+            }
+            await loadRenders()
+        } catch (caught) {
+            setError(errorMessage(caught))
+        } finally {
+            setDeletingId(null)
+        }
+    }
+
     if (!isLoaded) {
         return <DashboardPage eyebrow="Renders" title="Loading renders"><div /></DashboardPage>
     }
@@ -190,6 +210,14 @@ export default function RendersPage() {
                                     disabled={downloadingId === preview.asset.file_id}
                                 >
                                     <Download size={16} /> {downloadingId === preview.asset.file_id ? "Downloading" : "Download MP4"}
+                                </button>
+                                <button
+                                    className={styles.dangerButton}
+                                    type="button"
+                                    onClick={() => deleteRender(preview.asset)}
+                                    disabled={deletingId === preview.asset.file_id}
+                                >
+                                    <Trash2 size={16} /> {deletingId === preview.asset.file_id ? "Deleting" : "Delete"}
                                 </button>
                             </div>
                         </div>
