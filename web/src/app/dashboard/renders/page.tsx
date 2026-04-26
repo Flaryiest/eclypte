@@ -12,7 +12,7 @@ import {
 } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import { downloadSignedUrl, safeDownloadFilename } from "@/services/downloadFile"
-import { AssetSummary, EclypteApiClient, RunSummary } from "@/services/eclypteApi"
+import { AssetSummary, EclypteApiClient, RunSummary, isRunActive } from "@/services/eclypteApi"
 
 type RenderPreview = { asset: AssetSummary; url: string }
 
@@ -26,6 +26,7 @@ export default function RendersPage() {
     const [downloadingId, setDownloadingId] = useState<string | null>(null)
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
+    const hasActiveRuns = runs.some(isRunActive)
 
     const loadRenders = useCallback(async () => {
         if (!api) {
@@ -50,6 +51,51 @@ export default function RendersPage() {
     useEffect(() => {
         void loadRenders()
     }, [loadRenders])
+
+    useEffect(() => {
+        if (!api || !hasActiveRuns) {
+            return
+        }
+        const controller = new AbortController()
+        let stopped = false
+        let fallbackInterval: number | undefined
+        let refreshTimeout: number | undefined
+        const refresh = () => {
+            void loadRenders()
+        }
+        const scheduleRefresh = () => {
+            if (refreshTimeout !== undefined) {
+                return
+            }
+            refreshTimeout = window.setTimeout(() => {
+                refreshTimeout = undefined
+                refresh()
+            }, 150)
+        }
+        void api.streamRunUpdates({
+            signal: controller.signal,
+            onMessage: (message) => {
+                if (message.type === "run_manifest" && message.run.workflow_type === "render") {
+                    scheduleRefresh()
+                }
+            },
+        }).catch((caught) => {
+            if (stopped || isAbortError(caught)) {
+                return
+            }
+            fallbackInterval = window.setInterval(refresh, 1000)
+        })
+        return () => {
+            stopped = true
+            controller.abort()
+            if (fallbackInterval !== undefined) {
+                window.clearInterval(fallbackInterval)
+            }
+            if (refreshTimeout !== undefined) {
+                window.clearTimeout(refreshTimeout)
+            }
+        }
+    }, [api, hasActiveRuns, loadRenders])
 
     const openPreview = useCallback(async (asset: AssetSummary) => {
         if (!api) {
@@ -212,4 +258,8 @@ export default function RendersPage() {
 
 function errorMessage(error: unknown) {
     return error instanceof Error ? error.message : "Something went wrong"
+}
+
+function isAbortError(error: unknown) {
+    return error instanceof DOMException && error.name === "AbortError"
 }

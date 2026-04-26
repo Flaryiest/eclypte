@@ -5,6 +5,8 @@ fastapi
 uvicorn
 python-dotenv
 pydantic>=2
+psycopg[binary,pool]
+redis
 pyyaml
 boto3
 imageio-ffmpeg

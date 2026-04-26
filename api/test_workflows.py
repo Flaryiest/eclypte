@@ -333,6 +333,75 @@ def test_agent_timeline_reuses_existing_clip_index_and_active_prompt(monkeypatch
     assert captured["instructions"] == "Make it cinematic."
 
 
+def test_agent_timeline_emits_parent_progress_milestones(monkeypatch):
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    audio, source_video, music_analysis, video_analysis = _publish_timeline_inputs(repo)
+    _publish_artifact(
+        repo,
+        file_id="file_clip_index",
+        kind="clip_index",
+        filename="source.npz",
+        body=b"npz",
+        content_type="application/x-numpy-data",
+        input_file_version_ids=[source_video["version_id"]],
+    )
+    parent = repo.create_run(
+        user_id="user_123",
+        workflow_type="edit_pipeline",
+        inputs={"title": "Telemetry edit"},
+        steps=["assets", "music", "video", "timeline", "render", "result"],
+    )
+    run = _create_timeline_agent_run(repo)
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setattr(runner, "_r2_config_payload", lambda: {"bucket": "test"})
+    monkeypatch.setattr(
+        "api.workflows._build_clip_index_r2",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("clip index should be reused")),
+    )
+    monkeypatch.setattr(
+        "api.workflows._run_agent_synthesis",
+        lambda **_kwargs: [
+            {"start_time": 0.0, "end_time": 2.0, "source_timestamp": 2.0},
+            {"start_time": 2.0, "end_time": 4.0, "source_timestamp": 8.0},
+        ],
+    )
+
+    runner.run_timeline_plan(
+        user_id="user_123",
+        run_id=run.run_id,
+        audio=audio,
+        source_video=source_video,
+        music_analysis=music_analysis,
+        video_analysis=video_analysis,
+        planning_mode="agent",
+        creative_brief="Use strong moments.",
+        progress_context={
+            "user_id": "user_123",
+            "run_id": parent.run_id,
+            "stage": "timeline",
+        },
+    )
+
+    events = [
+        event.payload
+        for event in repo.list_run_events(RunRef(user_id="user_123", run_id=parent.run_id))
+        if event.event_type == "progress" and event.payload.get("stage") == "timeline"
+    ]
+    assert [event["percent"] for event in events] == [10, 15, 25, 40, 55, 70, 75, 90]
+    assert [event["detail"] for event in events] == [
+        "Loading timeline inputs",
+        "Checking CLIP index",
+        "Reused existing CLIP index",
+        "Loading active synthesis prompt",
+        "Running agent timeline planner",
+        "Adapting agent timeline",
+        "Validating timeline coverage",
+        "Publishing timeline",
+    ]
+
+
 def test_agent_timeline_builds_missing_clip_index(monkeypatch):
     store = InMemoryObjectStore()
     repo = StorageRepository(store)

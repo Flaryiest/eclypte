@@ -116,6 +116,20 @@ export type RunProgressEvent = {
     detail: string
 }
 
+export type RunEvent = {
+    event_id: string
+    run_id: string
+    owner_user_id: string
+    event_type: string
+    timestamp: string
+    payload: Record<string, unknown>
+}
+
+export type RunStreamMessage =
+    | { type: "run_manifest"; run: RunManifest }
+    | { type: "run_event"; event: RunEvent }
+    | { type: "heartbeat"; timestamp: string }
+
 export type EditJobStage = {
     id: string
     label: string
@@ -158,6 +172,7 @@ export type HealthResponse = {
 
 export const ECLYPTE_API_BASE_URL =
     process.env.NEXT_PUBLIC_ECLYPTE_API_BASE_URL || "http://127.0.0.1:8000"
+const RUN_STREAM_STALE_TIMEOUT_MS = 15000
 
 type ApiClientOptions = {
     baseUrl?: string
@@ -317,6 +332,35 @@ export class EclypteApiClient {
         return this.request<RunManifest>(`/v1/runs/${runId}`, { signal })
     }
 
+    async streamRunUpdates({
+        runId,
+        signal,
+        onMessage,
+    }: {
+        runId?: string
+        signal?: AbortSignal
+        onMessage: (message: RunStreamMessage) => void
+    }) {
+        const path = runId
+            ? `/v1/runs/${encodeURIComponent(runId)}/stream`
+            : "/v1/runs/stream"
+        const response = await fetch(`${this.baseUrl}${path}`, {
+            headers: {
+                "Accept": "application/x-ndjson",
+                "X-User-Id": this.userId,
+            },
+            signal,
+        })
+
+        if (!response.ok) {
+            throw new EclypteApiError(await readErrorMessage(response), response.status)
+        }
+        if (!response.body) {
+            throw new Error("Run update stream is unavailable")
+        }
+        await readJsonLineStream(response.body, onMessage, signal)
+    }
+
     async getDownloadUrl(ref: FileVersionInput, signal?: AbortSignal) {
         return this.request<DownloadUrlResponse>(
             `/v1/files/${ref.file_id}/versions/${ref.version_id}/download-url`,
@@ -460,7 +504,7 @@ export async function waitForRunCompletion(
     initialRun: RunManifest,
     {
         signal,
-        intervalMs = 3000,
+        intervalMs = 1000,
         onUpdate,
     }: {
         signal?: AbortSignal
@@ -470,13 +514,111 @@ export async function waitForRunCompletion(
 ) {
     let run = initialRun
     onUpdate?.(run)
+    if (isRunActive(run)) {
+        try {
+            run = await waitForRunCompletionFromStream(api, run, { signal, onUpdate })
+        } catch (caught) {
+            if (isAbortError(caught, signal)) {
+                throw caught
+            }
+            run = await waitForRunCompletionByPolling(api, run, {
+                signal,
+                intervalMs,
+                onUpdate,
+            })
+        }
+    }
+    if (run.status === "failed") {
+        throw new Error(run.last_error || `${run.workflow_type} failed`)
+    }
+    return run
+}
+
+async function waitForRunCompletionFromStream(
+    api: EclypteApiClient,
+    initialRun: RunManifest,
+    {
+        signal,
+        onUpdate,
+    }: {
+        signal?: AbortSignal
+        onUpdate?: (run: RunManifest) => void
+    },
+) {
+    let completed: RunManifest | null = null
+    let latest = initialRun
+    const streamController = new AbortController()
+    let staleTimeout: ReturnType<typeof setTimeout> | undefined
+    const abortStream = () => streamController.abort()
+    const resetStaleTimeout = () => {
+        if (staleTimeout !== undefined) {
+            clearTimeout(staleTimeout)
+        }
+        staleTimeout = setTimeout(() => streamController.abort(), RUN_STREAM_STALE_TIMEOUT_MS)
+    }
+    signal?.addEventListener("abort", abortStream, { once: true })
+    resetStaleTimeout()
+
+    try {
+        await api.streamRunUpdates({
+            runId: initialRun.run_id,
+            signal: streamController.signal,
+            onMessage: (message) => {
+                if (message.type === "run_event" && message.event.run_id === initialRun.run_id) {
+                    resetStaleTimeout()
+                    return
+                }
+                if (message.type !== "run_manifest" || message.run.run_id !== initialRun.run_id) {
+                    return
+                }
+                resetStaleTimeout()
+                latest = message.run
+                onUpdate?.(latest)
+                if (!isRunActive(latest)) {
+                    completed = latest
+                    streamController.abort()
+                }
+            },
+        })
+    } catch (caught) {
+        if (completed) {
+            return completed
+        }
+        throw caught
+    } finally {
+        signal?.removeEventListener("abort", abortStream)
+        if (staleTimeout !== undefined) {
+            clearTimeout(staleTimeout)
+        }
+    }
+
+    if (completed) {
+        return completed
+    }
+    if (!isRunActive(latest)) {
+        return latest
+    }
+    throw new Error("Run update stream ended before completion")
+}
+
+async function waitForRunCompletionByPolling(
+    api: EclypteApiClient,
+    initialRun: RunManifest,
+    {
+        signal,
+        intervalMs,
+        onUpdate,
+    }: {
+        signal?: AbortSignal
+        intervalMs: number
+        onUpdate?: (run: RunManifest) => void
+    },
+) {
+    let run = initialRun
     while (isRunActive(run)) {
         await delay(intervalMs, signal)
         run = await api.getRun(run.run_id, signal)
         onUpdate?.(run)
-    }
-    if (run.status === "failed") {
-        throw new Error(run.last_error || `${run.workflow_type} failed`)
     }
     return run
 }
@@ -519,6 +661,52 @@ async function readErrorMessage(response: Response): Promise<string> {
     } catch {
         return `Request failed with status ${response.status}`
     }
+}
+
+export async function readJsonLineStream<T>(
+    stream: ReadableStream<Uint8Array>,
+    onMessage: (message: T) => void,
+    signal?: AbortSignal,
+) {
+    const reader = stream.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ""
+    try {
+        while (true) {
+            if (signal?.aborted) {
+                throw new DOMException("Aborted", "AbortError")
+            }
+            const { value, done } = await reader.read()
+            if (done) {
+                break
+            }
+            buffer += decoder.decode(value, { stream: true })
+            const parsed = drainJsonLines(buffer)
+            buffer = parsed.remainder
+            for (const line of parsed.lines) {
+                onMessage(JSON.parse(line) as T)
+            }
+        }
+        buffer += decoder.decode()
+        if (buffer.trim()) {
+            onMessage(JSON.parse(buffer) as T)
+        }
+    } finally {
+        reader.releaseLock()
+    }
+}
+
+export function drainJsonLines(buffer: string) {
+    const parts = buffer.split("\n")
+    const remainder = parts.pop() ?? ""
+    return {
+        lines: parts.map((line) => line.replace(/\r$/, "")).filter(Boolean),
+        remainder,
+    }
+}
+
+function isAbortError(error: unknown, signal?: AbortSignal) {
+    return Boolean(signal?.aborted) || (error instanceof DOMException && error.name === "AbortError")
 }
 
 function delay(ms: number, signal?: AbortSignal) {

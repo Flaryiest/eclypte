@@ -14,7 +14,7 @@ import {
     PlanningMode,
 } from "@/services/eclypteApi"
 
-const POLL_INTERVAL_MS = 3000
+const POLL_INTERVAL_MS = 1000
 
 export default function NewEditPage() {
     const { isLoaded, isSignedIn, user } = useUser()
@@ -79,10 +79,48 @@ export default function NewEditPage() {
         if (!api || !hasActiveJobs) {
             return
         }
-        const interval = window.setInterval(() => {
+        const controller = new AbortController()
+        let stopped = false
+        let fallbackInterval: number | undefined
+        let refreshTimeout: number | undefined
+        const refresh = () => {
             void loadJobs().catch((caught) => setError(errorMessage(caught)))
-        }, POLL_INTERVAL_MS)
-        return () => window.clearInterval(interval)
+        }
+        const scheduleRefresh = () => {
+            if (refreshTimeout !== undefined) {
+                return
+            }
+            refreshTimeout = window.setTimeout(() => {
+                refreshTimeout = undefined
+                refresh()
+            }, 150)
+        }
+        void api.streamRunUpdates({
+            signal: controller.signal,
+            onMessage: (message) => {
+                if (message.type === "run_manifest" && message.run.workflow_type === "edit_pipeline") {
+                    scheduleRefresh()
+                }
+                if (message.type === "run_event" && message.event.event_type === "progress") {
+                    scheduleRefresh()
+                }
+            },
+        }).catch((caught) => {
+            if (stopped || isAbortError(caught)) {
+                return
+            }
+            fallbackInterval = window.setInterval(refresh, POLL_INTERVAL_MS)
+        })
+        return () => {
+            stopped = true
+            controller.abort()
+            if (fallbackInterval !== undefined) {
+                window.clearInterval(fallbackInterval)
+            }
+            if (refreshTimeout !== undefined) {
+                window.clearTimeout(refreshTimeout)
+            }
+        }
     }, [api, hasActiveJobs, loadJobs])
 
     const startEdit = async () => {
@@ -374,4 +412,8 @@ function clampPercent(value: number) {
 
 function errorMessage(error: unknown) {
     return error instanceof Error ? error.message : "Something went wrong"
+}
+
+function isAbortError(error: unknown) {
+    return error instanceof DOMException && error.name === "AbortError"
 }

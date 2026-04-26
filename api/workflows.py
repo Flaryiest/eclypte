@@ -19,7 +19,7 @@ from api.prototyping.edit.synthesis.system_prompt import (
     SYSTEM_PROMPT as DEFAULT_SYNTHESIS_PROMPT,
 )
 from api.storage.config import R2Config
-from api.storage.factory import get_object_store, load_storage_env
+from api.storage.factory import get_storage_repository, load_storage_env
 from api.storage.refs import FileRef, FileVersionRef, RunRef
 from api.storage.repository import StorageRepository
 
@@ -50,9 +50,9 @@ class DefaultWorkflowRunner:
     """
 
     def _repository(self) -> StorageRepository:
-        store = get_object_store(required=True)
-        assert store is not None
-        return StorageRepository(store)
+        repository = get_storage_repository(required=True)
+        assert repository is not None
+        return repository
 
     def _r2_config_payload(self) -> dict[str, str]:
         load_storage_env()
@@ -70,12 +70,22 @@ class DefaultWorkflowRunner:
             r2_config = self._r2_config_payload()
         except Exception:
             r2_config = {}
-        return {
+        context = {
             "r2_config": r2_config,
             "user_id": user_id,
             "run_id": run_id,
             "stage": stage,
         }
+        progress_url = os.environ.get("ECLYPTE_INTERNAL_PROGRESS_URL")
+        progress_token = os.environ.get("ECLYPTE_INTERNAL_PROGRESS_TOKEN")
+        if progress_url and progress_token:
+            context.update(
+                {
+                    "progress_api_url": progress_url,
+                    "progress_token": progress_token,
+                }
+            )
+        return context
 
     def _mark_failed(self, repo: StorageRepository, user_id: str, run_id: str, exc: Exception) -> None:
         repo.update_run_status(
@@ -83,6 +93,42 @@ class DefaultWorkflowRunner:
             status="failed",
             last_error=str(exc),
         )
+
+    def _append_progress_context(
+        self,
+        repo: StorageRepository,
+        progress_context: dict | None,
+        percent: int,
+        detail: str,
+    ) -> None:
+        if not progress_context:
+            return
+        user_id = progress_context.get("user_id")
+        run_id = progress_context.get("run_id")
+        stage = progress_context.get("stage")
+        if not user_id or not run_id or not stage:
+            return
+        repo.append_run_progress(
+            run_ref=RunRef(user_id=str(user_id), run_id=str(run_id)),
+            stage=str(stage),
+            percent=percent,
+            detail=detail,
+        )
+
+    def _scaled_progress_context(
+        self,
+        progress_context: dict | None,
+        *,
+        percent_start: int,
+        percent_end: int,
+    ) -> dict | None:
+        if not progress_context:
+            return None
+        return {
+            **progress_context,
+            "percent_start": percent_start,
+            "percent_end": percent_end,
+        }
 
     def run_edit_pipeline(self, **kwargs) -> None:
         repo = self._repository()
@@ -729,14 +775,22 @@ class DefaultWorkflowRunner:
     ) -> None:
         from api.prototyping.edit.synthesis.planner import plan
 
+        progress_context = kwargs.get("progress_context")
+        self._append_progress_context(repo, progress_context, 10, "Loading timeline inputs")
         music_ref, video_ref, audio_ref, source_ref = self._timeline_refs(user_id, kwargs)
+        song = _read_json_version(repo, music_ref)
+        video = _read_json_version(repo, video_ref)
+        source_meta = repo.load_file_version_meta(source_ref)
+        audio_meta = repo.load_file_version_meta(audio_ref)
+        self._append_progress_context(repo, progress_context, 45, "Running deterministic timeline planner")
         timeline = plan(
-            song=_read_json_version(repo, music_ref),
-            video=_read_json_version(repo, video_ref),
-            source_video_path=repo.load_file_version_meta(source_ref).original_filename,
-            audio_path=repo.load_file_version_meta(audio_ref).original_filename,
+            song=song,
+            video=video,
+            source_video_path=source_meta.original_filename,
+            audio_path=audio_meta.original_filename,
             max_duration_sec=kwargs.get("max_duration_sec"),
         )
+        self._append_progress_context(repo, progress_context, 90, "Publishing timeline")
         self._publish_timeline(
             repo=repo,
             user_id=user_id,
@@ -761,7 +815,9 @@ class DefaultWorkflowRunner:
     ) -> None:
         from api.prototyping.edit.synthesis.adapter import adapt
 
+        progress_context = kwargs.get("progress_context")
         run_ref = RunRef(user_id=user_id, run_id=run_id)
+        self._append_progress_context(repo, progress_context, 10, "Loading timeline inputs")
         music_ref, video_ref, audio_ref, source_ref = self._timeline_refs(user_id, kwargs)
         source_meta = repo.load_file_version_meta(source_ref)
         audio_meta = repo.load_file_version_meta(audio_ref)
@@ -769,13 +825,18 @@ class DefaultWorkflowRunner:
         video = _read_json_version(repo, video_ref)
 
         repo.update_run_status(run_ref, status="running", current_step="ensure_clip_index")
+        self._append_progress_context(repo, progress_context, 15, "Checking CLIP index")
         clip_file_ref, clip_version_ref, clip_meta = self._ensure_clip_index(
             repo=repo,
             user_id=user_id,
             run_id=run_id,
             source_ref=source_ref,
             source_meta=source_meta,
-            progress_context=kwargs.get("progress_context"),
+            progress_context=self._scaled_progress_context(
+                progress_context,
+                percent_start=20,
+                percent_end=35,
+            ),
         )
         clip_outputs = {
             "clip_index_file_id": clip_file_ref.file_id,
@@ -788,6 +849,7 @@ class DefaultWorkflowRunner:
             current_step="agent_plan_timeline",
             outputs=clip_outputs,
         )
+        self._append_progress_context(repo, progress_context, 40, "Loading active synthesis prompt")
         prompt_state = repo.get_synthesis_prompt_state(
             user_id=user_id,
             default_prompt_text=DEFAULT_SYNTHESIS_PROMPT.strip(),
@@ -804,6 +866,7 @@ class DefaultWorkflowRunner:
             )
 
         creative_brief = str(kwargs.get("creative_brief") or "").strip() or DEFAULT_CREATIVE_BRIEF
+        self._append_progress_context(repo, progress_context, 55, "Running agent timeline planner")
         agent_output = _run_agent_synthesis(
             video_filename=source_meta.original_filename,
             instructions=creative_brief,
@@ -811,6 +874,7 @@ class DefaultWorkflowRunner:
             system_prompt=active_prompt.prompt_text,
             query_clips_fn=query_clip_index,
         )
+        self._append_progress_context(repo, progress_context, 70, "Adapting agent timeline")
         timeline = adapt(
             agent_output=agent_output,
             song=song,
@@ -818,8 +882,10 @@ class DefaultWorkflowRunner:
             source_video_path=source_meta.original_filename,
             audio_path=audio_meta.original_filename,
         )
+        self._append_progress_context(repo, progress_context, 75, "Validating timeline coverage")
         _validate_agent_timeline_coverage(timeline, song)
 
+        self._append_progress_context(repo, progress_context, 90, "Publishing timeline")
         self._publish_timeline(
             repo=repo,
             user_id=user_id,
@@ -851,6 +917,7 @@ class DefaultWorkflowRunner:
     ) -> tuple[FileRef, FileVersionRef, object]:
         existing = _find_clip_index_for_source(repo, user_id, source_ref.version_id)
         if existing is not None:
+            self._append_progress_context(repo, progress_context, 25, "Reused existing CLIP index")
             return existing
 
         index_name = f"{Path(source_meta.original_filename).stem or run_id}.npz"

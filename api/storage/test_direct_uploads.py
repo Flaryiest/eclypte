@@ -102,6 +102,9 @@ def test_repository_appends_run_progress_events():
         "percent": 45,
         "detail": "Analyzing beats",
     }
+    assert repo.list_latest_run_progress(
+        RunRef(user_id="user_123", run_id=run.run_id)
+    )["music"]["percent"] == 45
 
 
 def test_repository_records_existing_blob_version_written_by_worker():

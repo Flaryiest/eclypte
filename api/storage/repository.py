@@ -5,8 +5,6 @@ import uuid
 from typing import Any
 
 from .keys import (
-    run_event_key,
-    run_manifest_key,
     synthesis_prompt_state_key,
     synthesis_prompt_version_key,
     synthesis_prompt_version_prefix,
@@ -32,10 +30,16 @@ from .models import (
 )
 from .r2_client import ObjectStore
 from .refs import FileRef, FileVersionRef, RunRef
+from .run_broadcast import RunUpdateBroadcaster
+from .run_store import R2RunStore, RunStore
 
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _utc_event_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def _utc_after(seconds: int) -> str:
@@ -45,8 +49,16 @@ def _utc_after(seconds: int) -> str:
 
 
 class StorageRepository:
-    def __init__(self, store: ObjectStore):
+    def __init__(
+        self,
+        store: ObjectStore,
+        *,
+        run_store: RunStore | None = None,
+        run_broadcaster: RunUpdateBroadcaster | None = None,
+    ):
         self._store = store
+        self._run_store = run_store or R2RunStore(store)
+        self._run_broadcaster = run_broadcaster
 
     def create_file_manifest(
         self,
@@ -88,25 +100,15 @@ class StorageRepository:
         return sorted(manifests, key=lambda item: item.updated_at, reverse=True)
 
     def save_run_manifest(self, manifest: RunManifest) -> RunManifest:
-        key = run_manifest_key(user_id=manifest.owner_user_id, run_id=manifest.run_id)
-        self._store.put_json(key, manifest.model_dump(mode="json"))
-        return manifest
+        saved = self._run_store.save_run_manifest(manifest)
+        self._broadcast_run_manifest(saved)
+        return saved
 
     def load_run_manifest(self, run_ref: RunRef) -> RunManifest:
-        return RunManifest.model_validate(self._store.get_json(run_ref.manifest_key))
+        return self._run_store.load_run_manifest(run_ref)
 
     def list_run_manifests(self, user_id: str) -> list[RunManifest]:
-        prefix = f"users/{user_id}/runs/"
-        keys = [
-            key
-            for key in self._store.list_keys(prefix)
-            if key.endswith("/manifest.json")
-        ]
-        runs = [
-            RunManifest.model_validate(self._store.get_json(key))
-            for key in keys
-        ]
-        return sorted(runs, key=lambda item: item.updated_at, reverse=True)
+        return self._run_store.list_run_manifests(user_id)
 
     def publish_bytes(
         self,
@@ -197,21 +199,14 @@ class StorageRepository:
         event_id: str,
         payload: dict[str, Any],
     ) -> RunEvent:
-        event = RunEvent(
-            event_id=event_id,
-            run_id=run_ref.run_id,
-            owner_user_id=run_ref.user_id,
+        event = self._run_store.append_run_event(
+            run_ref=run_ref,
             event_type=event_type,
             timestamp=timestamp,
+            event_id=event_id,
             payload=payload,
         )
-        key = run_event_key(
-            user_id=run_ref.user_id,
-            run_id=run_ref.run_id,
-            timestamp=timestamp,
-            event_id=event_id,
-        )
-        self._store.put_json(key, event.model_dump(mode="json"))
+        self._broadcast_run_event(event)
         return event
 
     def append_run_progress(
@@ -225,7 +220,7 @@ class StorageRepository:
         return self.append_run_event(
             run_ref=run_ref,
             event_type="progress",
-            timestamp=_utc_now(),
+            timestamp=_utc_event_now(),
             event_id=f"evt_progress_{uuid.uuid4().hex[:12]}",
             payload={
                 "stage": stage,
@@ -235,9 +230,26 @@ class StorageRepository:
         )
 
     def list_run_events(self, run_ref: RunRef) -> list[RunEvent]:
-        prefix = f"users/{run_ref.user_id}/runs/{run_ref.run_id}/events/"
-        keys = self._store.list_keys(prefix)
-        return [RunEvent.model_validate(self._store.get_json(key)) for key in keys]
+        return self._run_store.list_run_events(run_ref)
+
+    def list_latest_run_progress(self, run_ref: RunRef) -> dict[str, dict[str, Any]]:
+        return self._run_store.list_latest_run_progress(run_ref)
+
+    def _broadcast_run_manifest(self, manifest: RunManifest) -> None:
+        if self._run_broadcaster is None:
+            return
+        try:
+            self._run_broadcaster.publish_run_manifest(manifest)
+        except Exception:
+            return
+
+    def _broadcast_run_event(self, event: RunEvent) -> None:
+        if self._run_broadcaster is None:
+            return
+        try:
+            self._run_broadcaster.publish_run_event(event)
+        except Exception:
+            return
 
     def create_upload_reservation(
         self,

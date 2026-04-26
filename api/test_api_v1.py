@@ -1,7 +1,7 @@
 from api.storage.keys import file_version_blob_key
 from api.storage.refs import FileRef, RunRef
 from api.storage.repository import StorageRepository
-from api.storage.test_fakes import InMemoryObjectStore
+from api.storage.test_fakes import InMemoryObjectStore, InMemoryRunStore
 
 
 class RecordingWorkflowRunner:
@@ -31,6 +31,23 @@ class RecordingWorkflowRunner:
 
     def run_synthesis_consolidation(self, **kwargs):
         self.calls.append(("synthesis_consolidation", kwargs))
+
+
+class FiniteRunBroadcaster:
+    def __init__(self, messages):
+        self.messages = messages
+        self.listen_calls = []
+
+    def publish_run_manifest(self, manifest):
+        pass
+
+    def publish_run_event(self, event):
+        pass
+
+    async def listen(self, *, user_id, run_id=None):
+        self.listen_calls.append((user_id, run_id))
+        for message in self.messages:
+            yield message
 
 
 def build_client():
@@ -468,6 +485,124 @@ def test_edit_jobs_list_recovers_multiple_jobs_and_progress_from_r2_events():
     assert by_title["First edit"]["progress_percent"] > 0
 
 
+def test_edit_job_status_reads_latest_progress_without_scanning_events():
+    from fastapi.testclient import TestClient
+    from api.app import create_app
+
+    store = InMemoryObjectStore()
+    run_store = InMemoryRunStore()
+    repo = StorageRepository(store, run_store=run_store)
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="edit_pipeline",
+        inputs={
+            "title": "Fast status",
+            "audio_file_id": "file_audio",
+            "audio_version_id": "ver_audio",
+            "source_video_file_id": "file_video",
+            "source_video_version_id": "ver_video",
+            "planning_mode": "agent",
+        },
+        steps=["assets", "music", "video", "timeline", "render", "result"],
+    )
+    run_store.latest_progress[("user_123", run.run_id)] = {
+        "timeline": {
+            "stage": "timeline",
+            "percent": 64,
+            "detail": "Loaded from latest progress",
+        }
+    }
+
+    client = TestClient(
+        create_app(
+            store=store,
+            run_store=run_store,
+            workflow_runner=RecordingWorkflowRunner(),
+            cors_origins=["http://localhost:3000"],
+        )
+    )
+
+    response = client.get(
+        f"/v1/edits/{run.run_id}",
+        headers={"X-User-Id": "user_123"},
+    )
+
+    assert response.status_code == 200
+    timeline_stage = response.json()["stages"][3]
+    assert timeline_stage["percent"] == 64
+    assert timeline_stage["detail"] == "Loaded from latest progress"
+
+
+def test_internal_progress_endpoint_requires_valid_token(monkeypatch):
+    monkeypatch.setenv("ECLYPTE_INTERNAL_PROGRESS_TOKEN", "secret-token")
+    client, _, _ = build_client()
+
+    missing = client.post(
+        "/internal/progress",
+        json={
+            "user_id": "user_123",
+            "run_id": "run_123",
+            "stage": "timeline",
+            "percent": 40,
+            "detail": "Planning shots",
+        },
+    )
+    invalid = client.post(
+        "/internal/progress",
+        headers={"X-Eclypte-Internal-Token": "wrong"},
+        json={
+            "user_id": "user_123",
+            "run_id": "run_123",
+            "stage": "timeline",
+            "percent": 40,
+            "detail": "Planning shots",
+        },
+    )
+
+    assert missing.status_code == 403
+    assert invalid.status_code == 403
+
+
+def test_internal_progress_endpoint_records_latest_stage_progress(monkeypatch):
+    monkeypatch.setenv("ECLYPTE_INTERNAL_PROGRESS_TOKEN", "secret-token")
+    client, store, _ = build_client()
+    repo = StorageRepository(store)
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="edit_pipeline",
+        inputs={
+            "title": "Progress edit",
+            "audio_file_id": "file_audio",
+            "audio_version_id": "ver_audio",
+            "source_video_file_id": "file_video",
+            "source_video_version_id": "ver_video",
+            "planning_mode": "agent",
+        },
+        steps=["assets", "music", "video", "timeline", "render", "result"],
+    )
+
+    response = client.post(
+        "/internal/progress",
+        headers={"X-Eclypte-Internal-Token": "secret-token"},
+        json={
+            "user_id": "user_123",
+            "run_id": run.run_id,
+            "stage": "timeline",
+            "percent": 67,
+            "detail": "Choosing clips",
+        },
+    )
+    status = client.get(
+        f"/v1/edits/{run.run_id}",
+        headers={"X-User-Id": "user_123"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+    assert status.json()["stages"][3]["percent"] == 67
+    assert status.json()["stages"][3]["detail"] == "Choosing clips"
+
+
 def test_edit_job_detail_includes_final_render_ref_and_download_status():
     client, store, _ = build_client()
     repo = StorageRepository(store)
@@ -668,6 +803,86 @@ def test_runs_list_supports_workflow_and_status_filters():
 
     assert response.status_code == 200
     assert [run["run_id"] for run in response.json()] == [music.run_id]
+
+
+def test_run_stream_endpoint_requires_broadcaster_when_redis_is_unset(monkeypatch):
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    client, _, _ = build_client()
+
+    response = client.get("/v1/runs/stream", headers={"X-User-Id": "user_123"})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "run streaming is not configured"
+
+
+def test_run_stream_endpoint_streams_json_lines_for_user():
+    from fastapi.testclient import TestClient
+    from api.app import create_app
+
+    broadcaster = FiniteRunBroadcaster(
+        [
+            {
+                "type": "run_manifest",
+                "run": {
+                    "run_id": "run_123",
+                    "owner_user_id": "user_123",
+                    "workflow_type": "edit_pipeline",
+                    "status": "running",
+                    "inputs": {},
+                    "outputs": {},
+                    "steps": [],
+                    "current_step": None,
+                    "last_error": None,
+                    "created_at": "2026-04-21T19:00:00Z",
+                    "updated_at": "2026-04-21T19:00:01Z",
+                },
+            }
+        ]
+    )
+    client = TestClient(
+        create_app(
+            store=InMemoryObjectStore(),
+            run_broadcaster=broadcaster,
+            workflow_runner=RecordingWorkflowRunner(),
+            cors_origins=["http://localhost:3000"],
+        )
+    )
+
+    with client.stream("GET", "/v1/runs/stream", headers={"X-User-Id": "user_123"}) as response:
+        lines = list(response.iter_lines())
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/x-ndjson")
+    assert lines == [
+        '{"type":"run_manifest","run":{"run_id":"run_123","owner_user_id":"user_123","workflow_type":"edit_pipeline","status":"running","inputs":{},"outputs":{},"steps":[],"current_step":null,"last_error":null,"created_at":"2026-04-21T19:00:00Z","updated_at":"2026-04-21T19:00:01Z"}}'
+    ]
+    assert broadcaster.listen_calls == [("user_123", None)]
+
+
+def test_run_stream_endpoint_can_subscribe_to_one_run():
+    from fastapi.testclient import TestClient
+    from api.app import create_app
+
+    broadcaster = FiniteRunBroadcaster([{"type": "heartbeat", "timestamp": "now"}])
+    client = TestClient(
+        create_app(
+            store=InMemoryObjectStore(),
+            run_broadcaster=broadcaster,
+            workflow_runner=RecordingWorkflowRunner(),
+            cors_origins=["http://localhost:3000"],
+        )
+    )
+
+    with client.stream(
+        "GET",
+        "/v1/runs/run_abc/stream",
+        headers={"X-User-Id": "user_123"},
+    ) as response:
+        lines = list(response.iter_lines())
+
+    assert response.status_code == 200
+    assert lines == ['{"type":"heartbeat","timestamp":"now"}']
+    assert broadcaster.listen_calls == [("user_123", "run_abc")]
 
 
 def test_synthesis_reference_submission_persists_queue_records_and_schedules_ingest():

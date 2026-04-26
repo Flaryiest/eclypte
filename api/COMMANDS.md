@@ -43,9 +43,12 @@ OPENAI_API_KEY=sk-...
 ## Cloud REST API V1
 
 The Railway-ready FastAPI app lives in `api/app.py` and is exposed by
-`api/main.py`. It uses R2 manifests as the v1 metadata store and returns
-immediately from workflow endpoints while background tasks call Modal or the
-local deterministic planner.
+`api/main.py`. It keeps media artifacts and file metadata in R2. When
+`DATABASE_URL` is set, run manifests, run events, and latest stage progress are
+stored in Postgres; otherwise the app falls back to the original R2 JSON run
+store. When `REDIS_URL` is set, run updates are also published to a realtime
+stream for dashboard UX; Redis is not durable state. Workflow endpoints return
+immediately while background tasks call Modal or the local deterministic planner.
 
 Required storage env for real `/v1/*` calls:
 
@@ -56,6 +59,11 @@ $env:ECLYPTE_R2_ACCESS_KEY_ID="..."
 $env:ECLYPTE_R2_SECRET_ACCESS_KEY="..."
 $env:ECLYPTE_R2_REGION_NAME="auto"
 $env:ECLYPTE_DEFAULT_USER_ID="local_dev"
+# Optional Postgres run/progress store:
+$env:DATABASE_URL="postgresql://..."
+$env:REDIS_URL="redis://..."
+$env:ECLYPTE_INTERNAL_PROGRESS_URL="https://<api-host>/internal/progress"
+$env:ECLYPTE_INTERNAL_PROGRESS_TOKEN="..."
 ```
 
 ```bash
@@ -65,6 +73,11 @@ export ECLYPTE_R2_ACCESS_KEY_ID="..."
 export ECLYPTE_R2_SECRET_ACCESS_KEY="..."
 export ECLYPTE_R2_REGION_NAME="auto"
 export ECLYPTE_DEFAULT_USER_ID="local_dev"
+# Optional Postgres run/progress store:
+export DATABASE_URL="postgresql://..."
+export REDIS_URL="redis://..."
+export ECLYPTE_INTERNAL_PROGRESS_URL="https://<api-host>/internal/progress"
+export ECLYPTE_INTERNAL_PROGRESS_TOKEN="..."
 ```
 
 CORS defaults to `https://eclypte.vercel.app`, `http://localhost:3000`, and
@@ -108,6 +121,20 @@ Invoke-RestMethod http://127.0.0.1:8000/healthz
 curl http://127.0.0.1:8000/healthz
 ```
 
+Backfill existing R2 run history into Postgres after `DATABASE_URL` is set:
+
+```powershell
+python -m api.storage.backfill_runs
+# or one user only:
+python -m api.storage.backfill_runs --user-id local_dev
+```
+
+```bash
+python -m api.storage.backfill_runs
+# or one user only:
+python -m api.storage.backfill_runs --user-id local_dev
+```
+
 Routes:
 
 - `POST /v1/uploads` reserves a file/version/blob key and returns a presigned R2 PUT URL.
@@ -116,6 +143,8 @@ Routes:
 - `GET /v1/files/{file_id}/versions/{version_id}/download-url` returns a presigned R2 GET URL.
 - `POST /v1/music/analyses`, `POST /v1/video/analyses`, `POST /v1/timelines`, and `POST /v1/renders` create run manifests and schedule background work.
 - `GET /v1/runs/{run_id}` and `GET /v1/runs/{run_id}/events` inspect workflow status.
+- `GET /v1/runs/stream` and `GET /v1/runs/{run_id}/stream` stream Redis-backed run updates when `REDIS_URL` is configured.
+- `POST /internal/progress` records worker progress and requires `X-Eclypte-Internal-Token`.
 
 Deploy the new R2-aware Modal wrappers before using video-analysis/render API
 jobs against live Modal:

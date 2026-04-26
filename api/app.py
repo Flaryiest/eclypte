@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import os
+import secrets
 from typing import Literal
 from urllib.parse import urlparse
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, status
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from api.storage.factory import get_default_user_id, get_object_store
+from api.storage.factory import (
+    get_default_user_id,
+    get_object_store,
+    get_run_broadcaster,
+    get_run_store,
+)
 from api.prototyping.edit.synthesis.system_prompt import (
     SYSTEM_PROMPT as DEFAULT_SYNTHESIS_PROMPT,
 )
@@ -25,6 +32,8 @@ from api.storage.models import (
 from api.storage.r2_client import ObjectStore
 from api.storage.refs import FileRef, FileVersionRef, RunRef
 from api.storage.repository import StorageRepository
+from api.storage.run_broadcast import RunUpdateBroadcaster
+from api.storage.run_store import RunStore
 from api.workflows import DefaultWorkflowRunner, WorkflowRunner
 
 DEFAULT_CORS_ORIGINS = (
@@ -111,6 +120,14 @@ class EditJobRequest(BaseModel):
     title: str | None = None
 
 
+class InternalProgressRequest(BaseModel):
+    user_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    stage: str = Field(min_length=1)
+    percent: int = Field(ge=0, le=100)
+    detail: str = ""
+
+
 class EditJobStage(BaseModel):
     id: str
     label: str
@@ -184,6 +201,8 @@ def is_youtube_url(url: str) -> bool:
 def create_app(
     *,
     store: ObjectStore | None = None,
+    run_store: RunStore | None = None,
+    run_broadcaster: RunUpdateBroadcaster | None = None,
     workflow_runner: WorkflowRunner | None = None,
     cors_origins: list[str] | None = None,
 ) -> FastAPI:
@@ -208,7 +227,26 @@ def create_app(
         return resolved
 
     def repository(resolved: ObjectStore = Depends(resolve_store)) -> StorageRepository:
-        return StorageRepository(resolved)
+        selected_run_store = run_store
+        if selected_run_store is None and store is None:
+            selected_run_store = get_run_store(object_store=resolved)
+        selected_broadcaster = run_broadcaster
+        if selected_broadcaster is None:
+            selected_broadcaster = get_run_broadcaster()
+        return StorageRepository(
+            resolved,
+            run_store=selected_run_store,
+            run_broadcaster=selected_broadcaster,
+        )
+
+    def resolve_run_broadcaster() -> RunUpdateBroadcaster:
+        selected_broadcaster = run_broadcaster or get_run_broadcaster()
+        if selected_broadcaster is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="run streaming is not configured",
+            )
+        return selected_broadcaster
 
     def user_id(x_user_id: str | None = Header(default=None)) -> str:
         return x_user_id or get_default_user_id()
@@ -279,12 +317,7 @@ def create_app(
         uid: str,
         run: RunManifest,
     ) -> EditJobStatus:
-        latest_progress: dict[str, dict] = {}
-        for event in repo.list_run_events(RunRef(user_id=uid, run_id=run.run_id)):
-            if event.event_type == "progress":
-                stage = str(event.payload.get("stage", ""))
-                if stage:
-                    latest_progress[stage] = event.payload
+        latest_progress = repo.list_latest_run_progress(RunRef(user_id=uid, run_id=run.run_id))
 
         step_statuses = {step.name: step.status for step in run.steps}
         stages: list[EditJobStage] = []
@@ -418,6 +451,29 @@ def create_app(
                 or os.environ.get("ECLYPTE_YOUTUBE_COOKIES")
             ),
         }
+
+    @app.post("/internal/progress")
+    def record_internal_progress(
+        request: InternalProgressRequest,
+        x_eclypte_internal_token: str | None = Header(
+            default=None,
+            alias="X-Eclypte-Internal-Token",
+        ),
+        repo: StorageRepository = Depends(repository),
+    ) -> dict[str, bool]:
+        expected = os.environ.get("ECLYPTE_INTERNAL_PROGRESS_TOKEN")
+        if not expected or not x_eclypte_internal_token or not secrets.compare_digest(
+            expected,
+            x_eclypte_internal_token,
+        ):
+            raise HTTPException(status_code=403, detail="invalid internal token")
+        repo.append_run_progress(
+            run_ref=RunRef(user_id=request.user_id, run_id=request.run_id),
+            stage=request.stage,
+            percent=request.percent,
+            detail=request.detail,
+        )
+        return {"ok": True}
 
     @app.post(
         "/v1/uploads",
@@ -756,6 +812,29 @@ def create_app(
             runs = [run for run in runs if run.status == status]
         return runs
 
+    @app.get("/v1/runs/stream")
+    async def stream_runs(
+        request: Request,
+        broadcaster: RunUpdateBroadcaster = Depends(resolve_run_broadcaster),
+        uid: str = Depends(user_id),
+    ) -> StreamingResponse:
+        return StreamingResponse(
+            _json_line_stream(request, broadcaster.listen(user_id=uid)),
+            media_type="application/x-ndjson",
+        )
+
+    @app.get("/v1/runs/{run_id}/stream")
+    async def stream_run(
+        run_id: str,
+        request: Request,
+        broadcaster: RunUpdateBroadcaster = Depends(resolve_run_broadcaster),
+        uid: str = Depends(user_id),
+    ) -> StreamingResponse:
+        return StreamingResponse(
+            _json_line_stream(request, broadcaster.listen(user_id=uid, run_id=run_id)),
+            media_type="application/x-ndjson",
+        )
+
     @app.get("/v1/runs/{run_id}", response_model=RunManifest)
     def get_run(
         run_id: str,
@@ -888,3 +967,16 @@ def create_app(
         )
 
     return app
+
+
+async def _json_line_stream(request: Request, messages):
+    async for message in messages:
+        if await request.is_disconnected():
+            break
+        yield json_dumps_line(message)
+
+
+def json_dumps_line(value) -> str:
+    import json
+
+    return f"{json.dumps(value, separators=(',', ':'))}\n"
