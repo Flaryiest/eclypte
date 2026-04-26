@@ -25,7 +25,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     }, [])
 
     return (
-        <div className={styles.container}>
+        <div className={styles.container} data-surface="cream">
             <Sidebar
                 isOpen={dashboardOpen}
                 onToggle={() => setDashboardOpen((prev) => !prev)}

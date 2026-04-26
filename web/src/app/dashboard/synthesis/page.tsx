@@ -28,6 +28,7 @@ export default function SynthesisPage() {
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [isConsolidating, setIsConsolidating] = useState(false)
     const [isSaving, setIsSaving] = useState(false)
+    const [refsOpen, setRefsOpen] = useState(false)
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
     const completedReferences = references.filter((reference) => reference.status === "completed")
@@ -158,84 +159,45 @@ export default function SynthesisPage() {
         )
     }
 
+    const sortedVersions = promptState
+        ? [...promptState.versions].sort((a, b) => {
+            if (a.version_id === promptState.active_version_id) return -1
+            if (b.version_id === promptState.active_version_id) return 1
+            return 0
+        })
+        : []
+
     return (
         <DashboardPage
             eyebrow="Synthesis"
             title="Reference learning"
-            subtitle="Queue Instagram Reel references, consolidate what the agent learns, and edit the active system prompt directly."
+            subtitle="Edit the active system prompt directly. Queue Instagram Reel references below to teach new patterns."
             action={
-                <button className={styles.secondaryButton} type="button" onClick={loadSynthesis}>
-                    <RefreshCw size={16} /> Refresh
-                </button>
+                <>
+                    <button className={styles.ghostButton} type="button" onClick={loadSynthesis}>
+                        <RefreshCw size={16} /> Refresh
+                    </button>
+                    <button className={styles.primaryButton} type="button" onClick={savePromptVersion} disabled={isSaving || !promptText.trim()}>
+                        <Save size={16} /> {isSaving ? "Saving" : "Save new version"}
+                    </button>
+                </>
             }
         >
+            {(error || status) && (
+                <div className={styles.fieldStack}>
+                    {status && <div className={styles.successBanner}>{status}</div>}
+                    {error && <div className={styles.errorBanner}>{error}</div>}
+                </div>
+            )}
+
             <section className={styles.grid}>
-                <div className={`${styles.panel} ${styles.side}`}>
-                    <div className={styles.panelHeader}>
-                        <div>
-                            <h2>Reel intake</h2>
-                            <p>One URL per line. Private or unsupported reels can fail individually.</p>
-                        </div>
-                    </div>
-                    <div className={styles.fieldStack}>
-                        <label className={styles.fieldLabel}>
-                            Instagram Reel URLs
-                            <textarea
-                                className={styles.textarea}
-                                placeholder="https://www.instagram.com/reel/..."
-                                value={urlInput}
-                                onChange={(event) => setUrlInput(event.target.value)}
-                            />
-                        </label>
-                        <button className={styles.primaryButton} type="button" onClick={submitReferences} disabled={isSubmitting}>
-                            <Link size={16} /> {isSubmitting ? "Queueing" : "Queue references"}
-                        </button>
-                        <button className={styles.secondaryButton} type="button" onClick={consolidateReferences} disabled={isConsolidating || completedReferences.length === 0}>
-                            <Sparkles size={16} /> {isConsolidating ? "Consolidating" : "Consolidate prompt"}
-                        </button>
-                        {status && <div className={styles.successBanner}>{status}</div>}
-                        {error && <div className={styles.errorBanner}>{error}</div>}
-                    </div>
-                </div>
-
-                <div className={`${styles.panel} ${styles.wide}`}>
-                    <div className={styles.panelHeader}>
-                        <div>
-                            <h2>Reference queue</h2>
-                            <p>{completedReferences.length} complete of {references.length} total</p>
-                        </div>
-                        {activeRun && <StatusBadge label={activeRun.status} tone={activeRun.status} />}
-                    </div>
-                    {references.length === 0 ? (
-                        <div className={styles.emptyState}>No references submitted yet.</div>
-                    ) : (
-                        <ul className={styles.referenceList}>
-                            {references.map((reference) => (
-                                <li className={styles.listCard} key={reference.reference_id}>
-                                    <div className={styles.cardTop}>
-                                        <div>
-                                            <h3>{reference.title || reference.url}</h3>
-                                            <p className={styles.smallText}>{reference.author || "Unknown creator"} - {formatDate(reference.updated_at)}</p>
-                                        </div>
-                                        <StatusBadge label={reference.status} tone={reference.status} />
-                                    </div>
-                                    {reference.last_error && <div className={styles.errorBanner}>{reference.last_error}</div>}
-                                    {Object.keys(reference.metrics).length > 0 && (
-                                        <pre className={styles.codeBlock}>{JSON.stringify(reference.metrics, null, 2)}</pre>
-                                    )}
-                                </li>
-                            ))}
-                        </ul>
-                    )}
-                </div>
-
                 <div className={`${styles.panel} ${styles.wide}`}>
                     <div className={styles.panelHeader}>
                         <div>
                             <h2>Effective system prompt</h2>
                             <p>Active version: {promptState?.active_version_id || "loading"}</p>
                         </div>
-                        <StatusBadge label={promptChanged ? "edited" : "active"} />
+                        <StatusBadge label={promptChanged ? "edited" : "active"} tone={promptChanged ? "queued" : "completed"} />
                     </div>
                     <div className={styles.fieldStack}>
                         <label className={styles.fieldLabel}>
@@ -251,59 +213,132 @@ export default function SynthesisPage() {
                             value={promptText}
                             onChange={(event) => setPromptText(event.target.value)}
                         />
-                        <button className={styles.primaryButton} type="button" onClick={savePromptVersion} disabled={isSaving || !promptText.trim()}>
-                            <Save size={16} /> {isSaving ? "Saving" : "Save new version"}
-                        </button>
                     </div>
                 </div>
 
                 <div className={`${styles.panel} ${styles.side}`}>
                     <div className={styles.panelHeader}>
                         <div>
-                            <h2>Generated guidance</h2>
-                            <p>Latest consolidated learning from completed references.</p>
+                            <h2>Versions</h2>
+                            <p>{promptState?.versions.length ?? 0} saved</p>
                         </div>
                     </div>
-                    {activePrompt?.generated_guidance ? (
-                        <pre className={styles.codeBlock}>{activePrompt.generated_guidance}</pre>
-                    ) : (
-                        <div className={styles.emptyState}>Run consolidation after references complete to generate guidance.</div>
-                    )}
-                </div>
-
-                <div className={`${styles.panel} ${styles.full}`}>
-                    <div className={styles.panelHeader}>
-                        <div>
-                            <h2>Prompt versions</h2>
-                            <p>{promptState?.versions.length ?? 0} saved version{promptState?.versions.length === 1 ? "" : "s"}</p>
-                        </div>
-                    </div>
-                    {!promptState || promptState.versions.length === 0 ? (
+                    {!promptState || sortedVersions.length === 0 ? (
                         <div className={styles.emptyState}>No prompt versions loaded.</div>
                     ) : (
-                        <div className={styles.assetGrid}>
-                            {promptState.versions.map((version) => {
+                        <ul className={styles.versionList}>
+                            {sortedVersions.map((version) => {
                                 const isActive = version.version_id === promptState.active_version_id
                                 return (
-                                    <article className={styles.assetCard} key={version.version_id}>
+                                    <li className={styles.listCard} key={version.version_id}>
                                         <div className={styles.cardTop}>
                                             <div>
                                                 <h3>{version.label}</h3>
                                                 <p className={styles.smallText}>{formatDate(version.created_at)}</p>
                                             </div>
-                                            <StatusBadge label={isActive ? "active" : "saved"} />
+                                            <StatusBadge label={isActive ? "active" : "saved"} tone={isActive ? "completed" : undefined} />
                                         </div>
-                                        <p className={styles.smallText}>{version.version_id}</p>
-                                        <div className={styles.cardActions}>
-                                            <button className={styles.ghostButton} type="button" onClick={() => activateVersion(version.version_id)} disabled={isActive}>
-                                                <RotateCcw size={16} /> Activate
-                                            </button>
-                                        </div>
-                                    </article>
+                                        <p className={styles.smallText} style={{ fontFamily: "ui-monospace, monospace" }}>{version.version_id}</p>
+                                        {!isActive && (
+                                            <div className={styles.cardActions}>
+                                                <button className={styles.secondaryButton} type="button" onClick={() => activateVersion(version.version_id)}>
+                                                    <RotateCcw size={16} /> Activate
+                                                </button>
+                                            </div>
+                                        )}
+                                    </li>
                                 )
                             })}
-                        </div>
+                        </ul>
                     )}
+                </div>
+
+                <div className={`${styles.full}`}>
+                    <div className={`${styles.disclosure} ${refsOpen ? styles.disclosureOpen : ""}`}>
+                        <button
+                            type="button"
+                            className={styles.disclosureToggle}
+                            onClick={() => setRefsOpen((current) => !current)}
+                            aria-expanded={refsOpen}
+                        >
+                            <span>References &amp; guidance · {completedReferences.length} of {references.length} complete</span>
+                            <span className={styles.disclosureCaret} aria-hidden>+</span>
+                        </button>
+                        {refsOpen && (
+                            <div className={styles.disclosureBody}>
+                                <div className={`${styles.panel} ${styles.side}`}>
+                                    <div className={styles.panelHeader}>
+                                        <div>
+                                            <h2>Reel intake</h2>
+                                            <p>One URL per line.</p>
+                                        </div>
+                                    </div>
+                                    <div className={styles.fieldStack}>
+                                        <label className={styles.fieldLabel}>
+                                            Instagram Reel URLs
+                                            <textarea
+                                                className={styles.textarea}
+                                                placeholder="https://www.instagram.com/reel/..."
+                                                value={urlInput}
+                                                onChange={(event) => setUrlInput(event.target.value)}
+                                            />
+                                        </label>
+                                        <button className={styles.primaryButton} type="button" onClick={submitReferences} disabled={isSubmitting}>
+                                            <Link size={16} /> {isSubmitting ? "Queueing" : "Queue references"}
+                                        </button>
+                                        <button className={styles.secondaryButton} type="button" onClick={consolidateReferences} disabled={isConsolidating || completedReferences.length === 0}>
+                                            <Sparkles size={16} /> {isConsolidating ? "Consolidating" : "Consolidate"}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className={`${styles.panel} ${styles.wide}`}>
+                                    <div className={styles.panelHeader}>
+                                        <div>
+                                            <h2>Reference queue</h2>
+                                            <p>{completedReferences.length} complete of {references.length} total</p>
+                                        </div>
+                                        {activeRun && <StatusBadge label={activeRun.status} tone={activeRun.status} />}
+                                    </div>
+                                    {references.length === 0 ? (
+                                        <div className={styles.emptyState}>No references submitted yet.</div>
+                                    ) : (
+                                        <ul className={styles.referenceList}>
+                                            {references.map((reference) => (
+                                                <li className={styles.listCard} key={reference.reference_id}>
+                                                    <div className={styles.cardTop}>
+                                                        <div>
+                                                            <h3>{reference.title || reference.url}</h3>
+                                                            <p className={styles.smallText}>{reference.author || "Unknown creator"} · {formatDate(reference.updated_at)}</p>
+                                                        </div>
+                                                        <StatusBadge label={reference.status} tone={reference.status} />
+                                                    </div>
+                                                    {reference.last_error && <div className={styles.errorBanner}>{reference.last_error}</div>}
+                                                    {Object.keys(reference.metrics).length > 0 && (
+                                                        <pre className={styles.codeBlock}>{JSON.stringify(reference.metrics, null, 2)}</pre>
+                                                    )}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                </div>
+
+                                <div className={`${styles.panel} ${styles.full}`}>
+                                    <div className={styles.panelHeader}>
+                                        <div>
+                                            <h2>Generated guidance</h2>
+                                            <p>Latest consolidated learning from completed references.</p>
+                                        </div>
+                                    </div>
+                                    {activePrompt?.generated_guidance ? (
+                                        <pre className={styles.codeBlock}>{activePrompt.generated_guidance}</pre>
+                                    ) : (
+                                        <div className={styles.emptyState}>Run consolidation after references complete to generate guidance.</div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </section>
         </DashboardPage>

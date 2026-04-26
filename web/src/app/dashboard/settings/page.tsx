@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useUser } from "@clerk/nextjs"
-import { RefreshCw, Server, UserRound } from "lucide-react"
+import { RefreshCw } from "lucide-react"
 import { DashboardPage, StatusBadge, formatDate } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import {
@@ -71,74 +71,55 @@ export default function SettingsPage() {
                 </button>
             }
         >
-            <section className={styles.grid}>
-                <div className={`${styles.panel} ${styles.wide}`}>
-                    <div className={styles.panelHeader}>
-                        <div>
-                            <h2>API connection</h2>
-                            <p>The dashboard sends Clerk user identity as an X-User-Id header.</p>
-                        </div>
-                        <StatusBadge label={health} tone={health === "ok" ? "completed" : health === "failed" ? "failed" : undefined} />
+            {error && <div className={styles.errorBanner}>{error}</div>}
+
+            <div className={styles.settingsStack}>
+                <div className={styles.settingsGroup}>
+                    <div className={styles.settingsGroupHeader}>
+                        <h2 className={styles.settingsGroupTitle}>API connection</h2>
+                        <StatusBadge
+                            label={health}
+                            tone={health === "ok" ? "completed" : health === "failed" ? "failed" : undefined}
+                        />
                     </div>
-                    {error && <div className={styles.errorBanner}>{error}</div>}
-                    <div className={styles.settingsGrid}>
-                        <div className={styles.settingCard}>
-                            <Server size={18} />
-                            <div>
-                                <span className={styles.settingLabel}>API base URL</span>
-                                <span className={styles.monoText}>{ECLYPTE_API_BASE_URL}</span>
-                            </div>
-                        </div>
-                        <div className={styles.settingCard}>
-                            <UserRound size={18} />
-                            <div>
-                                <span className={styles.settingLabel}>Signed-in user ID</span>
-                                <span className={styles.monoText}>{user.id}</span>
-                            </div>
-                        </div>
-                        <div className={styles.settingCard}>
-                            <Server size={18} />
-                            <div>
-                                <span className={styles.settingLabel}>YouTube cookies</span>
-                                <span>{healthDetails?.youtube_cookies_configured ? "Configured" : "Not configured"}</span>
-                            </div>
-                        </div>
+                    <div className={styles.settingsRow}>
+                        <span className={styles.settingsRowLabel}>Base URL</span>
+                        <span className={`${styles.settingsRowValue} ${styles.settingsRowMono}`}>{ECLYPTE_API_BASE_URL}</span>
+                    </div>
+                    <div className={styles.settingsRow}>
+                        <span className={styles.settingsRowLabel}>Signed-in as</span>
+                        <span className={`${styles.settingsRowValue} ${styles.settingsRowMono}`}>{user.id}</span>
+                    </div>
+                    <div className={styles.settingsRow}>
+                        <span className={styles.settingsRowLabel}>YouTube cookies</span>
+                        <span className={styles.settingsRowValue}>{healthDetails?.youtube_cookies_configured ? "Configured" : "Not configured"}</span>
                     </div>
                 </div>
 
-                <div className={`${styles.panel} ${styles.side}`}>
-                    <div className={styles.panelHeader}>
-                        <div>
-                            <h2>Synthesis prompt</h2>
-                            <p>Active version used by future prompt-aware workflows.</p>
-                        </div>
+                <div className={styles.settingsGroup}>
+                    <div className={styles.settingsGroupHeader}>
+                        <h2 className={styles.settingsGroupTitle}>Synthesis prompt</h2>
                     </div>
                     {promptState ? (
-                        <div className={styles.fieldStack}>
-                            <div className={styles.settingCard}>
-                                <div>
-                                    <span className={styles.settingLabel}>Active version</span>
-                                    <span className={styles.monoText}>{promptState.active_version_id}</span>
-                                </div>
+                        <>
+                            <div className={styles.settingsRow}>
+                                <span className={styles.settingsRowLabel}>Active version</span>
+                                <span className={`${styles.settingsRowValue} ${styles.settingsRowMono}`}>{promptState.active_version_id}</span>
                             </div>
-                            <div className={styles.settingCard}>
-                                <div>
-                                    <span className={styles.settingLabel}>Label</span>
-                                    <span>{promptState.active_prompt.label}</span>
-                                </div>
+                            <div className={styles.settingsRow}>
+                                <span className={styles.settingsRowLabel}>Label</span>
+                                <span className={styles.settingsRowValue}>{promptState.active_prompt.label}</span>
                             </div>
-                            <div className={styles.settingCard}>
-                                <div>
-                                    <span className={styles.settingLabel}>Updated</span>
-                                    <span>{formatDate(promptState.active_prompt.created_at)}</span>
-                                </div>
+                            <div className={styles.settingsRow}>
+                                <span className={styles.settingsRowLabel}>Updated</span>
+                                <span className={styles.settingsRowValue}>{formatDate(promptState.active_prompt.created_at)}</span>
                             </div>
-                        </div>
+                        </>
                     ) : (
                         <div className={styles.emptyState}>Prompt state has not loaded yet.</div>
                     )}
                 </div>
-            </section>
+            </div>
         </DashboardPage>
     )
 }

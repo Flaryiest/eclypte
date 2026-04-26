@@ -145,6 +145,35 @@ table {
   --color-subtitle: #f0f0f0;
 }
 
+[data-surface="cream"] {
+  --color-background: #f4efe6;
+  --color-primary: #161412;
+  --color-secondary: #3c3833;
+  --color-subtitle: #6f655a;
+  --color-highlight: #c2410c;
+
+  --ec-paper: #f4efe6;
+  --ec-paper-2: #ece5d6;
+  --ec-paper-sunk: #e7dec9;
+  --ec-ink: #161412;
+  --ec-ink-2: #3c3833;
+  --ec-ink-muted: #6f655a;
+  --ec-rule: rgba(22, 20, 18, 0.12);
+  --ec-rule-strong: rgba(22, 20, 18, 0.28);
+  --ec-ember: #c2410c;
+  --ec-ember-soft: rgba(194, 65, 12, 0.10);
+  --ec-sage: #3a6b4f;
+  --ec-sage-soft: rgba(58, 107, 79, 0.10);
+  --ec-mark: #161412;
+
+  background-color: var(--ec-paper);
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='paper'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23paper)' opacity='0.06'/></svg>");
+  background-size: 200px 200px;
+  background-attachment: fixed;
+  color: var(--ec-ink);
+}
+
 body {
   margin: 0;
   display: flex;

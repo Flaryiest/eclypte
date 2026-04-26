@@ -178,7 +178,7 @@ export default function NewEditPage() {
                 <div className={`${styles.panel} ${styles.wide}`}>
                     <div className={styles.panelHeader}>
                         <div>
-                            <h2>Asset selection</h2>
+                            <h2>Compose</h2>
                             <p>Use analyzed or uploaded songs and source videos.</p>
                         </div>
                     </div>
@@ -195,7 +195,7 @@ export default function NewEditPage() {
                             />
                         </label>
                         <label className={styles.fieldLabel}>
-                            Song asset
+                            Song
                             <select className={styles.select} value={audioId} onChange={(event) => setAudioId(event.target.value)} disabled={isCreating}>
                                 <option value="">Choose a WAV song</option>
                                 {songs.map((asset) => (
@@ -204,9 +204,14 @@ export default function NewEditPage() {
                                     </option>
                                 ))}
                             </select>
+                            {selectedSong && (
+                                <span className={`${styles.assetCaption} ${selectedSong.analysis ? styles.assetCaptionOk : ""}`}>
+                                    {selectedSong.analysis ? "✓ analyzed" : "○ awaiting analysis"} · {kindLabel(selectedSong.kind)} · {formatBytes(selectedSong.current_version?.size_bytes)}
+                                </span>
+                            )}
                         </label>
                         <label className={styles.fieldLabel}>
-                            Source video asset
+                            Source video
                             <select className={styles.select} value={videoId} onChange={(event) => setVideoId(event.target.value)} disabled={isCreating}>
                                 <option value="">Choose an MP4 video</option>
                                 {videos.map((asset) => (
@@ -215,6 +220,11 @@ export default function NewEditPage() {
                                     </option>
                                 ))}
                             </select>
+                            {selectedVideo && (
+                                <span className={`${styles.assetCaption} ${selectedVideo.analysis ? styles.assetCaptionOk : ""}`}>
+                                    {selectedVideo.analysis ? "✓ analyzed" : "○ awaiting analysis"} · {kindLabel(selectedVideo.kind)} · {formatBytes(selectedVideo.current_version?.size_bytes)}
+                                </span>
+                            )}
                         </label>
                         <div className={styles.fieldLabel}>
                             Planning mode
@@ -225,7 +235,7 @@ export default function NewEditPage() {
                                     onClick={() => setPlanningMode("agent")}
                                     disabled={isCreating}
                                 >
-                                    AI Agent
+                                    AI agent
                                 </button>
                                 <button
                                     className={planningMode === "deterministic" ? styles.segmentActive : styles.segmentButton}
@@ -255,34 +265,8 @@ export default function NewEditPage() {
                 <div className={`${styles.panel} ${styles.side}`}>
                     <div className={styles.panelHeader}>
                         <div>
-                            <h2>Selected assets</h2>
-                            <p>{selectedAssets.length}/2 ready</p>
-                        </div>
-                    </div>
-                    <div className={styles.assetList}>
-                        {selectedAssets.length === 0 ? (
-                            <div className={styles.emptyState}>Choose a song and video.</div>
-                        ) : (
-                            selectedAssets.map((asset) => (
-                                <article className={styles.listCard} key={asset.file_id}>
-                                    <div className={styles.cardTop}>
-                                        <div>
-                                            <h3>{asset.display_name}</h3>
-                                            <p className={styles.smallText}>{kindLabel(asset.kind)}</p>
-                                        </div>
-                                        <StatusBadge label={asset.analysis ? "Ready" : "Uploaded"} tone={asset.analysis ? "ready" : "uploaded"} />
-                                    </div>
-                                </article>
-                            ))
-                        )}
-                    </div>
-                </div>
-
-                <div className={`${styles.panel} ${styles.full}`}>
-                    <div className={styles.panelHeader}>
-                        <div>
-                            <h2>Edit jobs</h2>
-                            <p>{jobs.length} job{jobs.length === 1 ? "" : "s"} tracked</p>
+                            <h2>Queue</h2>
+                            <p>{jobs.length} job{jobs.length === 1 ? "" : "s"} · {selectedAssets.length}/2 ready</p>
                         </div>
                     </div>
                     {jobs.length === 0 ? (

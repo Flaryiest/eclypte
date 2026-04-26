@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useUser } from "@clerk/nextjs"
-import { Download, Film, RefreshCw } from "lucide-react"
+import { Download, RefreshCw } from "lucide-react"
 import {
     DashboardPage,
     StatusBadge,
@@ -51,7 +51,7 @@ export default function RendersPage() {
         void loadRenders()
     }, [loadRenders])
 
-    const openPreview = async (asset: AssetSummary) => {
+    const openPreview = useCallback(async (asset: AssetSummary) => {
         if (!api) {
             return
         }
@@ -67,7 +67,13 @@ export default function RendersPage() {
         } catch (caught) {
             setError(errorMessage(caught))
         }
-    }
+    }, [api])
+
+    useEffect(() => {
+        if (!preview && outputs.length > 0) {
+            void openPreview(outputs[0])
+        }
+    }, [outputs, preview, openPreview])
 
     const downloadAsset = async (asset: AssetSummary) => {
         if (!api) {
@@ -115,98 +121,91 @@ export default function RendersPage() {
                 </button>
             }
         >
-            <section className={styles.grid}>
-                <div className={`${styles.panel} ${styles.wide}`}>
-                    <div className={styles.panelHeader}>
-                        <div>
-                            <h2>Output assets</h2>
-                            <p>{outputs.length} rendered MP4{outputs.length === 1 ? "" : "s"}</p>
-                        </div>
-                    </div>
-                    {error && <div className={styles.errorBanner}>{error}</div>}
-                    {outputs.length === 0 ? (
-                        <div className={styles.emptyState}>No renders yet. Create one from New Edit.</div>
-                    ) : (
-                        <div className={styles.assetGrid}>
-                            {outputs.map((asset) => (
-                                <article className={styles.assetCard} key={asset.file_id}>
-                                    <div className={styles.cardTop}>
-                                        <div>
-                                            <h3>{asset.display_name}</h3>
-                                            <p className={styles.smallText}>
-                                                {formatBytes(asset.current_version?.size_bytes)} - {formatDate(asset.updated_at)}
-                                            </p>
-                                        </div>
-                                        <StatusBadge label="ready" tone="ready" />
-                                    </div>
-                                    <div className={styles.cardActions}>
-                                        <button className={styles.secondaryButton} type="button" onClick={() => openPreview(asset)}>
-                                            <Film size={16} /> Preview
-                                        </button>
-                                        {preview?.asset.file_id === asset.file_id && (
-                                            <button
-                                                className={styles.ghostButton}
-                                                type="button"
-                                                onClick={() => downloadAsset(asset)}
-                                                disabled={downloadingId === asset.file_id}
-                                            >
-                                                <Download size={16} /> {downloadingId === asset.file_id ? "Downloading" : "Download"}
-                                            </button>
-                                        )}
-                                    </div>
-                                </article>
-                            ))}
-                        </div>
-                    )}
-                </div>
+            {error && <div className={styles.errorBanner}>{error}</div>}
 
-                <div className={`${styles.panel} ${styles.side}`}>
-                    <div className={styles.panelHeader}>
-                        <div>
-                            <h2>Render runs</h2>
-                            <p>{runs.length} tracked run{runs.length === 1 ? "" : "s"}</p>
-                        </div>
-                    </div>
-                    {runs.length === 0 ? (
-                        <div className={styles.emptyState}>No render runs found.</div>
-                    ) : (
-                        <ul className={styles.runList}>
-                            {runs.map((run) => (
-                                <li className={styles.listCard} key={run.run_id}>
-                                    <div className={styles.cardTop}>
-                                        <div>
-                                            <h3>{run.run_id}</h3>
-                                            <p className={styles.smallText}>{run.current_step || "render"} - {formatDate(run.updated_at)}</p>
-                                        </div>
-                                        <StatusBadge label={run.status} tone={run.status} />
-                                    </div>
-                                    {run.last_error && <div className={styles.errorBanner}>{run.last_error}</div>}
-                                </li>
-                            ))}
-                        </ul>
-                    )}
-                </div>
-
-                {preview && (
-                    <div className={`${styles.panel} ${styles.full}`}>
-                        <div className={styles.panelHeader}>
-                            <div>
-                                <h2>{preview.asset.display_name}</h2>
-                                <p>Presigned preview URL for the latest render version.</p>
+            {outputs.length === 0 ? (
+                <div className={styles.emptyState}>No renders yet. Create one from New Edit.</div>
+            ) : (
+                <>
+                    {preview && (
+                        <div className={styles.heroPlayer}>
+                            <video className={styles.previewMedia} controls src={preview.url} />
+                            <div className={styles.heroCaption}>
+                                <div>
+                                    <h2 className={styles.heroCaptionTitle}>{preview.asset.display_name}</h2>
+                                    <p className={styles.heroCaptionMeta}>
+                                        {formatBytes(preview.asset.current_version?.size_bytes)} · {formatDate(preview.asset.updated_at)}
+                                    </p>
+                                </div>
+                                <button
+                                    className={styles.primaryButton}
+                                    type="button"
+                                    onClick={() => downloadAsset(preview.asset)}
+                                    disabled={downloadingId === preview.asset.file_id}
+                                >
+                                    <Download size={16} /> {downloadingId === preview.asset.file_id ? "Downloading" : "Download MP4"}
+                                </button>
                             </div>
-                            <button
-                                className={styles.primaryButton}
-                                type="button"
-                                onClick={() => downloadAsset(preview.asset)}
-                                disabled={downloadingId === preview.asset.file_id}
-                            >
-                                <Download size={16} /> {downloadingId === preview.asset.file_id ? "Downloading" : "Download MP4"}
-                            </button>
                         </div>
-                        <video className={styles.previewMedia} controls src={preview.url} />
-                    </div>
-                )}
-            </section>
+                    )}
+
+                    <section className={styles.grid}>
+                        <div className={`${styles.panel} ${styles.wide}`}>
+                            <div className={styles.panelHeader}>
+                                <div>
+                                    <h2>All renders</h2>
+                                    <p>{outputs.length} rendered MP4{outputs.length === 1 ? "" : "s"}</p>
+                                </div>
+                            </div>
+                            <div className={styles.filmstrip}>
+                                {outputs.map((asset) => {
+                                    const isActive = preview?.asset.file_id === asset.file_id
+                                    return (
+                                        <button
+                                            type="button"
+                                            key={asset.file_id}
+                                            className={`${styles.filmstripCard} ${isActive ? styles.filmstripActive : ""}`}
+                                            onClick={() => openPreview(asset)}
+                                            aria-pressed={isActive}
+                                        >
+                                            <div className={styles.filmstripFrame}>{asset.display_name}</div>
+                                            <span className={styles.assetRowMeta}>{formatDate(asset.updated_at)}</span>
+                                            <span className={styles.assetRowCellNumeral}>{formatBytes(asset.current_version?.size_bytes)}</span>
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                        </div>
+
+                        <div className={`${styles.panel} ${styles.side}`}>
+                            <div className={styles.panelHeader}>
+                                <div>
+                                    <h2>Render runs</h2>
+                                    <p>{runs.length} tracked run{runs.length === 1 ? "" : "s"}</p>
+                                </div>
+                            </div>
+                            {runs.length === 0 ? (
+                                <div className={styles.emptyState}>No render runs found.</div>
+                            ) : (
+                                <ul className={styles.runList}>
+                                    {runs.map((run) => (
+                                        <li className={styles.listCard} key={run.run_id}>
+                                            <div className={styles.cardTop}>
+                                                <div>
+                                                    <h3 style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.86rem" }}>{run.run_id}</h3>
+                                                    <p className={styles.smallText}>{run.current_step || "render"} · {formatDate(run.updated_at)}</p>
+                                                </div>
+                                                <StatusBadge label={run.status} tone={run.status} />
+                                            </div>
+                                            {run.last_error && <div className={styles.errorBanner}>{run.last_error}</div>}
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                    </section>
+                </>
+            )}
         </DashboardPage>
     )
 }

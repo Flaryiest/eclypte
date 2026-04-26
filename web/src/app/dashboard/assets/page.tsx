@@ -24,6 +24,7 @@ import {
 
 type UploadSlot = "audio" | "video"
 type PreviewState = { asset: AssetSummary; url: string }
+type Disclosure = "upload" | "youtube" | null
 
 export default function AssetsPage() {
     const { isLoaded, isSignedIn, user } = useUser()
@@ -35,6 +36,8 @@ export default function AssetsPage() {
     const [status, setStatus] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [preview, setPreview] = useState<PreviewState | null>(null)
+    const [selectedFileId, setSelectedFileId] = useState<string | null>(null)
+    const [openDisclosure, setOpenDisclosure] = useState<Disclosure>(null)
     const [isUploading, setIsUploading] = useState(false)
     const [isImporting, setIsImporting] = useState(false)
     const [busyAssetId, setBusyAssetId] = useState<string | null>(null)
@@ -44,6 +47,7 @@ export default function AssetsPage() {
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
     const visibleAssets = filter === "all" ? assets : assets.filter((asset) => asset.kind === filter)
     const isWorking = isUploading || isImporting
+    const selectedAsset = selectedFileId ? assets.find((asset) => asset.file_id === selectedFileId) ?? null : null
 
     const loadAssets = useCallback(async () => {
         if (!api) {
@@ -186,6 +190,13 @@ export default function AssetsPage() {
         setPreview({ asset, url: download.download_url })
     }
 
+    const selectAsset = (asset: AssetSummary) => {
+        setSelectedFileId(asset.file_id)
+        if (preview && preview.asset.file_id !== asset.file_id) {
+            setPreview(null)
+        }
+    }
+
     const downloadAsset = async (asset: AssetSummary) => {
         if (!api) {
             return
@@ -210,6 +221,10 @@ export default function AssetsPage() {
         }
     }
 
+    const toggleDisclosure = (next: Disclosure) => {
+        setOpenDisclosure((current) => (current === next ? null : next))
+    }
+
     if (!isLoaded) {
         return <DashboardPage eyebrow="Assets" title="Loading assets"><div /></DashboardPage>
     }
@@ -227,16 +242,41 @@ export default function AssetsPage() {
             title="Asset library"
             subtitle="Upload reusable WAV songs and MP4 source videos, then analyze them once for future edits."
             action={
-                <button className={styles.secondaryButton} type="button" onClick={loadAssets}>
-                    <RefreshCw size={16} /> Refresh
-                </button>
+                <>
+                    <button
+                        className={openDisclosure === "upload" ? styles.primaryButton : styles.secondaryButton}
+                        type="button"
+                        onClick={() => toggleDisclosure("upload")}
+                        aria-expanded={openDisclosure === "upload"}
+                    >
+                        <Upload size={16} /> Upload
+                    </button>
+                    <button
+                        className={openDisclosure === "youtube" ? styles.primaryButton : styles.secondaryButton}
+                        type="button"
+                        onClick={() => toggleDisclosure("youtube")}
+                        aria-expanded={openDisclosure === "youtube"}
+                    >
+                        <Link2 size={16} /> YouTube
+                    </button>
+                    <button className={styles.ghostButton} type="button" onClick={loadAssets}>
+                        <RefreshCw size={16} /> Refresh
+                    </button>
+                </>
             }
         >
-            <section className={styles.grid}>
-                <div className={`${styles.panel} ${styles.side}`}>
+            {(error || status) && (
+                <div className={styles.fieldStack}>
+                    {status && <div className={styles.successBanner}>{status}</div>}
+                    {error && <div className={styles.errorBanner}>{error}</div>}
+                </div>
+            )}
+
+            {openDisclosure === "upload" && (
+                <div className={`${styles.panel} ${styles.full}`}>
                     <div className={styles.panelHeader}>
                         <div>
-                            <h2>Upload</h2>
+                            <h2>Upload asset</h2>
                             <p>Assets persist in R2 and can be reused after refresh.</p>
                         </div>
                     </div>
@@ -249,7 +289,7 @@ export default function AssetsPage() {
                             </select>
                         </label>
                         <label className={styles.filePicker}>
-                            <span className={styles.fileName}>{file ? file.name : "Choose file"}</span>
+                            <span className={styles.fileName}>{file ? file.name : "Choose a file"}</span>
                             <span className={styles.muted}>{slot === "audio" ? "audio/wav" : "video/mp4"}</span>
                             {file && <span className={styles.smallText}>{formatBytes(file.size)}</span>}
                             <input type="file" accept={slot === "audio" ? "audio/wav,.wav" : "video/mp4,.mp4"} onChange={onFileChange} />
@@ -257,6 +297,19 @@ export default function AssetsPage() {
                         <button className={styles.primaryButton} type="button" onClick={uploadSelected} disabled={!file || Boolean(validateUpload(file, slot)) || isWorking}>
                             <Upload size={16} /> {isUploading ? "Uploading" : "Upload asset"}
                         </button>
+                    </div>
+                </div>
+            )}
+
+            {openDisclosure === "youtube" && (
+                <div className={`${styles.panel} ${styles.full}`}>
+                    <div className={styles.panelHeader}>
+                        <div>
+                            <h2>Import from YouTube</h2>
+                            <p>Backend downloads the audio, transcodes to WAV, and runs music analysis.</p>
+                        </div>
+                    </div>
+                    <div className={styles.fieldStack}>
                         <label className={styles.fieldLabel}>
                             YouTube song URL
                             <input
@@ -272,25 +325,25 @@ export default function AssetsPage() {
                             />
                         </label>
                         <button
-                            className={styles.secondaryButton}
+                            className={styles.primaryButton}
                             type="button"
                             onClick={importYouTubeSong}
                             disabled={!youtubeUrl.trim() || isWorking}
                         >
                             <Link2 size={16} /> {isImporting ? "Importing" : "Import and analyze"}
                         </button>
-                        {status && <div className={styles.successBanner}>{status}</div>}
-                        {error && <div className={styles.errorBanner}>{error}</div>}
                     </div>
                 </div>
+            )}
 
+            <section className={styles.grid}>
                 <div className={`${styles.panel} ${styles.wide}`}>
                     <div className={styles.panelHeader}>
                         <div>
                             <h2>Library</h2>
                             <p>{visibleAssets.length} asset{visibleAssets.length === 1 ? "" : "s"}</p>
                         </div>
-                        <select className={styles.select} value={filter} onChange={(event) => setFilter(event.target.value as "all" | ArtifactKind)}>
+                        <select className={styles.select} value={filter} onChange={(event) => setFilter(event.target.value as "all" | ArtifactKind)} style={{ maxWidth: 240 }}>
                             <option value="all">All assets</option>
                             <option value="song_audio">Songs</option>
                             <option value="source_video">Videos</option>
@@ -303,82 +356,125 @@ export default function AssetsPage() {
                     {visibleAssets.length === 0 ? (
                         <div className={styles.emptyState}>No assets yet.</div>
                     ) : (
-                        <div className={styles.assetGrid}>
+                        <div className={styles.assetTable}>
+                            <div className={styles.assetTableHeader}>
+                                <span>Name</span>
+                                <span>Kind</span>
+                                <span>Size</span>
+                                <span>Updated</span>
+                                <span>Status</span>
+                            </div>
                             {visibleAssets.map((asset) => {
                                 const state = assetState(asset)
-                                const canAnalyze = (asset.kind === "song_audio" || asset.kind === "source_video") && !asset.analysis
+                                const isSelected = selectedFileId === asset.file_id
                                 return (
-                                    <article className={styles.assetCard} key={asset.file_id}>
-                                        <div className={styles.cardTop}>
-                                            <div>
-                                                <h3>{asset.display_name}</h3>
-                                                <p className={styles.smallText}>
-                                                    {kindLabel(asset.kind)} - {formatBytes(asset.current_version?.size_bytes)} - {formatDate(asset.updated_at)}
-                                                </p>
-                                            </div>
-                                            <StatusBadge label={state} tone={state} />
-                                        </div>
-                                        <div className={styles.cardActions}>
-                                            {canAnalyze && state !== "analyzing" && state !== "ready" && (
-                                                <button className={styles.secondaryButton} type="button" onClick={() => analyzeAsset(asset)} disabled={busyAssetId === asset.file_id}>
-                                                    <Activity size={16} /> {busyAssetId === asset.file_id ? "Analyzing" : "Analyze"}
-                                                </button>
-                                            )}
-                                            {asset.current_version_id && (
-                                                <button className={styles.ghostButton} type="button" onClick={() => openPreview(asset)}>
-                                                    <Download size={16} /> Preview
-                                                </button>
-                                            )}
-                                        </div>
-                                    </article>
+                                    <button
+                                        type="button"
+                                        key={asset.file_id}
+                                        className={`${styles.assetRow} ${isSelected ? styles.assetRowSelected : ""}`}
+                                        onClick={() => selectAsset(asset)}
+                                    >
+                                        <span className={styles.assetRowName}>
+                                            <span className={styles.assetRowTitle}>{asset.display_name}</span>
+                                            <span className={styles.assetRowMeta}>{asset.file_id.slice(0, 12)}</span>
+                                        </span>
+                                        <span className={styles.assetRowCell}>{kindLabel(asset.kind)}</span>
+                                        <span className={styles.assetRowCellNumeral}>{formatBytes(asset.current_version?.size_bytes)}</span>
+                                        <span className={styles.assetRowCell}>{formatDate(asset.updated_at)}</span>
+                                        <span><StatusBadge label={state} tone={state} /></span>
+                                    </button>
                                 )
                             })}
                         </div>
                     )}
                 </div>
 
-                {preview && (
-                    <AssetPreview
-                        preview={preview}
-                        isDownloading={downloadingId === preview.asset.file_id}
-                        onDownload={() => downloadAsset(preview.asset)}
-                    />
-                )}
+                <div className={`${styles.detailPanel} ${styles.side}`}>
+                    {!selectedAsset ? (
+                        <div className={styles.detailEmpty}>Select an asset to preview, analyze, or download.</div>
+                    ) : (
+                        <AssetDetail
+                            asset={selectedAsset}
+                            preview={preview && preview.asset.file_id === selectedAsset.file_id ? preview : null}
+                            isAnalyzing={busyAssetId === selectedAsset.file_id}
+                            isDownloading={downloadingId === selectedAsset.file_id}
+                            onAnalyze={() => analyzeAsset(selectedAsset)}
+                            onPreview={() => openPreview(selectedAsset)}
+                            onDownload={() => downloadAsset(selectedAsset)}
+                        />
+                    )}
+                </div>
             </section>
         </DashboardPage>
     )
 }
 
-function AssetPreview({
+function AssetDetail({
+    asset,
     preview,
+    isAnalyzing,
     isDownloading,
+    onAnalyze,
+    onPreview,
     onDownload,
 }: {
-    preview: PreviewState
+    asset: AssetSummary
+    preview: PreviewState | null
+    isAnalyzing: boolean
     isDownloading: boolean
+    onAnalyze: () => void
+    onPreview: () => void
     onDownload: () => void
 }) {
-    const contentType = preview.asset.current_version?.content_type || ""
+    const state = assetState(asset)
+    const canAnalyze = (asset.kind === "song_audio" || asset.kind === "source_video") && !asset.analysis
+    const contentType = asset.current_version?.content_type || ""
     const isAudio = contentType.startsWith("audio/")
     const isVideo = contentType.startsWith("video/")
 
     return (
-        <div className={`${styles.panel} ${styles.full}`}>
-            <div className={styles.panelHeader}>
+        <>
+            <div className={styles.cardTop}>
                 <div>
-                    <h2>Preview</h2>
-                    <p>Presigned URLs expire; refresh preview if playback stops.</p>
+                    <h3 style={{ fontFamily: "var(--font-eiko), serif", fontSize: "1.4rem", textTransform: "none", letterSpacing: "-0.005em" }}>{asset.display_name}</h3>
+                    <p className={styles.smallText}>
+                        {kindLabel(asset.kind)} · {formatBytes(asset.current_version?.size_bytes)} · {formatDate(asset.updated_at)}
+                    </p>
                 </div>
-                <button className={styles.primaryButton} type="button" onClick={onDownload} disabled={isDownloading}>
-                    <Download size={16} /> {isDownloading ? "Downloading" : "Download"}
-                </button>
+                <StatusBadge label={state} tone={state} />
             </div>
-            {isAudio && <audio className={styles.previewMedia} controls src={preview.url} />}
-            {isVideo && <video className={styles.previewMedia} controls src={preview.url} />}
-            {!isAudio && !isVideo && (
-                <div className={styles.emptyState}>This artifact can be downloaded, but it does not have an inline media preview.</div>
+
+            {preview ? (
+                <>
+                    {isAudio && <audio className={styles.previewMedia} controls src={preview.url} />}
+                    {isVideo && <video className={styles.previewMedia} controls src={preview.url} />}
+                    {!isAudio && !isVideo && (
+                        <div className={styles.emptyState}>Downloadable, no inline preview available.</div>
+                    )}
+                    <p className={styles.smallText}>Presigned URLs expire; refresh preview if playback stops.</p>
+                </>
+            ) : (
+                <p className={styles.smallText}>Preview to play this asset inline, or download to save it locally.</p>
             )}
-        </div>
+
+            <div className={styles.cardActions}>
+                {canAnalyze && state !== "analyzing" && state !== "ready" && (
+                    <button className={styles.secondaryButton} type="button" onClick={onAnalyze} disabled={isAnalyzing}>
+                        <Activity size={16} /> {isAnalyzing ? "Analyzing" : "Analyze"}
+                    </button>
+                )}
+                {asset.current_version_id && !preview && (
+                    <button className={styles.secondaryButton} type="button" onClick={onPreview}>
+                        <Download size={16} /> Preview
+                    </button>
+                )}
+                {asset.current_version_id && (
+                    <button className={styles.primaryButton} type="button" onClick={onDownload} disabled={isDownloading}>
+                        <Download size={16} /> {isDownloading ? "Downloading" : "Download"}
+                    </button>
+                )}
+            </div>
+        </>
     )
 }
 
