@@ -44,6 +44,14 @@ export type FileVersionMeta = {
 
 export type RunStatus = "created" | "running" | "blocked" | "failed" | "completed" | "canceled"
 export type PlanningMode = "agent" | "deterministic"
+export type ExportFormat = "reels_9_16" | "youtube_16_9"
+
+export type ExportOptions = {
+    format: ExportFormat
+    audioStartSec?: number
+    audioEndSec?: number | null
+    cropFocusX?: number
+}
 
 export type RunManifest = {
     run_id: string
@@ -162,6 +170,7 @@ export type EditJobRequest = {
     planningMode?: PlanningMode
     creativeBrief?: string
     title?: string
+    exportOptions?: ExportOptions
 }
 
 export type DownloadUrlResponse = {
@@ -309,6 +318,7 @@ export class EclypteApiClient {
             videoAnalysis: FileVersionInput
             planningMode?: PlanningMode
             creativeBrief?: string
+            exportOptions?: ExportOptions
         },
         signal?: AbortSignal,
     ) {
@@ -321,6 +331,7 @@ export class EclypteApiClient {
                 video_analysis: input.videoAnalysis,
                 planning_mode: input.planningMode,
                 creative_brief: input.creativeBrief,
+                export_options: serializeExportOptions(input.exportOptions),
             }),
             signal,
         })
@@ -354,6 +365,7 @@ export class EclypteApiClient {
                 planning_mode: input.planningMode,
                 creative_brief: input.creativeBrief,
                 title: input.title,
+                export_options: serializeExportOptions(input.exportOptions),
             }),
             signal,
         })
@@ -578,6 +590,18 @@ export function assetState(asset: AssetSummary): AssetState {
 
 export function isRunActive(run: RunManifest) {
     return run.status === "created" || run.status === "running" || run.status === "blocked"
+}
+
+function serializeExportOptions(options: ExportOptions | undefined) {
+    if (!options) {
+        return undefined
+    }
+    return {
+        format: options.format,
+        audio_start_sec: options.audioStartSec ?? 0,
+        audio_end_sec: options.audioEndSec ?? null,
+        crop_focus_x: options.cropFocusX ?? 0.5,
+    }
 }
 
 export async function waitForRunCompletion(

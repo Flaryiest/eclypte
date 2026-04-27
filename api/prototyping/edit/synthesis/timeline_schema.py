@@ -6,7 +6,7 @@ SCHEMA_VERSION = 1
 
 TransitionType = Literal["cut", "crossfade", "whip", "flash"]
 EffectType = Literal["freeze", "speed_ramp", "hold"]
-CropMode = Literal["letterbox", "center", "per_shot"]
+CropMode = Literal["letterbox", "center", "fill", "per_shot"]
 
 
 class SourceRef(BaseModel):
@@ -20,6 +20,7 @@ class OutputSpec(BaseModel):
     fps: int = 30
     duration_sec: float
     crop: CropMode = "letterbox"
+    crop_focus_x: float = Field(default=0.5, ge=0, le=1)
 
 
 class AudioSpec(BaseModel):

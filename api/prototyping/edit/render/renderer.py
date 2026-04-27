@@ -21,6 +21,7 @@ from moviepy import AudioFileClip, ColorClip, CompositeVideoClip, VideoFileClip,
 from ..synthesis.timeline_schema import OutputSpec, Shot, Timeline
 from ..synthesis.validators import validate_timeline
 from .effects import apply_effects
+from .geometry import cover_crop_offsets
 from .transitions import apply_transition
 
 CODEC_VIDEO = "libx264"
@@ -65,7 +66,13 @@ def render_timeline(
 
     try:
         build_started = time.perf_counter()
-        shot_clips = _build_shot_clips(source, timeline.shots, target_size, timeline.output.crop)
+        shot_clips = _build_shot_clips(
+            source,
+            timeline.shots,
+            target_size,
+            timeline.output.crop,
+            timeline.output.crop_focus_x,
+        )
         _log_timing("build shot clips", build_started)
         _report(progress_callback, 30, "Built shot clips")
 
@@ -126,7 +133,13 @@ def _resolve_output(spec: OutputSpec, *, preview: bool) -> tuple[tuple[int, int]
     return (spec.width, spec.height), spec.fps
 
 
-def _build_shot_clips(source: VideoFileClip, shots: list[Shot], size: tuple[int, int], crop_mode: str):
+def _build_shot_clips(
+    source: VideoFileClip,
+    shots: list[Shot],
+    size: tuple[int, int],
+    crop_mode: str,
+    crop_focus_x: float,
+):
     clips = []
     prev = None
     for shot in shots:
@@ -135,7 +148,7 @@ def _build_shot_clips(source: VideoFileClip, shots: list[Shot], size: tuple[int,
         if shot.speed != 1.0:
             sub = sub.with_speed_scaled(factor=shot.speed)
         sub = sub.with_duration(shot.duration_sec)
-        sub = _fit(sub, size, crop_mode)
+        sub = _fit(sub, size, crop_mode, crop_focus_x)
         sub = apply_effects(sub, shot)
         sub = apply_transition(prev, sub, shot)
         clips.append(sub)
@@ -143,18 +156,16 @@ def _build_shot_clips(source: VideoFileClip, shots: list[Shot], size: tuple[int,
     return clips
 
 
-def _fit(clip, size: tuple[int, int], crop_mode: str):
+def _fit(clip, size: tuple[int, int], crop_mode: str, crop_focus_x: float = 0.5):
     target_w, target_h = size
     w, h = clip.size
     if (w, h) == (target_w, target_h):
         return clip
 
-    if crop_mode == "center":
+    if crop_mode in {"center", "fill"}:
         scale = max(target_w / w, target_h / h)
         scaled = clip.resized(scale)
-        sw, sh = scaled.size
-        x = (sw - target_w) // 2
-        y = (sh - target_h) // 2
+        x, y = cover_crop_offsets((w, h), (target_w, target_h), focus_x=crop_focus_x)
         return scaled.cropped(x1=x, y1=y, x2=x + target_w, y2=y + target_h)
 
     scale = min(target_w / w, target_h / h)

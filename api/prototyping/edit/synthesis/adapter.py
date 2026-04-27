@@ -20,6 +20,9 @@ def adapt(
     audio_path: str,
     output_size: tuple[int, int] = (1920, 1080),
     output_fps: int = 30,
+    output_crop: str = "letterbox",
+    crop_focus_x: float = 0.5,
+    audio_start_sec: float = 0.0,
 ) -> Timeline:
     """
     Convert `run_synthesis_loop` output into a validated renderable Timeline.
@@ -129,8 +132,10 @@ def adapt(
             height=output_size[1],
             fps=output_fps,
             duration_sec=round(last_end, 3),
+            crop=output_crop,
+            crop_focus_x=crop_focus_x,
         ),
-        audio=AudioSpec(path=audio_path, start_sec=0.0),
+        audio=AudioSpec(path=audio_path, start_sec=round(audio_start_sec, 3)),
         shots=shots,
         markers=Markers(beats_used_sec=[], sections=sections),
     )

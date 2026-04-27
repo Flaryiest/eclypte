@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
+from api.export_options import resolve_export_options, trim_song_analysis
 from api.youtube_download import (
     YoutubeDownloadAttempt,
     YoutubeDownloadError,
@@ -138,6 +139,7 @@ class DefaultWorkflowRunner:
         source_video = kwargs["source_video"]
         planning_mode = kwargs.get("planning_mode", "agent")
         creative_brief = kwargs.get("creative_brief", "")
+        export_options = kwargs.get("export_options")
         parent_ref = RunRef(user_id=user_id, run_id=run_id)
         current_stage = "assets"
 
@@ -171,6 +173,7 @@ class DefaultWorkflowRunner:
                 video_analysis=video_analysis,
                 planning_mode=planning_mode,
                 creative_brief=creative_brief,
+                export_options=export_options,
             )
 
             current_stage = "render"
@@ -413,7 +416,9 @@ class DefaultWorkflowRunner:
         video_analysis: dict,
         planning_mode: str,
         creative_brief: str,
+        export_options: dict | None,
     ) -> dict[str, str]:
+        resolved_export = resolve_export_options(export_options, max_duration_sec=None)
         steps = (
             ["ensure_clip_index", "agent_plan_timeline", "publish_timeline"]
             if planning_mode == "agent"
@@ -430,6 +435,7 @@ class DefaultWorkflowRunner:
                 "music_analysis_version_id": music_analysis["version_id"],
                 "video_analysis_version_id": video_analysis["version_id"],
                 "planning_mode": planning_mode,
+                **resolved_export.as_run_inputs(),
             },
             steps=steps,
         )
@@ -451,6 +457,7 @@ class DefaultWorkflowRunner:
             planning_mode=planning_mode,
             creative_brief=creative_brief,
             max_duration_sec=None,
+            export_options=resolved_export.as_payload(),
             progress_context=self._progress_context(
                 user_id=user_id,
                 run_id=parent_ref.run_id,
@@ -778,9 +785,17 @@ class DefaultWorkflowRunner:
         from api.prototyping.edit.synthesis.planner import plan
 
         progress_context = kwargs.get("progress_context")
+        export_options = resolve_export_options(
+            kwargs.get("export_options"),
+            max_duration_sec=kwargs.get("max_duration_sec"),
+        )
         self._append_progress_context(repo, progress_context, 10, "Loading timeline inputs")
         music_ref, video_ref, audio_ref, source_ref = self._timeline_refs(user_id, kwargs)
-        song = _read_json_version(repo, music_ref)
+        song = trim_song_analysis(
+            _read_json_version(repo, music_ref),
+            start_sec=export_options.audio_start_sec,
+            end_sec=export_options.audio_end_sec,
+        )
         video = _read_json_version(repo, video_ref)
         source_meta = repo.load_file_version_meta(source_ref)
         audio_meta = repo.load_file_version_meta(audio_ref)
@@ -790,7 +805,11 @@ class DefaultWorkflowRunner:
             video=video,
             source_video_path=source_meta.original_filename,
             audio_path=audio_meta.original_filename,
-            max_duration_sec=kwargs.get("max_duration_sec"),
+            output_size=export_options.output_size,
+            output_crop=export_options.crop,
+            crop_focus_x=export_options.crop_focus_x,
+            audio_start_sec=export_options.audio_start_sec if export_options.explicit else None,
+            max_duration_sec=None,
         )
         self._append_progress_context(repo, progress_context, 90, "Publishing timeline")
         self._publish_timeline(
@@ -818,12 +837,20 @@ class DefaultWorkflowRunner:
         from api.prototyping.edit.synthesis.adapter import adapt
 
         progress_context = kwargs.get("progress_context")
+        export_options = resolve_export_options(
+            kwargs.get("export_options"),
+            max_duration_sec=kwargs.get("max_duration_sec"),
+        )
         run_ref = RunRef(user_id=user_id, run_id=run_id)
         self._append_progress_context(repo, progress_context, 10, "Loading timeline inputs")
         music_ref, video_ref, audio_ref, source_ref = self._timeline_refs(user_id, kwargs)
         source_meta = repo.load_file_version_meta(source_ref)
         audio_meta = repo.load_file_version_meta(audio_ref)
-        song = _read_json_version(repo, music_ref)
+        song = trim_song_analysis(
+            _read_json_version(repo, music_ref),
+            start_sec=export_options.audio_start_sec,
+            end_sec=export_options.audio_end_sec,
+        )
         video = _read_json_version(repo, video_ref)
 
         repo.update_run_status(run_ref, status="running", current_step="ensure_clip_index")
@@ -883,6 +910,10 @@ class DefaultWorkflowRunner:
             video=video,
             source_video_path=source_meta.original_filename,
             audio_path=audio_meta.original_filename,
+            output_size=export_options.output_size,
+            output_crop=export_options.crop,
+            crop_focus_x=export_options.crop_focus_x,
+            audio_start_sec=export_options.audio_start_sec,
         )
         self._append_progress_context(repo, progress_context, 75, "Validating timeline coverage")
         _validate_agent_timeline_coverage(timeline, song)

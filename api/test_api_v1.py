@@ -358,6 +358,70 @@ def test_timeline_endpoint_defaults_to_agent_planning_and_accepts_creative_brief
     assert runner.calls[-1][1]["creative_brief"] == "Open with the strongest action beat."
 
 
+def test_timeline_endpoint_forwards_export_options_and_legacy_duration():
+    client, store, runner = build_client()
+    repo = StorageRepository(store)
+    audio = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_audio",
+        kind="song_audio",
+        filename="song.wav",
+        content_type="audio/wav",
+    )
+    video = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_video",
+        kind="source_video",
+        filename="source.mp4",
+        content_type="video/mp4",
+    )
+    music_analysis = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_music_analysis",
+        kind="music_analysis",
+        filename="song.json",
+        content_type="application/json",
+    )
+    video_analysis = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_video_analysis",
+        kind="video_analysis",
+        filename="source.json",
+        content_type="application/json",
+    )
+
+    response = client.post(
+        "/v1/timelines",
+        headers={"X-User-Id": "user_123"},
+        json={
+            "audio": audio,
+            "source_video": video,
+            "music_analysis": music_analysis,
+            "video_analysis": video_analysis,
+            "max_duration_sec": 12.0,
+            "export_options": {
+                "format": "reels_9_16",
+                "audio_start_sec": 5.0,
+                "crop_focus_x": 0.25,
+            },
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["inputs"]["export_format"] == "reels_9_16"
+    assert response.json()["inputs"]["audio_start_sec"] == "5.000"
+    assert response.json()["inputs"]["audio_end_sec"] == "17.000"
+    assert response.json()["inputs"]["crop_focus_x"] == "0.250"
+    assert runner.calls[-1][1]["export_options"]["format"] == "reels_9_16"
+    assert runner.calls[-1][1]["export_options"]["audio_start_sec"] == 5.0
+    assert runner.calls[-1][1]["export_options"]["audio_end_sec"] == 17.0
+    assert runner.calls[-1][1]["export_options"]["crop_focus_x"] == 0.25
+
+
 def test_timeline_endpoint_supports_deterministic_opt_out():
     client, store, runner = build_client()
     repo = StorageRepository(store)
@@ -464,6 +528,59 @@ def test_edit_job_endpoint_creates_parent_run_and_schedules_pipeline():
     assert [call[0] for call in runner.calls] == ["edit_pipeline"]
     assert runner.calls[0][1]["run_id"] == body["run_id"]
     assert runner.calls[0][1]["creative_brief"] == "Cut fast on the hook."
+
+
+def test_edit_job_endpoint_stores_and_forwards_export_options():
+    client, store, runner = build_client()
+    repo = StorageRepository(store)
+    audio = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_audio",
+        kind="song_audio",
+        filename="song.wav",
+        content_type="audio/wav",
+    )
+    video = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_video",
+        kind="source_video",
+        filename="source.mp4",
+        content_type="video/mp4",
+    )
+
+    response = client.post(
+        "/v1/edits",
+        headers={"X-User-Id": "user_123"},
+        json={
+            "audio": audio,
+            "source_video": video,
+            "planning_mode": "agent",
+            "export_options": {
+                "format": "reels_9_16",
+                "audio_start_sec": 2.0,
+                "audio_end_sec": 14.0,
+                "crop_focus_x": 0.8,
+            },
+        },
+    )
+
+    assert response.status_code == 202
+    run = client.get(
+        f"/v1/runs/{response.json()['run_id']}",
+        headers={"X-User-Id": "user_123"},
+    ).json()
+    assert run["inputs"]["export_format"] == "reels_9_16"
+    assert run["inputs"]["audio_start_sec"] == "2.000"
+    assert run["inputs"]["audio_end_sec"] == "14.000"
+    assert run["inputs"]["crop_focus_x"] == "0.800"
+    assert runner.calls[-1][1]["export_options"] == {
+        "format": "reels_9_16",
+        "audio_start_sec": 2.0,
+        "audio_end_sec": 14.0,
+        "crop_focus_x": 0.8,
+    }
 
 
 def test_edit_jobs_list_recovers_multiple_jobs_and_progress_from_r2_events():
@@ -808,6 +925,58 @@ def test_redo_edit_job_creates_new_job_from_original_inputs():
     assert runner.calls[-1][0] == "edit_pipeline"
     assert runner.calls[-1][1]["planning_mode"] == "deterministic"
     assert runner.calls[-1][1]["creative_brief"] == "Retry this."
+
+
+def test_redo_edit_job_preserves_export_options():
+    client, store, runner = build_client()
+    repo = StorageRepository(store)
+    audio = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_audio",
+        kind="song_audio",
+        filename="song.wav",
+        content_type="audio/wav",
+    )
+    video = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_video",
+        kind="source_video",
+        filename="source.mp4",
+        content_type="video/mp4",
+    )
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="edit_pipeline",
+        inputs={
+            "title": "Redo export",
+            "audio_file_id": audio["file_id"],
+            "audio_version_id": audio["version_id"],
+            "source_video_file_id": video["file_id"],
+            "source_video_version_id": video["version_id"],
+            "planning_mode": "agent",
+            "creative_brief": "",
+            "export_format": "reels_9_16",
+            "audio_start_sec": "3.000",
+            "audio_end_sec": "18.000",
+            "crop_focus_x": "0.750",
+        },
+        steps=["assets", "music", "video", "timeline", "render", "result"],
+    )
+
+    response = client.post(
+        f"/v1/edits/{run.run_id}/redo",
+        headers={"X-User-Id": "user_123"},
+    )
+
+    assert response.status_code == 202
+    assert runner.calls[-1][1]["export_options"] == {
+        "format": "reels_9_16",
+        "audio_start_sec": 3.0,
+        "audio_end_sec": 18.0,
+        "crop_focus_x": 0.75,
+    }
 
 
 def test_youtube_song_import_endpoint_creates_run_and_schedules_background_task():

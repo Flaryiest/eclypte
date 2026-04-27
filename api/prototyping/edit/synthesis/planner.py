@@ -40,6 +40,9 @@ def plan(
     patterns_path: Path | str | None = None,
     output_size: tuple[int, int] = DEFAULT_SIZE,
     output_fps: int = DEFAULT_FPS,
+    output_crop: str = "letterbox",
+    crop_focus_x: float = 0.5,
+    audio_start_sec: float | None = None,
     max_duration_sec: float | None = None,
 ) -> Timeline:
     if patterns is None:
@@ -62,7 +65,9 @@ def plan(
             "label": "instrumental",
         }]
 
-    audio_start = _pick_audio_start(segments[0], downbeats)
+    explicit_audio_start = audio_start_sec is not None
+    audio_start = 0.0 if explicit_audio_start else _pick_audio_start(segments[0], downbeats)
+    render_audio_start = float(audio_start_sec) if explicit_audio_start else audio_start
 
     shots: list[Shot] = []
     last_scene: int | None = None
@@ -80,7 +85,13 @@ def plan(
         )
         meso_refs = [meso.id] if meso else []
         stride = _stride_for(label, meso)
-        boundaries = _boundaries_in_segment(downbeats, seg_start, seg_end, stride)
+        boundaries = _boundaries_in_segment(
+            downbeats,
+            seg_start,
+            seg_end,
+            stride,
+            include_segment_start=explicit_audio_start,
+        )
 
         energy_target = energy_target_for(label)
         query_text = intent_for(label)
@@ -157,8 +168,10 @@ def plan(
             height=output_size[1],
             fps=output_fps,
             duration_sec=round(last_end, 3),
+            crop=output_crop,
+            crop_focus_x=crop_focus_x,
         ),
-        audio=AudioSpec(path=audio_path, start_sec=round(audio_start, 3)),
+        audio=AudioSpec(path=audio_path, start_sec=round(render_audio_start, 3)),
         shots=shots,
         markers={
             "beats_used_sec": beats_used,
@@ -204,6 +217,8 @@ def _boundaries_in_segment(
     seg_start: float,
     seg_end: float,
     stride: int,
+    *,
+    include_segment_start: bool = False,
 ) -> list[float]:
     db_in = [d for d in downbeats if seg_start <= d < seg_end]
     if len(db_in) < 2:
@@ -211,6 +226,8 @@ def _boundaries_in_segment(
         n = max(2, int(span / 2.0))
         return [seg_start + i * span / (n - 1) for i in range(n)]
     grid = db_in[::stride]
+    if include_segment_start and grid[0] > seg_start:
+        grid.insert(0, seg_start)
     if grid[-1] < seg_end:
         grid.append(seg_end)
     return grid

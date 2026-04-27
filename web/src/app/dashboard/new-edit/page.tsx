@@ -11,10 +11,12 @@ import {
     EclypteApiClient,
     EditJobStage,
     EditJobStatus,
+    ExportFormat,
     PlanningMode,
 } from "@/services/eclypteApi"
 
 const POLL_INTERVAL_MS = 1000
+const MIN_TRIM_DURATION_SEC = 1
 
 export default function NewEditPage() {
     const { isLoaded, isSignedIn, user } = useUser()
@@ -23,9 +25,15 @@ export default function NewEditPage() {
     const [audioId, setAudioId] = useState("")
     const [videoId, setVideoId] = useState("")
     const [planningMode, setPlanningMode] = useState<PlanningMode>("agent")
+    const [exportFormat, setExportFormat] = useState<ExportFormat>("reels_9_16")
+    const [songDurationSec, setSongDurationSec] = useState<number | null>(null)
+    const [audioStartSec, setAudioStartSec] = useState(0)
+    const [audioEndSec, setAudioEndSec] = useState(0)
+    const [cropFocusX, setCropFocusX] = useState(0.5)
     const [creativeBrief, setCreativeBrief] = useState("")
     const [title, setTitle] = useState("")
     const [error, setError] = useState<string | null>(null)
+    const [mediaStatus, setMediaStatus] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState(false)
     const [isCreating, setIsCreating] = useState(false)
     const [downloadingId, setDownloadingId] = useState<string | null>(null)
@@ -33,6 +41,7 @@ export default function NewEditPage() {
     const [deletingId, setDeletingId] = useState<string | null>(null)
     const [redoingId, setRedoingId] = useState<string | null>(null)
     const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({})
+    const [sourcePreviewUrl, setSourcePreviewUrl] = useState<string | null>(null)
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
     const songs = assets.filter((asset) => asset.kind === "song_audio" && asset.current_version_id && !asset.archived_at)
@@ -43,7 +52,9 @@ export default function NewEditPage() {
         (asset): asset is AssetSummary => Boolean(asset),
     )
     const hasActiveJobs = jobs.some(isJobActive)
-    const canStart = Boolean(api && selectedSong && selectedVideo && !isCreating)
+    const selectedDurationSec = songDurationSec ? Math.max(0, audioEndSec - audioStartSec) : null
+    const hasValidTrim = selectedDurationSec === null || selectedDurationSec >= MIN_TRIM_DURATION_SEC
+    const canStart = Boolean(api && selectedSong && selectedVideo && !isCreating && hasValidTrim)
 
     const loadJobs = useCallback(async () => {
         if (!api) {
@@ -77,6 +88,80 @@ export default function NewEditPage() {
     useEffect(() => {
         void loadDashboard()
     }, [loadDashboard])
+
+    useEffect(() => {
+        setSongDurationSec(null)
+        setAudioStartSec(0)
+        setAudioEndSec(0)
+        setMediaStatus(null)
+        if (!api || !selectedSong) {
+            return
+        }
+        const audioRef = versionRef(selectedSong)
+        if (!audioRef) {
+            return
+        }
+        const controller = new AbortController()
+        let audio: HTMLAudioElement | null = null
+        setMediaStatus("Loading song length")
+        void api.getDownloadUrl(audioRef, controller.signal)
+            .then((download) => {
+                if (controller.signal.aborted) {
+                    return
+                }
+                audio = new Audio()
+                audio.preload = "metadata"
+                audio.onloadedmetadata = () => {
+                    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) {
+                        setMediaStatus("Song length unavailable")
+                        return
+                    }
+                    const duration = roundTime(audio.duration)
+                    setSongDurationSec(duration)
+                    setAudioStartSec(0)
+                    setAudioEndSec(duration)
+                    setMediaStatus(null)
+                }
+                audio.onerror = () => setMediaStatus("Song length unavailable")
+                audio.src = download.download_url
+                audio.load()
+            })
+            .catch((caught) => {
+                if (!isAbortError(caught)) {
+                    setMediaStatus("Song length unavailable")
+                }
+            })
+        return () => {
+            controller.abort()
+            if (audio) {
+                audio.src = ""
+            }
+        }
+    }, [api, selectedSong])
+
+    useEffect(() => {
+        setSourcePreviewUrl(null)
+        if (!api || !selectedVideo) {
+            return
+        }
+        const videoRef = versionRef(selectedVideo)
+        if (!videoRef) {
+            return
+        }
+        const controller = new AbortController()
+        void api.getDownloadUrl(videoRef, controller.signal)
+            .then((download) => {
+                if (!controller.signal.aborted) {
+                    setSourcePreviewUrl(download.download_url)
+                }
+            })
+            .catch((caught) => {
+                if (!isAbortError(caught)) {
+                    setSourcePreviewUrl(null)
+                }
+            })
+        return () => controller.abort()
+    }, [api, selectedVideo])
 
     useEffect(() => {
         if (!api || !hasActiveJobs) {
@@ -145,6 +230,12 @@ export default function NewEditPage() {
                 planningMode,
                 creativeBrief: creativeBrief.trim(),
                 title: title.trim() || `${selectedSong.display_name} x ${selectedVideo.display_name}`,
+                exportOptions: {
+                    format: exportFormat,
+                    audioStartSec: songDurationSec === null ? 0 : audioStartSec,
+                    audioEndSec: songDurationSec === null ? null : audioEndSec,
+                    cropFocusX,
+                },
             })
             setJobs((current) => [job, ...current.filter((item) => item.run_id !== job.run_id)])
             setTitle("")
@@ -239,6 +330,31 @@ export default function NewEditPage() {
         } finally {
             setRedoingId(null)
         }
+    }
+
+    const updateAudioStart = (value: number) => {
+        if (!songDurationSec) {
+            return
+        }
+        const next = clampTime(value, 0, Math.max(0, audioEndSec - MIN_TRIM_DURATION_SEC))
+        setAudioStartSec(roundTime(next))
+    }
+
+    const updateAudioEnd = (value: number) => {
+        if (!songDurationSec) {
+            return
+        }
+        const next = clampTime(value, Math.min(songDurationSec, audioStartSec + MIN_TRIM_DURATION_SEC), songDurationSec)
+        setAudioEndSec(roundTime(next))
+    }
+
+    const updateDuration = (value: number) => {
+        if (!songDurationSec) {
+            return
+        }
+        const duration = clampTime(value, MIN_TRIM_DURATION_SEC, songDurationSec)
+        const end = Math.min(songDurationSec, audioStartSec + duration)
+        setAudioEndSec(roundTime(end))
     }
 
     if (!isLoaded) {
@@ -339,6 +455,136 @@ export default function NewEditPage() {
                                 >
                                     Deterministic
                                 </button>
+                            </div>
+                        </div>
+                        <div className={styles.exportSection}>
+                            <div className={styles.exportHeader}>
+                                <span>Export</span>
+                                <span>{exportFormat === "reels_9_16" ? "1080 x 1920" : "1920 x 1080"}</span>
+                            </div>
+                            <div className={styles.segmentedControl} role="group" aria-label="Export format">
+                                <button
+                                    className={exportFormat === "reels_9_16" ? styles.segmentActive : styles.segmentButton}
+                                    type="button"
+                                    onClick={() => setExportFormat("reels_9_16")}
+                                    disabled={isCreating}
+                                >
+                                    Reels 9:16
+                                </button>
+                                <button
+                                    className={exportFormat === "youtube_16_9" ? styles.segmentActive : styles.segmentButton}
+                                    type="button"
+                                    onClick={() => setExportFormat("youtube_16_9")}
+                                    disabled={isCreating}
+                                >
+                                    YouTube 16:9
+                                </button>
+                            </div>
+                            <div className={styles.trimSummary}>
+                                {songDurationSec === null
+                                    ? mediaStatus || "Choose a song to set timing"
+                                    : `${formatTime(audioStartSec)} - ${formatTime(audioEndSec)} (${formatSeconds(selectedDurationSec || 0)})`}
+                            </div>
+                            <div className={styles.rangeGrid}>
+                                <label className={styles.rangeLabel}>
+                                    Start
+                                    <input
+                                        className={styles.rangeInput}
+                                        type="range"
+                                        min={0}
+                                        max={songDurationSec || 0}
+                                        step={0.1}
+                                        value={audioStartSec}
+                                        onChange={(event) => updateAudioStart(Number(event.target.value))}
+                                        disabled={isCreating || songDurationSec === null}
+                                    />
+                                </label>
+                                <label className={styles.rangeLabel}>
+                                    End
+                                    <input
+                                        className={styles.rangeInput}
+                                        type="range"
+                                        min={0}
+                                        max={songDurationSec || 0}
+                                        step={0.1}
+                                        value={audioEndSec}
+                                        onChange={(event) => updateAudioEnd(Number(event.target.value))}
+                                        disabled={isCreating || songDurationSec === null}
+                                    />
+                                </label>
+                            </div>
+                            <div className={styles.numberGrid}>
+                                <label className={styles.fieldLabel}>
+                                    Start sec
+                                    <input
+                                        className={styles.input}
+                                        type="number"
+                                        min={0}
+                                        max={songDurationSec || undefined}
+                                        step={0.1}
+                                        value={audioStartSec}
+                                        onChange={(event) => updateAudioStart(Number(event.target.value))}
+                                        disabled={isCreating || songDurationSec === null}
+                                    />
+                                </label>
+                                <label className={styles.fieldLabel}>
+                                    End sec
+                                    <input
+                                        className={styles.input}
+                                        type="number"
+                                        min={0}
+                                        max={songDurationSec || undefined}
+                                        step={0.1}
+                                        value={audioEndSec}
+                                        onChange={(event) => updateAudioEnd(Number(event.target.value))}
+                                        disabled={isCreating || songDurationSec === null}
+                                    />
+                                </label>
+                                <label className={styles.fieldLabel}>
+                                    Length sec
+                                    <input
+                                        className={styles.input}
+                                        type="number"
+                                        min={MIN_TRIM_DURATION_SEC}
+                                        max={songDurationSec || undefined}
+                                        step={0.1}
+                                        value={selectedDurationSec === null ? 0 : roundTime(selectedDurationSec)}
+                                        onChange={(event) => updateDuration(Number(event.target.value))}
+                                        disabled={isCreating || songDurationSec === null}
+                                    />
+                                </label>
+                            </div>
+                            {exportFormat === "reels_9_16" && (
+                                <label className={styles.rangeLabel}>
+                                    Crop focus
+                                    <input
+                                        className={styles.rangeInput}
+                                        type="range"
+                                        min={0}
+                                        max={1}
+                                        step={0.01}
+                                        value={cropFocusX}
+                                        onChange={(event) => setCropFocusX(Number(event.target.value))}
+                                        disabled={isCreating}
+                                    />
+                                </label>
+                            )}
+                            <div className={`${styles.cropPreview} ${exportFormat === "reels_9_16" ? styles.cropPreviewVertical : styles.cropPreviewWide}`}>
+                                {sourcePreviewUrl ? (
+                                    <video
+                                        className={styles.cropPreviewMedia}
+                                        src={sourcePreviewUrl}
+                                        muted
+                                        playsInline
+                                        controls
+                                        style={{
+                                            objectFit: exportFormat === "reels_9_16" ? "cover" : "contain",
+                                            objectPosition: `${Math.round(cropFocusX * 100)}% center`,
+                                        }}
+                                    />
+                                ) : (
+                                    <div className={styles.cropPreviewEmpty}>Choose a source video</div>
+                                )}
                             </div>
                         </div>
                         {planningMode === "agent" && (
@@ -505,6 +751,28 @@ function stageClass(status: EditJobStage["status"]) {
 
 function clampPercent(value: number) {
     return Math.max(0, Math.min(100, Math.round(value)))
+}
+
+function clampTime(value: number, min: number, max: number) {
+    if (!Number.isFinite(value)) {
+        return min
+    }
+    return Math.max(min, Math.min(max, value))
+}
+
+function roundTime(value: number) {
+    return Math.round(value * 10) / 10
+}
+
+function formatTime(value: number) {
+    const safe = Math.max(0, Math.floor(value))
+    const minutes = Math.floor(safe / 60)
+    const seconds = safe % 60
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`
+}
+
+function formatSeconds(value: number) {
+    return `${roundTime(value).toFixed(1)}s`
 }
 
 function errorMessage(error: unknown) {

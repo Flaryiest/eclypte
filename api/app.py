@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from api.export_options import resolve_export_options
 from api.storage.factory import (
     get_default_user_id,
     get_object_store,
@@ -96,6 +97,13 @@ class VideoAnalysisRequest(BaseModel):
     source_video: FileVersionInput
 
 
+class ExportOptionsInput(BaseModel):
+    format: Literal["reels_9_16", "youtube_16_9"] = "youtube_16_9"
+    audio_start_sec: float = Field(default=0.0, ge=0)
+    audio_end_sec: float | None = Field(default=None, gt=0)
+    crop_focus_x: float = Field(default=0.5, ge=0, le=1)
+
+
 class TimelineRequest(BaseModel):
     audio: FileVersionInput
     source_video: FileVersionInput
@@ -104,6 +112,7 @@ class TimelineRequest(BaseModel):
     planning_mode: Literal["agent", "deterministic"] = "agent"
     creative_brief: str = ""
     max_duration_sec: float | None = Field(default=None, gt=0)
+    export_options: ExportOptionsInput | None = None
 
 
 class RenderRequest(BaseModel):
@@ -118,6 +127,7 @@ class EditJobRequest(BaseModel):
     planning_mode: Literal["agent", "deterministic"] = "agent"
     creative_brief: str = ""
     title: str | None = None
+    export_options: ExportOptionsInput | None = None
 
 
 class InternalProgressRequest(BaseModel):
@@ -474,6 +484,10 @@ def create_app(
     ) -> EditJobStatus:
         load_version(repo, uid, request.audio, "song_audio")
         load_version(repo, uid, request.source_video, "source_video")
+        try:
+            export_options = resolve_export_options(request.export_options, max_duration_sec=None)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         title = (request.title or "").strip() or "Untitled edit"
         run = create_workflow_run(
             repo,
@@ -487,6 +501,7 @@ def create_app(
                 "source_video_version_id": request.source_video.version_id,
                 "planning_mode": request.planning_mode,
                 "creative_brief": request.creative_brief,
+                **export_options.as_run_inputs(),
             },
             EDIT_STAGE_ORDER,
         )
@@ -499,6 +514,7 @@ def create_app(
             planning_mode=request.planning_mode,
             creative_brief=request.creative_brief,
             title=title,
+            export_options=export_options.as_payload(),
         )
         return edit_status_from_run(repo, uid, run)
 
@@ -792,6 +808,13 @@ def create_app(
         load_version(repo, uid, request.music_analysis, "music_analysis")
         load_version(repo, uid, request.video_analysis, "video_analysis")
         planning_mode = request.planning_mode
+        try:
+            export_options = resolve_export_options(
+                request.export_options,
+                max_duration_sec=request.max_duration_sec,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         steps = (
             ["ensure_clip_index", "agent_plan_timeline", "publish_timeline"]
             if planning_mode == "agent"
@@ -808,6 +831,7 @@ def create_app(
                 "music_analysis_version_id": request.music_analysis.version_id,
                 "video_analysis_version_id": request.video_analysis.version_id,
                 "planning_mode": planning_mode,
+                **export_options.as_run_inputs(),
             },
             steps,
         )
@@ -822,6 +846,7 @@ def create_app(
             planning_mode=planning_mode,
             creative_brief=request.creative_brief,
             max_duration_sec=request.max_duration_sec,
+            export_options=export_options.as_payload(),
         )
         return run
 
@@ -959,6 +984,7 @@ def create_app(
         source_video_version_id = run.inputs.get("source_video_version_id")
         if not all([audio_file_id, audio_version_id, source_video_file_id, source_video_version_id]):
             raise HTTPException(status_code=400, detail="edit job cannot be redone because inputs are incomplete")
+        export_options = _export_options_from_run_inputs(run.inputs)
         return start_edit_job(
             request=EditJobRequest(
                 audio=FileVersionInput(
@@ -972,6 +998,7 @@ def create_app(
                 planning_mode=run.inputs.get("planning_mode", "agent"),
                 creative_brief=run.inputs.get("creative_brief", ""),
                 title=run.inputs.get("title"),
+                export_options=ExportOptionsInput(**export_options) if export_options else None,
             ),
             background_tasks=background_tasks,
             repo=repo,
@@ -1150,6 +1177,20 @@ def create_app(
         )
 
     return app
+
+
+def _export_options_from_run_inputs(inputs: dict[str, str]) -> dict[str, object] | None:
+    format_value = inputs.get("export_format")
+    if not format_value:
+        return None
+    options: dict[str, object] = {"format": format_value}
+    if "audio_start_sec" in inputs:
+        options["audio_start_sec"] = float(inputs["audio_start_sec"])
+    if "audio_end_sec" in inputs:
+        options["audio_end_sec"] = float(inputs["audio_end_sec"])
+    if "crop_focus_x" in inputs:
+        options["crop_focus_x"] = float(inputs["crop_focus_x"])
+    return options
 
 
 async def _json_line_stream(request: Request, messages):

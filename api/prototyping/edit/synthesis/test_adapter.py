@@ -135,6 +135,27 @@ def test_custom_output_spec():
     assert tl.output.fps == 24
 
 
+def test_custom_export_options_are_preserved():
+    tl = adapt(
+        _three_shots_contiguous(),
+        SONG,
+        VIDEO,
+        SRC_PATH,
+        AUDIO_PATH,
+        output_size=(1080, 1920),
+        output_fps=30,
+        output_crop="fill",
+        crop_focus_x=0.75,
+        audio_start_sec=12.5,
+    )
+
+    assert tl.output.width == 1080
+    assert tl.output.height == 1920
+    assert tl.output.crop == "fill"
+    assert tl.output.crop_focus_x == 0.75
+    assert tl.audio.start_sec == 12.5
+
+
 def test_missing_segments_ok():
     song_no_segs = {"source": {"duration_sec": 180.0}}
     tl = adapt(_three_shots_contiguous(), song_no_segs, VIDEO, SRC_PATH, AUDIO_PATH)
