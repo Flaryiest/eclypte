@@ -281,7 +281,7 @@ python -m api.prototyping.edit.main \
 
 ---
 
-## Plan a timeline (Phase-3: GPT-4o agent)
+## Plan a timeline (Phase-3: gpt-5.4 agent)
 
 Requires: CLIP index built, `eclypte-query` deployed, `OPENAI_API_KEY` set in `.env`.
 

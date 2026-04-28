@@ -10,7 +10,7 @@ Two planning paths share this CLI:
             --song content/song.wav \\
             --source content/source.mp4
 
-- **Phase 3 (`--agent`)** — GPT-4o synthesis loop + CLIP retrieval. Requires the
+- **Phase 3 (`--agent`)** — gpt-5.4 synthesis loop + CLIP retrieval. Requires the
   CLIP index to already be built on the `eclypte-edit` Modal volume
   (`modal run edit/index/index_modal.py --video-filename source.mp4`) and the
   `OPENAI_API_KEY` env var to be set:
@@ -228,7 +228,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--annotations-path", type=Path, default=DEFAULT_ANNOTATIONS_PATH,
                    help="path to references.md (default: knowledge/references.md)")
     p.add_argument("--agent", action="store_true",
-                   help="use the Phase-3 GPT-4o synthesis agent instead of the "
+                   help="use the Phase-3 gpt-5.4 synthesis agent instead of the "
                         "deterministic planner (requires OPENAI_API_KEY and a "
                         "prebuilt CLIP index on the eclypte-edit Modal volume)")
     p.add_argument("--instructions", type=str, default=None,

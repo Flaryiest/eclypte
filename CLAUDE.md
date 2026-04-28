@@ -326,7 +326,7 @@ modal volume put    eclypte-edit api/prototyping/video/content/source.mp4
 - `download.py` — `download_reference(url, workdir)` downloads viral AMVs via yt-dlp → `ReferenceMedia(audio_wav, video_mp4, meta)`.
 - `metrics.py` — `compute_metrics(music, video)` extracts cut-timing stats: `cut_offsets_to_downbeats`, `cut_density_per_section`, `motion_at_cuts`, `impact_to_cut_lag`, `shot_duration_per_section`.
 - `ingest.py` — `ingest(url, likes, views, store_dir)` full pipeline: download → Modal analyses → stores `store/<ref_id>.json`.
-- `consolidate.py` — `consolidate(store_dir, references_md_path, model)` calls GPT-4o; LLM rewrites `knowledge/references.md` whole (three H2 sections: Discovered Patterns, Weighted Annotations, Correlations).
+- `consolidate.py` — `consolidate(store_dir, references_md_path, model)` calls the configured OpenAI model (default `gpt-5.2`); the LLM rewrites `knowledge/references.md` whole (three H2 sections: Discovered Patterns, Weighted Annotations, Correlations).
 - `annotations.py` — `parse_annotations(md_path, known_pattern_ids)` extracts `{pattern_id: multiplier}` dict (clamped [0.5, 1.5]) for use by `main.py`.
 - Run via `python -m api.prototyping.edit.reference <ingest|consolidate|list|show>`.
 
@@ -368,7 +368,7 @@ Under the hood, `--agent` calls `run_synthesis_loop(video_filename, instructions
 
 The raw `run_synthesis_loop` output is `list[{start_time, end_time, source_timestamp}]`. Conversion to a renderable `Timeline` is done by [synthesis/adapter.py](api/prototyping/edit/synthesis/adapter.py) — see the load-bearing adapter landmines above. The **adapter is where quality-control happens**: prompt engineering + agent reasoning get you 90% there; dedupe + duration trim are what make the output reliably renderable.
 
-Model/param overrides live at module-scope constants in `agent.py`: `MODEL`, `REASONING_EFFORT`, `VERBOSITY`, `MAX_LOOPS`. Revert to `"gpt-4o"` + Chat Completions is one model-constant line if `gpt-5.4` ever misbehaves; the Responses-API scaffolding stays as a strict upgrade regardless.
+Model/param overrides live at module-scope constants in `agent.py`: `MODEL`, `REASONING_EFFORT`, `VERBOSITY`, `MAX_LOOPS`. Change those constants first if `gpt-5.4` ever misbehaves; the Responses-API scaffolding is the active integration path.
 
 ## Next.js 16 — READ BEFORE WRITING CODE
 

@@ -13,15 +13,15 @@ Repo-wide architecture and backend guidance lives in `../AGENTS.md`; this file a
 - `src/app/pricing/page.tsx` is still lightweight.
 - `src/app/dashboard/page.tsx` redirects to the creator console default route at `/dashboard/new-edit`.
 - The dashboard console uses real App Router pages:
-  - `/dashboard/new-edit` selects existing song/video assets, reuses completed analyses when available, auto-runs missing analysis, then chains AI-agent timeline planning by default, rendering, and final preview/download. It also exposes a deterministic planning opt-out and optional creative brief.
-  - `/dashboard/assets` uploads persistent WAV/MP4 assets to R2, lists the R2-backed library, starts manual analysis, and opens preview/download URLs.
+  - `/dashboard/new-edit` selects existing song/video assets, previews the source crop, sets export format and audio trim, reuses completed analyses when available, auto-runs missing analysis, then chains AI-agent timeline planning by default, rendering, and final preview/download. It also exposes deterministic planning, optional creative brief, job cancel/delete, and redo for failed/canceled jobs.
+  - `/dashboard/assets` uploads persistent WAV/MP4 assets to R2, cleans up failed upload reservations, lists the R2-backed library including hidden archived items, starts manual analysis, imports YouTube songs, opens preview/download URLs, and deletes/restores assets.
   - `/dashboard/synthesis` queues Instagram Reel references, runs synthesis consolidation, exposes the effective system prompt, saves prompt versions, and reactivates older versions.
-  - `/dashboard/renders` lists render runs and output MP4 assets with preview/download actions.
-  - `/dashboard/settings` shows the API base URL, signed-in Clerk user id, API health, and active synthesis prompt version.
+  - `/dashboard/renders` lists render runs and output MP4 assets with preview/download actions, refreshing active render runs from run streams with polling fallback.
+  - `/dashboard/settings` shows the API base URL, signed-in Clerk user id, API health, YouTube-cookie configuration, and active synthesis prompt version.
 - `src/proxy.ts` contains the Clerk middleware matcher for app and API routes.
 - `src/components/login/login.tsx` renders the Clerk `SignIn` modal; `src/components/navbar/navbar.tsx` controls opening it.
 - Fonts are configured in `src/app/layout.tsx` with both Google fonts and local font assets from `public/fonts/`.
-- `src/services/eclypteApi.ts` is the typed browser API client for FastAPI v1 endpoints, including asset/run listing and synthesis prompt/reference APIs.
+- `src/services/eclypteApi.ts` is the typed browser API client for FastAPI v1 endpoints, including uploads, assets, run streams, edit jobs, export options, downloads, and synthesis prompt/reference APIs.
 
 ## Dashboard Pipeline Notes
 
@@ -30,12 +30,15 @@ Repo-wide architecture and backend guidance lives in `../AGENTS.md`; this file a
 - Temporary auth sends Clerk `user.id` as `X-User-Id`. Backend Clerk JWT verification is intentionally deferred.
 - V1 intentionally accepts only `audio/wav` and `video/mp4`; validate those before upload.
 - Uploads are browser-to-R2 using presigned PUT URLs from `POST /v1/uploads`, followed by `POST /v1/uploads/{upload_id}/complete` with a browser-computed SHA-256.
-- The dashboard library is persistent and R2-backed. `/dashboard/assets` owns upload and manual analysis; `/dashboard/new-edit` composes from saved assets and starts missing analyses only when needed.
+- Failed or aborted uploads should call `DELETE /v1/uploads/{upload_id}` so orphaned reservations/blob keys do not linger.
+- The dashboard library is persistent and R2-backed. `/v1/assets` hides archived records by default and excludes render outputs unless `kind=render_output` is requested. `/dashboard/assets` owns upload, archive/restore, and manual analysis; `/dashboard/new-edit` composes from saved assets and starts missing analyses only when needed.
 - `/dashboard/assets` can import songs from YouTube via `POST /v1/music/youtube-imports`; imports publish a `song_audio` asset and auto-run music analysis.
 - YouTube media download stays backend-side in `api/youtube_download.py`. The frontend should poll the returned run manifest and surface `RunManifest.last_error` for failures rather than attempting browser-side media extraction.
 - Backend YouTube import runs record provider-level `youtube_download_attempt` events, but the current dashboard client does not expose run events as a first-class UI view.
-- New Edit polls run manifests for music analysis, video analysis, timeline planning, and rendering, then requests the render download URL.
+- New Edit uses `/v1/edits` durable edit jobs, subscribes to `/v1/runs/stream` while jobs are active, falls back to polling, and then requests the render download URL. The UI exposes cancel, delete/archive, and redo through the edit-job lifecycle endpoints.
+- The New Edit export controls serialize `ExportOptions`: `reels_9_16` for 1080x1920 vertical fill crop, `youtube_16_9` for 1920x1080 letterbox, optional `audioStartSec`/`audioEndSec`, and `cropFocusX` for vertical framing. The frontend defaults the compose UI to Reels; the backend default remains YouTube 16:9 when export options are omitted.
 - Timeline planning now defaults to `planning_mode: "agent"`. Agent mode may create/reuse a `clip_index` asset, uses the active synthesis prompt version, and fails visibly through `RunManifest.last_error` if OpenAI/CLIP planning fails. Send `planning_mode: "deterministic"` to opt out.
+- Run streams are newline-delimited JSON, not SSE. Use `readJsonLineStream`/`drainJsonLines` and keep polling fallback logic because Redis may be unconfigured or stale.
 - Synthesis prompt versions and reference records are stored under the current `X-User-Id` in R2. The active prompt is used by future agent-mode timeline planning.
 - The frontend depends on these `RunManifest.outputs` keys:
   - `music_analysis_file_id`, `music_analysis_version_id`

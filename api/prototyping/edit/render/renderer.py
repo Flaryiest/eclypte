@@ -21,7 +21,7 @@ from moviepy import AudioFileClip, ColorClip, CompositeVideoClip, VideoFileClip,
 from ..synthesis.timeline_schema import OutputSpec, Shot, Timeline
 from ..synthesis.validators import validate_timeline
 from .effects import apply_effects
-from .geometry import cover_crop_offsets
+from .geometry import cover_crop_offsets, cover_resize_size
 from .transitions import apply_transition
 
 CODEC_VIDEO = "libx264"
@@ -151,6 +151,11 @@ def _build_shot_clips(
         sub = _fit(sub, size, crop_mode, crop_focus_x)
         sub = apply_effects(sub, shot)
         sub = apply_transition(prev, sub, shot)
+        if tuple(sub.size) != tuple(size):
+            raise ValueError(
+                f"shot[{shot.index}] rendered size {tuple(sub.size)} does not match "
+                f"target size {tuple(size)}"
+            )
         clips.append(sub)
         prev = sub
     return clips
@@ -163,9 +168,14 @@ def _fit(clip, size: tuple[int, int], crop_mode: str, crop_focus_x: float = 0.5)
         return clip
 
     if crop_mode in {"center", "fill"}:
-        scale = max(target_w / w, target_h / h)
-        scaled = clip.resized(scale)
-        x, y = cover_crop_offsets((w, h), (target_w, target_h), focus_x=crop_focus_x)
+        scaled_size = cover_resize_size((w, h), (target_w, target_h))
+        scaled = clip.resized(new_size=scaled_size)
+        x, y = cover_crop_offsets(
+            (w, h),
+            (target_w, target_h),
+            focus_x=crop_focus_x,
+            scaled_size=scaled_size,
+        )
         return scaled.cropped(x1=x, y1=y, x2=x + target_w, y2=y + target_h)
 
     scale = min(target_w / w, target_h / h)
