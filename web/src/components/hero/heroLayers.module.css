@@ -46,6 +46,12 @@
     transform: translate3d(0, 0, 0) scale(1.15);
 }
 
+.layerBg picture {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
 .heroImage {
     width: 100%;
     height: 100%;
@@ -365,6 +371,36 @@
 
 /* ── Mobile ── */
 @media (max-width: 768px) {
+    .layerBg,
+    .layerMid,
+    .layerFg {
+        inset: 0;
+        will-change: auto;
+    }
+
+    .layerBg {
+        transform: none;
+    }
+
+    .layerMid,
+    .layerFg,
+    .grain {
+        display: none;
+    }
+
+    .heroImage {
+        object-position: center center;
+    }
+
+    .revealOverlay {
+        mask-image: none;
+        -webkit-mask-image: none;
+    }
+
+    .revealed {
+        animation: mobileRevealFade 0.45s ease-out 0.1s forwards;
+    }
+
     .orb1 {
         width: 250px;
         height: 250px;
@@ -396,6 +432,18 @@
 
 /* ── Reduced motion ── */
 @media (prefers-reduced-motion: reduce) {
+    .layerBg,
+    .layerMid,
+    .layerFg {
+        will-change: auto;
+    }
+
+    .layerBg,
+    .layerMid,
+    .layerFg {
+        transform: none;
+    }
+
     .orb1, .orb2, .orb3,
     .particle,
     .shootingStar, .shootingStar2, .shootingStar3, .shootingStar4, .shootingStar5,
@@ -405,5 +453,12 @@
 
     .revealOverlay {
         display: none;
+    }
+}
+
+@keyframes mobileRevealFade {
+    to {
+        opacity: 0;
+        visibility: hidden;
     }
 }

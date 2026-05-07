@@ -5,6 +5,7 @@ import styles from "./heroLayers.module.css"
 
 export default function HeroLayers() {
     const [loaded, setLoaded] = useState(false)
+    const [motionEnabled, setMotionEnabled] = useState(false)
     const containerRef = useRef<HTMLDivElement>(null)
     const bgRef = useRef<HTMLDivElement>(null)
     const midRef = useRef<HTMLDivElement>(null)
@@ -15,6 +16,34 @@ export default function HeroLayers() {
     const mouseRef = useRef({ x: 0, y: 0 })
 
     useEffect(() => {
+        const mobileQuery = window.matchMedia("(max-width: 768px)")
+        const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
+
+        const syncMotionPreference = () => {
+            setMotionEnabled(!mobileQuery.matches && !reducedMotionQuery.matches)
+        }
+
+        syncMotionPreference()
+        mobileQuery.addEventListener("change", syncMotionPreference)
+        reducedMotionQuery.addEventListener("change", syncMotionPreference)
+
+        return () => {
+            mobileQuery.removeEventListener("change", syncMotionPreference)
+            reducedMotionQuery.removeEventListener("change", syncMotionPreference)
+        }
+    }, [])
+
+    useEffect(() => {
+        if (!motionEnabled) {
+            scrollRef.current = 0
+            mouseRef.current = { x: 0, y: 0 }
+            bgRef.current?.style.removeProperty("transform")
+            midRef.current?.style.removeProperty("transform")
+            fgRef.current?.style.removeProperty("transform")
+            containerRef.current?.style.removeProperty("opacity")
+            return
+        }
+
         const onScroll = () => {
             scrollRef.current = window.scrollY
             scheduleUpdate()
@@ -75,20 +104,23 @@ export default function HeroLayers() {
             }
         }
 
-        // Handle cached images where onLoad already fired.
-        const cachedImageRaf = imgRef.current?.complete
-            ? requestAnimationFrame(() => setLoaded(true))
-            : 0
-
         window.addEventListener("scroll", onScroll, { passive: true })
         window.addEventListener("mousemove", onMouseMove, { passive: true })
+        updateTransforms()
 
         return () => {
             window.removeEventListener("scroll", onScroll)
             window.removeEventListener("mousemove", onMouseMove)
             cancelAnimationFrame(rafRef.current)
-            cancelAnimationFrame(cachedImageRaf)
         }
+    }, [motionEnabled])
+
+    useEffect(() => {
+        const cachedImageRaf = imgRef.current?.complete
+            ? requestAnimationFrame(() => setLoaded(true))
+            : 0
+
+        return () => cancelAnimationFrame(cachedImageRaf)
     }, [])
 
     return (
@@ -101,7 +133,7 @@ export default function HeroLayers() {
                 <picture>
                     <source
                         media="(max-width: 768px)"
-                        srcSet="/assets/hero/one-sm.webp"
+                        srcSet="/assets/hero/one-mobile-portrait.webp"
                     />
                     <source
                         media="(max-width: 1280px)"
@@ -120,6 +152,9 @@ export default function HeroLayers() {
                         src="/assets/hero/one.webp"
                         className={styles.heroImage}
                         alt=""
+                        loading="eager"
+                        fetchPriority="high"
+                        decoding="async"
                         draggable={false}
                         onLoad={() => setLoaded(true)}
                     />

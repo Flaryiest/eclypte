@@ -70,7 +70,7 @@
 
 @media (max-width: 768px) {
     .navbarContainer {
-        padding: 1rem 1rem;
+        padding: 1.8rem 3rem;
     }
 
     .navbar {
@@ -78,7 +78,7 @@
     }
 
     .navList {
-        gap: 1.5rem;
+        gap: 2.4rem;
     }
 
     .logo {
@@ -86,6 +86,6 @@
     }
 
     .navLink {
-        font-size: 0.9rem;
+        font-size: 1rem;
     }
 }
