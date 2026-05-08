@@ -1,5 +1,5 @@
 # Eclypte  
-A multipurpose AI video editing pipeline. Hosted version can be found here: [https://eclypte.vercel.app/](https://eclypte.vercel.app/)
+A multipurpose AI video editing pipeline. Hosted version can be found here: [https://eclypte.vercel.app/](https://eclypte.vercel.app/). Would recommend looking at the Shape of You - Super Mario Galaxy Movie example at /demo.
 
 Initially created this project in order to create short-form content (particularly cool anime/movie edits) but the infrastructure works arguably better for normal editing activities, at least until I develop it more.
 
@@ -28,7 +28,47 @@ The **api/prototyping** folder contains the independent workflows through which 
 
 ## Running Locally
 
-The project has separate dependency sets because the AI and the 
+The project has separate dependency sets because the normal API, the frontend, and the heavier AI/video workflows do not all run in the same environment. Where they each reside is listed above in overview.
+
+### Frontend
+
+Ensure that you have Node/NPM installed to be able to install dependencies. Then, from the `web` directory:
+
+```powershell
+cd web
+npm install
+npm run dev
+```
+By default, the frontend expects the API to be running at http://127.0.0.1:8000
+
+### Backend
+
+The backend can be run from the repo root, or from the api folder. A virtual environment is strongly recommended.
+
+```powershell
+python -m venv api/.venv
+. api/.venv/Scripts/Activate.ps1
+pip install -r api/requirements.txt
+```
+
+Then start and check the API:
+
+`python -m api.main`
+
+`Invoke-RestMethod http://127.0.0.1:8000/healthz`
+
+For the real upload/edit workflows, the API needs cloudflare R2 env variables, otherwise it will only be able to run local-only pieces. It can still run, however the dashboard will not be fully functional.
+
+#### Modal
+
+The heavier analysis and rendering workflows run through Modal, and thus require a package and auth.modal token new
+
+Modal can be authenticated locally through:
+
+`modal token new`
+
+
+
 
 ## Workflows
 
@@ -61,6 +101,10 @@ Current limitations include:
 - speed issues, especially on movie analysis and synthesis, can take a few hours
 - no unique edit types, purely relies on what it's fed right now - in the future I want to add masks, layers, colour grading etc and turn it into a full-fledged editor
 
+## AI Usage and Disclaimer
 
+This repository did in fact have a fair amount of AI usage on it, primarily for the implementation of the backend. This was done responsibly however, with all higher-level decisions from libaries to structure to workflows decided by myself. Additionally, a lot of smaller fixes were done manually.
+
+My AI workflow in particular - Claude Opus 4.6/7 for planning -> GPT 5.5 for writing code. The [superpowers](https://github.com/obra/superpowers) skill was used.
 
 
