@@ -7,6 +7,8 @@ Eclypte lets a user upload a WAV song and an MP4 source audio, then runs both th
 
 Those analysis files are then used to plan an edit timeline with an AI agent through API calls and skills. Currently it relies on OpenAI and a CLIP index to search for useful moments in the source content. The final timeline is rendered into an MP4 and made available in the dashboard for preview and download.
 
+Minor alert/warning: it takes extremely long to run the program (eg multiple hours per finished video currently, mostly time spent on movie analysis)
+
 ## Overview
 
 The code is split primarily into three big pieces, that are each fairly independent and can be ran/hosted individually.
