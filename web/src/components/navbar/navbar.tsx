@@ -33,7 +33,7 @@ export default function Navbar() {
                     <nav className={styles.navRight}>
                         <ul className={styles.navList}>
                             <li>
-                                <Link className={styles.navLink} href="/editor">Editor</Link>
+                                <Link className={styles.navLink} href="/demo">Demo</Link>
                             </li>
                             <li>
                                 <Link className={styles.navLink} href="/pricing">Pricing</Link>
