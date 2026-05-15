@@ -89,6 +89,42 @@ export type AssetSummary = {
 
 export type RunSummary = RunManifest
 
+export type ContentCandidateStatus = "discovered" | "available" | "approved" | "rejected" | "imported"
+export type ContentMediaType = "movie" | "tv"
+
+export type ContentProvider = {
+    provider_id: number
+    name: string
+    provider_type: "flatrate" | "free" | "ads" | "rent" | "buy"
+    logo_path: string | null
+}
+
+export type ContentCandidate = {
+    candidate_id: string
+    owner_user_id: string
+    source: string
+    status: ContentCandidateStatus
+    media_type: ContentMediaType
+    tmdb_id: number
+    title: string
+    overview: string
+    release_date: string | null
+    poster_path: string | null
+    backdrop_path: string | null
+    genre_ids: number[]
+    genres: string[]
+    popularity: number
+    vote_average: number
+    vote_count: number
+    provider_region: string
+    provider_link: string | null
+    providers: ContentProvider[]
+    score: number
+    tmdb_url: string
+    created_at: string
+    updated_at: string
+}
+
 export type SynthesisReference = {
     reference_id: string
     owner_user_id: string
@@ -247,6 +283,75 @@ export class EclypteApiClient {
         }
         const query = params.size ? `?${params.toString()}` : ""
         return this.request<RunSummary[]>(`/v1/runs${query}`, { signal })
+    }
+
+    async createContentRadarDiscovery(
+        input: { region?: string; maxPages?: number } = {},
+        signal?: AbortSignal,
+    ) {
+        return this.request<RunManifest>("/v1/content-radar/discover", {
+            method: "POST",
+            body: JSON.stringify({
+                region: input.region ?? "US",
+                max_pages: input.maxPages ?? 1,
+            }),
+            signal,
+        })
+    }
+
+    async listContentCandidates(
+        filters: {
+            mediaType?: ContentMediaType | "all"
+            status?: ContentCandidateStatus | "all"
+            provider?: string
+            genre?: string
+            releaseFrom?: string
+            releaseTo?: string
+        } = {},
+        signal?: AbortSignal,
+    ) {
+        const params = new URLSearchParams()
+        if (filters.mediaType && filters.mediaType !== "all") {
+            params.set("media_type", filters.mediaType)
+        }
+        if (filters.status && filters.status !== "all") {
+            params.set("status", filters.status)
+        }
+        if (filters.provider) {
+            params.set("provider", filters.provider)
+        }
+        if (filters.genre) {
+            params.set("genre", filters.genre)
+        }
+        if (filters.releaseFrom) {
+            params.set("release_from", filters.releaseFrom)
+        }
+        if (filters.releaseTo) {
+            params.set("release_to", filters.releaseTo)
+        }
+        const query = params.size ? `?${params.toString()}` : ""
+        return this.request<ContentCandidate[]>(`/v1/content-candidates${query}`, { signal })
+    }
+
+    async approveContentCandidate(candidateId: string, signal?: AbortSignal) {
+        return this.request<ContentCandidate>(
+            `/v1/content-candidates/${encodeURIComponent(candidateId)}/approve`,
+            { method: "POST", signal },
+        )
+    }
+
+    async rejectContentCandidate(candidateId: string, signal?: AbortSignal) {
+        return this.request<ContentCandidate>(
+            `/v1/content-candidates/${encodeURIComponent(candidateId)}/reject`,
+            { method: "POST", signal },
+        )
+    }
+
+    async markContentCandidateImported(candidateId: string, signal?: AbortSignal) {
+        return this.request<ContentCandidate>(
+            `/v1/content-candidates/${encodeURIComponent(candidateId)}/mark-imported`,
+            { method: "POST", signal },
+        )
     }
 
     async createUpload(request: UploadCreateRequest, signal?: AbortSignal) {

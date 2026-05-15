@@ -5,6 +5,8 @@ import uuid
 from typing import Any
 
 from .keys import (
+    content_candidate_key,
+    content_candidate_prefix,
     synthesis_prompt_state_key,
     synthesis_prompt_version_key,
     synthesis_prompt_version_prefix,
@@ -14,6 +16,8 @@ from .keys import (
 )
 from .models import (
     ArtifactKind,
+    ContentCandidateRecord,
+    ContentCandidateStatus,
     DerivedFrom,
     FileManifest,
     FileVersionMeta,
@@ -714,6 +718,79 @@ class StorageRepository:
             for key in keys
         ]
         return sorted(records, key=lambda item: item.updated_at, reverse=True)
+
+    def upsert_content_candidate(
+        self,
+        record: ContentCandidateRecord,
+    ) -> ContentCandidateRecord:
+        try:
+            existing = self.load_content_candidate(
+                user_id=record.owner_user_id,
+                candidate_id=record.candidate_id,
+            )
+        except KeyError:
+            candidate = record
+        else:
+            candidate = record.model_copy(
+                update={
+                    "status": existing.status,
+                    "created_at": existing.created_at,
+                }
+            )
+        return self.save_content_candidate(candidate)
+
+    def save_content_candidate(
+        self,
+        record: ContentCandidateRecord,
+    ) -> ContentCandidateRecord:
+        self._store.put_json(
+            content_candidate_key(
+                user_id=record.owner_user_id,
+                candidate_id=record.candidate_id,
+            ),
+            record.model_dump(mode="json"),
+        )
+        return record
+
+    def load_content_candidate(
+        self,
+        *,
+        user_id: str,
+        candidate_id: str,
+    ) -> ContentCandidateRecord:
+        return ContentCandidateRecord.model_validate(
+            self._store.get_json(
+                content_candidate_key(user_id=user_id, candidate_id=candidate_id)
+            )
+        )
+
+    def list_content_candidates(self, user_id: str) -> list[ContentCandidateRecord]:
+        keys = self._store.list_keys(content_candidate_prefix(user_id=user_id))
+        records = [
+            ContentCandidateRecord.model_validate(self._store.get_json(key))
+            for key in keys
+        ]
+        return sorted(records, key=lambda item: (item.score, item.updated_at), reverse=True)
+
+    def update_content_candidate_status(
+        self,
+        *,
+        user_id: str,
+        candidate_id: str,
+        status: ContentCandidateStatus,
+    ) -> ContentCandidateRecord:
+        record = self.load_content_candidate(
+            user_id=user_id,
+            candidate_id=candidate_id,
+        )
+        return self.save_content_candidate(
+            record.model_copy(
+                update={
+                    "status": status,
+                    "updated_at": _utc_now(),
+                }
+            )
+        )
 
     def default_synthesis_prompt_version(
         self,

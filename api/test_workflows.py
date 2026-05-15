@@ -7,6 +7,7 @@ from api.youtube_download import YoutubeDownloadAttempt, YoutubeDownloadResult
 from api.storage.refs import FileRef
 from api.storage.refs import FileVersionRef
 from api.storage.refs import RunRef
+from api.storage.models import ContentCandidateRecord, ContentProvider
 from api.storage.repository import StorageRepository
 from api.storage.test_fakes import InMemoryObjectStore
 from api.workflows import DefaultWorkflowRunner
@@ -103,6 +104,41 @@ def _publish_timeline_inputs(repo: StorageRepository):
         content_type="application/json",
     )
     return audio, source_video, music_analysis, video_analysis
+
+
+def _content_candidate():
+    return ContentCandidateRecord(
+        candidate_id="tmdb_movie_123",
+        owner_user_id="user_123",
+        source="tmdb_trending_day",
+        status="available",
+        media_type="movie",
+        tmdb_id=123,
+        title="Neon Action",
+        overview="",
+        release_date="2026-05-01",
+        poster_path="/poster.jpg",
+        backdrop_path="/backdrop.jpg",
+        genre_ids=[28],
+        genres=["Action"],
+        popularity=120.0,
+        vote_average=7.8,
+        vote_count=420,
+        provider_region="US",
+        provider_link="https://www.themoviedb.org/movie/123/watch",
+        providers=[
+            ContentProvider(
+                provider_id=8,
+                name="Netflix",
+                logo_path="/netflix.jpg",
+                provider_type="flatrate",
+            )
+        ],
+        score=175.0,
+        tmdb_url="https://www.themoviedb.org/movie/123",
+        created_at="2026-05-15T00:00:00Z",
+        updated_at="2026-05-15T00:00:00Z",
+    )
 
 
 def _complete_analysis_run(
@@ -228,6 +264,35 @@ def test_youtube_song_import_publishes_audio_and_analysis(monkeypatch):
     assert completed.status == "completed"
     assert completed.outputs["audio_file_id"] == f"file_audio_{run.run_id}"
     assert completed.outputs["music_analysis_file_id"] == f"file_music_analysis_{run.run_id}"
+
+
+def test_content_radar_discovery_saves_candidates_and_completes(monkeypatch):
+    repo = StorageRepository(InMemoryObjectStore())
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="content_radar_discovery",
+        inputs={"region": "US", "max_pages": "1"},
+        steps=["fetch_tmdb", "filter_available", "save_candidates"],
+    )
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setattr(
+        "api.workflows.fetch_tmdb_available_candidates",
+        lambda *, user_id, region, max_pages: [_content_candidate()],
+    )
+
+    runner.run_content_radar_discovery(
+        user_id="user_123",
+        run_id=run.run_id,
+        region="US",
+        max_pages=1,
+    )
+
+    completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=run.run_id))
+    saved = repo.load_content_candidate(user_id="user_123", candidate_id="tmdb_movie_123")
+    assert completed.status == "completed"
+    assert completed.outputs["candidates_saved"] == "1"
+    assert saved.title == "Neon Action"
 
 
 def test_youtube_song_import_records_download_attempt_events(monkeypatch):

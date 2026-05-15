@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
 import styles from "./studio.module.css"
-import type { AssetState, AssetSummary, RunManifest, SynthesisReference } from "@/services/eclypteApi"
+import type { AssetState, AssetSummary, ContentCandidateStatus, RunManifest, SynthesisReference } from "@/services/eclypteApi"
 
 export function DashboardPage({
     eyebrow,
@@ -35,7 +35,7 @@ export function StatusBadge({
     tone,
 }: {
     label: string
-    tone?: AssetState | RunManifest["status"] | SynthesisReference["status"]
+    tone?: AssetState | ContentCandidateStatus | RunManifest["status"] | SynthesisReference["status"]
 }) {
     const className = tone ? `${styles.badge} ${styles[tone]}` : styles.badge
     return (

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Protocol
 
 from api.auto_import import ImportCandidate, env_int
+from api.content_radar import fetch_tmdb_available_candidates
 from api.export_options import resolve_export_options, trim_song_analysis
 from api.youtube_download import (
     YoutubeDownloadAttempt,
@@ -52,6 +53,7 @@ class WorkflowRunner(Protocol):
     def run_synthesis_consolidation(self, **kwargs) -> None: ...
     def run_bucket_import(self, **kwargs) -> None: ...
     def run_auto_draft(self, **kwargs) -> None: ...
+    def run_content_radar_discovery(self, **kwargs) -> None: ...
 
 
 class DefaultWorkflowRunner:
@@ -229,6 +231,36 @@ class DefaultWorkflowRunner:
                 outputs=final_outputs,
             )
             self._append_progress_context(repo, progress_context, 100, "Import complete")
+        except Exception as exc:
+            self._mark_failed(repo, user_id, run_id, exc)
+
+    def run_content_radar_discovery(self, **kwargs) -> None:
+        repo = self._repository()
+        user_id = kwargs["user_id"]
+        run_id = kwargs["run_id"]
+        region = str(kwargs.get("region") or os.environ.get("ECLYPTE_CONTENT_RADAR_REGION") or "US")
+        max_pages = int(kwargs.get("max_pages") or os.environ.get("ECLYPTE_CONTENT_RADAR_MAX_PAGES") or 1)
+        run_ref = RunRef(user_id=user_id, run_id=run_id)
+        try:
+            repo.update_run_status(run_ref, status="running", current_step="fetch_tmdb")
+            candidates = fetch_tmdb_available_candidates(
+                user_id=user_id,
+                region=region,
+                max_pages=max_pages,
+            )
+            repo.update_run_status(run_ref, status="running", current_step="filter_available")
+            available = [candidate for candidate in candidates if candidate.providers]
+            repo.update_run_status(run_ref, status="running", current_step="save_candidates")
+            saved = [repo.upsert_content_candidate(candidate) for candidate in available]
+            repo.update_run_status(
+                run_ref,
+                status="completed",
+                outputs={
+                    "candidates_found": str(len(candidates)),
+                    "candidates_saved": str(len(saved)),
+                    "region": region.upper(),
+                },
+            )
         except Exception as exc:
             self._mark_failed(repo, user_id, run_id, exc)
 

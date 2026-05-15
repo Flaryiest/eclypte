@@ -64,6 +64,10 @@ $env:DATABASE_URL="postgresql://..."
 $env:REDIS_URL="redis://..."
 $env:ECLYPTE_INTERNAL_PROGRESS_URL="https://<api-host>/internal/progress"
 $env:ECLYPTE_INTERNAL_PROGRESS_TOKEN="..."
+# Optional TMDb content radar:
+$env:TMDB_READ_ACCESS_TOKEN="..."
+$env:ECLYPTE_CONTENT_RADAR_REGION="US"
+$env:ECLYPTE_CONTENT_RADAR_MAX_PAGES="1"
 ```
 
 ```bash
@@ -78,6 +82,10 @@ export DATABASE_URL="postgresql://..."
 export REDIS_URL="redis://..."
 export ECLYPTE_INTERNAL_PROGRESS_URL="https://<api-host>/internal/progress"
 export ECLYPTE_INTERNAL_PROGRESS_TOKEN="..."
+# Optional TMDb content radar:
+export TMDB_READ_ACCESS_TOKEN="..."
+export ECLYPTE_CONTENT_RADAR_REGION="US"
+export ECLYPTE_CONTENT_RADAR_MAX_PAGES="1"
 ```
 
 CORS defaults to `https://eclypte.vercel.app`, `http://localhost:3000`, and
@@ -142,6 +150,8 @@ Routes:
 - `GET /v1/files/{file_id}` and `GET /v1/files/{file_id}/versions/{version_id}` read manifests.
 - `GET /v1/files/{file_id}/versions/{version_id}/download-url` returns a presigned R2 GET URL.
 - `POST /v1/music/analyses`, `POST /v1/video/analyses`, `POST /v1/timelines`, and `POST /v1/renders` create run manifests and schedule background work.
+- `POST /v1/content-radar/discover` creates a `content_radar_discovery` run that pulls TMDb candidates, filters by watch-provider availability, and stores review records.
+- `GET /v1/content-candidates` lists TMDb movie/TV candidates; `POST /v1/content-candidates/{candidate_id}/approve`, `/reject`, and `/mark-imported` update review state.
 - `GET /v1/runs/{run_id}` and `GET /v1/runs/{run_id}/events` inspect workflow status.
 - `GET /v1/runs/stream` and `GET /v1/runs/{run_id}/stream` stream Redis-backed run updates when `REDIS_URL` is configured.
 - `POST /internal/progress` records worker progress and requires `X-Eclypte-Internal-Token`.

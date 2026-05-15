@@ -16,6 +16,9 @@ RunStatus = Literal["created", "running", "blocked", "failed", "completed", "can
 StepStatus = Literal["pending", "running", "completed", "failed"]
 UploadStatus = Literal["created", "completed"]
 SynthesisReferenceStatus = Literal["queued", "running", "completed", "failed"]
+ContentCandidateStatus = Literal["discovered", "available", "approved", "rejected", "imported"]
+ContentMediaType = Literal["movie", "tv"]
+ContentProviderType = Literal["flatrate", "free", "ads", "rent", "buy"]
 
 
 class DerivedFrom(BaseModel):
@@ -127,6 +130,43 @@ class SynthesisReferenceRecord(BaseModel):
     duration_sec: float | None = None
     metrics: dict[str, Any] = Field(default_factory=dict)
     last_error: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class ContentProvider(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider_id: int
+    name: str
+    provider_type: ContentProviderType
+    logo_path: str | None = None
+
+
+class ContentCandidateRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: str
+    owner_user_id: str
+    source: str
+    status: ContentCandidateStatus
+    media_type: ContentMediaType
+    tmdb_id: int
+    title: str
+    overview: str = ""
+    release_date: str | None = None
+    poster_path: str | None = None
+    backdrop_path: str | None = None
+    genre_ids: list[int] = Field(default_factory=list)
+    genres: list[str] = Field(default_factory=list)
+    popularity: float = 0.0
+    vote_average: float = 0.0
+    vote_count: int = 0
+    provider_region: str = "US"
+    provider_link: str | None = None
+    providers: list[ContentProvider] = Field(default_factory=list)
+    score: float = 0.0
+    tmdb_url: str
     created_at: str
     updated_at: str
 

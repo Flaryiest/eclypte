@@ -29,6 +29,9 @@ from api.prototyping.edit.synthesis.system_prompt import (
 )
 from api.storage.models import (
     ArtifactKind,
+    ContentCandidateRecord,
+    ContentCandidateStatus,
+    ContentMediaType,
     FileManifest,
     FileVersionMeta,
     RunEvent,
@@ -166,6 +169,11 @@ class ImportEventResponse(BaseModel):
     ignored: bool = False
     reason: str | None = None
     run: RunManifest | None = None
+
+
+class ContentRadarDiscoveryRequest(BaseModel):
+    region: str = Field(default="US", min_length=2, max_length=2)
+    max_pages: int = Field(default=1, ge=1, le=3)
 
 
 class EditJobStage(BaseModel):
@@ -367,6 +375,16 @@ def create_app(
         if run.workflow_type != "edit_pipeline":
             raise HTTPException(status_code=404, detail="edit job not found")
         return run
+
+    def content_candidate_or_404(
+        repo: StorageRepository,
+        uid: str,
+        candidate_id: str,
+    ) -> ContentCandidateRecord:
+        try:
+            return repo.load_content_candidate(user_id=uid, candidate_id=candidate_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="content candidate not found") from exc
 
     def edit_status_from_run(
         repo: StorageRepository,
@@ -639,6 +657,126 @@ def create_app(
             candidate=candidate.model_dump(mode="json"),
         )
         return ImportEventResponse(accepted=True, run=run)
+
+    @app.post(
+        "/v1/content-radar/discover",
+        response_model=RunManifest,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    def create_content_radar_discovery(
+        request: ContentRadarDiscoveryRequest,
+        background_tasks: BackgroundTasks,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> RunManifest:
+        region = request.region.upper()
+        run = create_workflow_run(
+            repo,
+            uid,
+            "content_radar_discovery",
+            {"region": region, "max_pages": str(request.max_pages)},
+            ["fetch_tmdb", "filter_available", "save_candidates"],
+        )
+        background_tasks.add_task(
+            runner.run_content_radar_discovery,
+            user_id=uid,
+            run_id=run.run_id,
+            region=region,
+            max_pages=request.max_pages,
+        )
+        return run
+
+    @app.get("/v1/content-candidates", response_model=list[ContentCandidateRecord])
+    def list_content_candidates(
+        media_type: ContentMediaType | None = None,
+        status: ContentCandidateStatus | None = None,
+        provider: str | None = None,
+        genre: str | None = None,
+        release_from: str | None = None,
+        release_to: str | None = None,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> list[ContentCandidateRecord]:
+        candidates = repo.list_content_candidates(uid)
+        if media_type is not None:
+            candidates = [candidate for candidate in candidates if candidate.media_type == media_type]
+        if status is not None:
+            candidates = [candidate for candidate in candidates if candidate.status == status]
+        if provider:
+            provider_filter = provider.strip().lower()
+            candidates = [
+                candidate
+                for candidate in candidates
+                if any(provider_filter in item.name.lower() for item in candidate.providers)
+            ]
+        if genre:
+            genre_filter = genre.strip().lower()
+            candidates = [
+                candidate
+                for candidate in candidates
+                if any(genre_filter == item.lower() for item in candidate.genres)
+            ]
+        if release_from:
+            candidates = [
+                candidate
+                for candidate in candidates
+                if candidate.release_date is not None and candidate.release_date >= release_from
+            ]
+        if release_to:
+            candidates = [
+                candidate
+                for candidate in candidates
+                if candidate.release_date is not None and candidate.release_date <= release_to
+            ]
+        return candidates
+
+    @app.post(
+        "/v1/content-candidates/{candidate_id}/approve",
+        response_model=ContentCandidateRecord,
+    )
+    def approve_content_candidate(
+        candidate_id: str,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> ContentCandidateRecord:
+        content_candidate_or_404(repo, uid, candidate_id)
+        return repo.update_content_candidate_status(
+            user_id=uid,
+            candidate_id=candidate_id,
+            status="approved",
+        )
+
+    @app.post(
+        "/v1/content-candidates/{candidate_id}/reject",
+        response_model=ContentCandidateRecord,
+    )
+    def reject_content_candidate(
+        candidate_id: str,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> ContentCandidateRecord:
+        content_candidate_or_404(repo, uid, candidate_id)
+        return repo.update_content_candidate_status(
+            user_id=uid,
+            candidate_id=candidate_id,
+            status="rejected",
+        )
+
+    @app.post(
+        "/v1/content-candidates/{candidate_id}/mark-imported",
+        response_model=ContentCandidateRecord,
+    )
+    def mark_content_candidate_imported(
+        candidate_id: str,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> ContentCandidateRecord:
+        content_candidate_or_404(repo, uid, candidate_id)
+        return repo.update_content_candidate_status(
+            user_id=uid,
+            candidate_id=candidate_id,
+            status="imported",
+        )
 
     @app.post(
         "/v1/uploads",
