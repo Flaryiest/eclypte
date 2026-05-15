@@ -960,6 +960,70 @@ def test_run_auto_draft_clamps_export_to_short_song_duration(monkeypatch):
     assert captured["export_options"]["audio_end_sec"] == 20.0
 
 
+def test_auto_draft_timeline_falls_back_when_agent_timeline_is_too_short(monkeypatch):
+    repo = StorageRepository(InMemoryObjectStore())
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    audio, source_video, music_analysis, video_analysis = _publish_timeline_inputs(repo)
+    parent = repo.create_run(
+        user_id="user_123",
+        workflow_type="auto_draft",
+        inputs={},
+        steps=["assets", "music", "video", "timeline", "render", "result"],
+    )
+    calls = []
+
+    def run_timeline_plan(**kwargs):
+        calls.append(kwargs["planning_mode"])
+        if kwargs["planning_mode"] == "agent":
+            repo.update_run_status(
+                RunRef(user_id="user_123", run_id=kwargs["run_id"]),
+                status="failed",
+                current_step="agent_plan_timeline",
+                last_error="agent timeline duration 16.090s is shorter than song duration 20.000s",
+            )
+            return
+        artifact = _publish_artifact(
+            repo,
+            file_id=f"file_timeline_{kwargs['run_id']}",
+            kind="timeline",
+            filename="fallback.timeline.json",
+            body=b"{}",
+            content_type="application/json",
+        )
+        repo.update_run_status(
+            RunRef(user_id="user_123", run_id=kwargs["run_id"]),
+            status="completed",
+            current_step=None,
+            outputs={
+                "timeline_file_id": artifact["file_id"],
+                "timeline_version_id": artifact["version_id"],
+            },
+        )
+
+    monkeypatch.setattr(runner, "run_timeline_plan", run_timeline_plan)
+
+    timeline = runner._run_edit_timeline(
+        repo=repo,
+        user_id="user_123",
+        parent_ref=RunRef(user_id="user_123", run_id=parent.run_id),
+        audio=audio,
+        source_video=source_video,
+        music_analysis=music_analysis,
+        video_analysis=video_analysis,
+        planning_mode="agent",
+        creative_brief="",
+        export_options={"format": "reels_9_16", "audio_end_sec": 20.0},
+        allow_deterministic_fallback=True,
+    )
+
+    updated_parent = repo.load_run_manifest(RunRef(user_id="user_123", run_id=parent.run_id))
+    assert calls == ["agent", "deterministic"]
+    assert timeline["file_id"].startswith("file_timeline_")
+    assert updated_parent.outputs["agent_timeline_run_id"].startswith("run_")
+    assert updated_parent.outputs["timeline_run_id"].startswith("run_")
+
+
 def test_bucket_import_skips_duplicate_auto_draft_pair(monkeypatch):
     from api.auto_import import parse_import_candidate
 

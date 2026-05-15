@@ -367,6 +367,7 @@ class DefaultWorkflowRunner:
             creative_brief=DEFAULT_CREATIVE_BRIEF,
             title=kwargs.get("title") or "Auto draft",
             export_options=export_options.as_payload(),
+            allow_deterministic_timeline_fallback=True,
         )
         try:
             completed = repo.load_run_manifest(RunRef(user_id=user_id, run_id=run_id))
@@ -423,6 +424,9 @@ class DefaultWorkflowRunner:
                 planning_mode=planning_mode,
                 creative_brief=creative_brief,
                 export_options=export_options,
+                allow_deterministic_fallback=bool(
+                    kwargs.get("allow_deterministic_timeline_fallback", False)
+                ),
             )
 
             current_stage = "render"
@@ -666,28 +670,52 @@ class DefaultWorkflowRunner:
         planning_mode: str,
         creative_brief: str,
         export_options: dict | None,
+        allow_deterministic_fallback: bool = False,
     ) -> dict[str, str]:
         resolved_export = resolve_export_options(export_options, max_duration_sec=None)
-        steps = (
-            ["ensure_clip_index", "agent_plan_timeline", "publish_timeline"]
-            if planning_mode == "agent"
-            else ["plan_timeline", "publish_timeline"]
-        )
-        workflow_type = "timeline_agent_plan" if planning_mode == "agent" else "timeline_plan"
-        child = self._create_child_run(
-            repo,
-            user_id=user_id,
-            workflow_type=workflow_type,
-            inputs={
-                "audio_version_id": audio["version_id"],
-                "source_video_version_id": source_video["version_id"],
-                "music_analysis_version_id": music_analysis["version_id"],
-                "video_analysis_version_id": video_analysis["version_id"],
-                "planning_mode": planning_mode,
-                **resolved_export.as_run_inputs(),
-            },
-            steps=steps,
-        )
+
+        def create_timeline_child(mode: str):
+            steps = (
+                ["ensure_clip_index", "agent_plan_timeline", "publish_timeline"]
+                if mode == "agent"
+                else ["plan_timeline", "publish_timeline"]
+            )
+            workflow_type = "timeline_agent_plan" if mode == "agent" else "timeline_plan"
+            return self._create_child_run(
+                repo,
+                user_id=user_id,
+                workflow_type=workflow_type,
+                inputs={
+                    "audio_version_id": audio["version_id"],
+                    "source_video_version_id": source_video["version_id"],
+                    "music_analysis_version_id": music_analysis["version_id"],
+                    "video_analysis_version_id": video_analysis["version_id"],
+                    "planning_mode": mode,
+                    **resolved_export.as_run_inputs(),
+                },
+                steps=steps,
+            )
+
+        def run_child(child_run, mode: str) -> None:
+            self.run_timeline_plan(
+                user_id=user_id,
+                run_id=child_run.run_id,
+                audio=audio,
+                source_video=source_video,
+                music_analysis=music_analysis,
+                video_analysis=video_analysis,
+                planning_mode=mode,
+                creative_brief=creative_brief,
+                max_duration_sec=None,
+                export_options=resolved_export.as_payload(),
+                progress_context=self._progress_context(
+                    user_id=user_id,
+                    run_id=parent_ref.run_id,
+                    stage="timeline",
+                ),
+            )
+
+        child = create_timeline_child(planning_mode)
         self._set_edit_progress(
             repo,
             parent_ref,
@@ -696,24 +724,30 @@ class DefaultWorkflowRunner:
             "Starting timeline plan",
             outputs={"timeline_run_id": child.run_id},
         )
-        self.run_timeline_plan(
-            user_id=user_id,
-            run_id=child.run_id,
-            audio=audio,
-            source_video=source_video,
-            music_analysis=music_analysis,
-            video_analysis=video_analysis,
-            planning_mode=planning_mode,
-            creative_brief=creative_brief,
-            max_duration_sec=None,
-            export_options=resolved_export.as_payload(),
-            progress_context=self._progress_context(
-                user_id=user_id,
-                run_id=parent_ref.run_id,
-                stage="timeline",
-            ),
-        )
-        completed = _require_completed_run(repo, user_id, child.run_id)
+        run_child(child, planning_mode)
+        try:
+            completed = _require_completed_run(repo, user_id, child.run_id)
+        except RuntimeError as exc:
+            if not (
+                allow_deterministic_fallback
+                and planning_mode == "agent"
+                and _is_short_agent_timeline_error(str(exc))
+            ):
+                raise
+            fallback = create_timeline_child("deterministic")
+            self._set_edit_progress(
+                repo,
+                parent_ref,
+                "timeline",
+                35,
+                "Agent timeline was too short; retrying deterministic plan",
+                outputs={
+                    "agent_timeline_run_id": child.run_id,
+                    "timeline_run_id": fallback.run_id,
+                },
+            )
+            run_child(fallback, "deterministic")
+            completed = _require_completed_run(repo, user_id, fallback.run_id)
         timeline = _output_ref(completed, "timeline_file_id", "timeline_version_id")
         self._set_edit_progress(
             repo,
@@ -1482,6 +1516,13 @@ def _auto_draft_within_limits(runs) -> bool:
         and run.archived_at is None
     )
     return daily_auto_drafts < max_daily
+
+
+def _is_short_agent_timeline_error(message: str) -> bool:
+    return (
+        "agent timeline duration" in message
+        and "is shorter than song duration" in message
+    )
 
 
 def _auto_draft_export_options(
