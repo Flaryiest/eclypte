@@ -119,16 +119,21 @@ def plan(
                 continue
             last_scene = pick["scene_index"]
             beats_used.append(round(song_t0, 3))
+            source_start, source_end, speed = _fit_source_range(
+                pick_start_sec=float(pick["start_sec"]),
+                shot_duration_sec=duration,
+                source_duration_sec=source_duration,
+            )
 
             shots.append(Shot(
                 index=len(shots),
                 timeline_start_sec=round(timeline_t0, 3),
                 timeline_end_sec=round(timeline_t1, 3),
                 source=ShotSource(
-                    start_sec=round(pick["start_sec"], 3),
-                    end_sec=round(pick["start_sec"] + duration, 3),
+                    start_sec=round(source_start, 3),
+                    end_sec=round(source_end, 3),
                 ),
-                speed=1.0,
+                speed=round(speed, 3),
                 effects=_effects_for(label, meso, scenes, pick),
                 transition_in=Transition(
                     type="cut",
@@ -188,6 +193,21 @@ def plan(
         source_duration_sec=source_duration,
     )
     return timeline
+
+
+def _fit_source_range(
+    *,
+    pick_start_sec: float,
+    shot_duration_sec: float,
+    source_duration_sec: float,
+) -> tuple[float, float, float]:
+    source_span = min(shot_duration_sec, source_duration_sec)
+    if source_span <= 0:
+        return 0.0, 0.0, 1.0
+    source_start = max(0.0, min(pick_start_sec, source_duration_sec - source_span))
+    source_end = source_start + source_span
+    speed = shot_duration_sec / source_span
+    return source_start, source_end, speed
 
 
 def _pick_audio_start(first_segment: dict, downbeats: list[float]) -> float:
