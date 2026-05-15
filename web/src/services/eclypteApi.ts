@@ -728,7 +728,7 @@ export async function waitForRunCompletion(
         try {
             run = await waitForRunCompletionFromStream(api, run, { signal, onUpdate })
         } catch (caught) {
-            if (isAbortError(caught, signal)) {
+            if (signal?.aborted) {
                 throw caught
             }
             run = await waitForRunCompletionByPolling(api, run, {
@@ -913,10 +913,6 @@ export function drainJsonLines(buffer: string) {
         lines: parts.map((line) => line.replace(/\r$/, "")).filter(Boolean),
         remainder,
     }
-}
-
-function isAbortError(error: unknown, signal?: AbortSignal) {
-    return Boolean(signal?.aborted) || (error instanceof DOMException && error.name === "AbortError")
 }
 
 function delay(ms: number, signal?: AbortSignal) {
