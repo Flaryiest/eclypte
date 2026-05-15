@@ -3,12 +3,14 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import subprocess
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
+from api.auto_import import ImportCandidate, env_int
 from api.export_options import resolve_export_options, trim_song_analysis
 from api.youtube_download import (
     YoutubeDownloadAttempt,
@@ -30,6 +32,13 @@ DEFAULT_CREATIVE_BRIEF = (
 )
 CLIP_INDEX_CONTENT_TYPE = "application/x-numpy-data"
 TIMELINE_COVERAGE_TOLERANCE_SEC = 0.75
+AUTO_DRAFT_STEPS = ["assets", "music", "video", "timeline", "render", "result"]
+AUTO_DRAFT_EXPORT_OPTIONS = {
+    "format": "reels_9_16",
+    "audio_start_sec": 0.0,
+    "audio_end_sec": 60.0,
+    "crop_focus_x": 0.5,
+}
 
 
 class WorkflowRunner(Protocol):
@@ -41,6 +50,8 @@ class WorkflowRunner(Protocol):
     def run_edit_pipeline(self, **kwargs) -> None: ...
     def run_synthesis_reference_ingest(self, **kwargs) -> None: ...
     def run_synthesis_consolidation(self, **kwargs) -> None: ...
+    def run_bucket_import(self, **kwargs) -> None: ...
+    def run_auto_draft(self, **kwargs) -> None: ...
 
 
 class DefaultWorkflowRunner:
@@ -130,6 +141,244 @@ class DefaultWorkflowRunner:
             "percent_start": percent_start,
             "percent_end": percent_end,
         }
+
+    def run_bucket_import(self, **kwargs) -> None:
+        repo = self._repository()
+        user_id = kwargs["user_id"]
+        run_id = kwargs["run_id"]
+        candidate = ImportCandidate.model_validate(kwargs["candidate"])
+        run_ref = RunRef(user_id=user_id, run_id=run_id)
+        progress_context = kwargs.get("progress_context")
+
+        try:
+            self._append_progress_context(repo, progress_context, 10, "Normalizing media")
+            normalized = _normalize_imported_media(repo, candidate, progress_context=progress_context)
+
+            repo.update_run_status(run_ref, status="running", current_step="publish_asset")
+            self._append_progress_context(repo, progress_context, 45, "Publishing imported asset")
+            file_ref = FileRef(user_id=user_id, file_id=f"file_import_{run_id}")
+            repo.create_file_manifest(
+                file_ref=file_ref,
+                kind=candidate.kind,
+                display_name=candidate.output_filename,
+                source_run_id=run_id,
+            )
+            manifest = repo.load_file_manifest(file_ref)
+            repo.save_file_manifest(
+                manifest.model_copy(
+                    update={"tags": ["auto_import", candidate.collection_tag()]}
+                )
+            )
+            version_ref = repo.publish_bytes(
+                file_ref=file_ref,
+                body=normalized,
+                content_type=candidate.output_content_type,
+                original_filename=candidate.output_filename,
+                created_by_step="normalize_media",
+                derived_from_step="normalize_media",
+                input_file_version_ids=[],
+                derived_from_run_id=run_id,
+            )
+            imported_ref = {
+                "file_id": file_ref.file_id,
+                "version_id": version_ref.version_id,
+            }
+            repo.update_run_status(
+                run_ref,
+                status="running",
+                current_step="analyze_asset",
+                outputs={
+                    "asset_file_id": file_ref.file_id,
+                    "asset_version_id": version_ref.version_id,
+                },
+            )
+
+            self._append_progress_context(repo, progress_context, 65, "Analyzing imported asset")
+            analysis_outputs = self._run_import_analysis(
+                repo=repo,
+                user_id=user_id,
+                imported_ref=imported_ref,
+                imported_kind=candidate.kind,
+            )
+            repo.update_run_status(
+                run_ref,
+                status="running",
+                current_step="create_auto_draft",
+                outputs={
+                    "analysis_run_id": analysis_outputs["run_id"],
+                    "analysis_file_id": analysis_outputs["file_id"],
+                    "analysis_version_id": analysis_outputs["version_id"],
+                },
+            )
+
+            self._append_progress_context(repo, progress_context, 85, "Checking auto-draft pair")
+            draft_run = self._maybe_create_auto_draft(
+                repo=repo,
+                user_id=user_id,
+                parent_run_id=run_id,
+                imported_ref=imported_ref,
+                imported_kind=candidate.kind,
+                collection_slug=candidate.collection_slug,
+            )
+            final_outputs = {}
+            if draft_run is not None:
+                final_outputs["auto_draft_run_id"] = draft_run.run_id
+            repo.update_run_status(
+                run_ref,
+                status="completed",
+                outputs=final_outputs,
+            )
+            self._append_progress_context(repo, progress_context, 100, "Import complete")
+        except Exception as exc:
+            self._mark_failed(repo, user_id, run_id, exc)
+
+    def _run_import_analysis(
+        self,
+        *,
+        repo: StorageRepository,
+        user_id: str,
+        imported_ref: dict[str, str],
+        imported_kind: str,
+    ) -> dict[str, str]:
+        if imported_kind == "song_audio":
+            child = self._create_child_run(
+                repo,
+                user_id=user_id,
+                workflow_type="music_analysis",
+                inputs={
+                    "audio_file_id": imported_ref["file_id"],
+                    "audio_version_id": imported_ref["version_id"],
+                },
+                steps=["analyze_music", "publish_analysis"],
+            )
+            self.run_music_analysis(
+                user_id=user_id,
+                run_id=child.run_id,
+                audio=imported_ref,
+            )
+            completed = _require_completed_run(repo, user_id, child.run_id)
+            return {
+                "run_id": child.run_id,
+                "file_id": completed.outputs["music_analysis_file_id"],
+                "version_id": completed.outputs["music_analysis_version_id"],
+            }
+
+        child = self._create_child_run(
+            repo,
+            user_id=user_id,
+            workflow_type="video_analysis",
+            inputs={
+                "source_video_file_id": imported_ref["file_id"],
+                "source_video_version_id": imported_ref["version_id"],
+            },
+            steps=["analyze_video", "publish_analysis"],
+        )
+        self.run_video_analysis(
+            user_id=user_id,
+            run_id=child.run_id,
+            source_video=imported_ref,
+        )
+        completed = _require_completed_run(repo, user_id, child.run_id)
+        return {
+            "run_id": child.run_id,
+            "file_id": completed.outputs["video_analysis_file_id"],
+            "version_id": completed.outputs["video_analysis_version_id"],
+        }
+
+    def _maybe_create_auto_draft(
+        self,
+        *,
+        repo: StorageRepository,
+        user_id: str,
+        parent_run_id: str,
+        imported_ref: dict[str, str],
+        imported_kind: str,
+        collection_slug: str,
+    ):
+        runs = repo.list_run_manifests(user_id)
+        if not _auto_draft_within_limits(runs):
+            return None
+        counterpart_kind = "source_video" if imported_kind == "song_audio" else "song_audio"
+        counterpart = _find_collection_asset(
+            repo=repo,
+            user_id=user_id,
+            kind=counterpart_kind,
+            collection_slug=collection_slug,
+            exclude_file_id=imported_ref["file_id"],
+        )
+        if counterpart is None or counterpart.current_version_id is None:
+            return None
+
+        counterpart_ref = {
+            "file_id": counterpart.file_id,
+            "version_id": counterpart.current_version_id,
+        }
+        if imported_kind == "song_audio":
+            audio = imported_ref
+            source_video = counterpart_ref
+        else:
+            audio = counterpart_ref
+            source_video = imported_ref
+        if _auto_draft_pair_exists(runs, audio, source_video):
+            return None
+
+        export_options = resolve_export_options(AUTO_DRAFT_EXPORT_OPTIONS)
+        title = f"Auto draft {collection_slug}"
+        run = self._create_child_run(
+            repo,
+            user_id=user_id,
+            workflow_type="auto_draft",
+            inputs={
+                "title": title,
+                "collection_slug": collection_slug,
+                "auto_import_run_id": parent_run_id,
+                "audio_file_id": audio["file_id"],
+                "audio_version_id": audio["version_id"],
+                "source_video_file_id": source_video["file_id"],
+                "source_video_version_id": source_video["version_id"],
+                "planning_mode": "agent",
+                "creative_brief": DEFAULT_CREATIVE_BRIEF,
+                **export_options.as_run_inputs(),
+            },
+            steps=AUTO_DRAFT_STEPS,
+        )
+        self.run_auto_draft(
+            user_id=user_id,
+            run_id=run.run_id,
+            audio=audio,
+            source_video=source_video,
+            title=title,
+            collection_slug=collection_slug,
+        )
+        return run
+
+    def run_auto_draft(self, **kwargs) -> None:
+        repo = self._repository()
+        user_id = kwargs["user_id"]
+        run_id = kwargs["run_id"]
+        collection_slug = kwargs.get("collection_slug", "")
+        export_options = resolve_export_options(AUTO_DRAFT_EXPORT_OPTIONS)
+        self.run_edit_pipeline(
+            user_id=user_id,
+            run_id=run_id,
+            audio=kwargs["audio"],
+            source_video=kwargs["source_video"],
+            planning_mode="agent",
+            creative_brief=DEFAULT_CREATIVE_BRIEF,
+            title=kwargs.get("title") or "Auto draft",
+            export_options=export_options.as_payload(),
+        )
+        try:
+            completed = repo.load_run_manifest(RunRef(user_id=user_id, run_id=run_id))
+            file_id = completed.outputs.get("render_output_file_id")
+            if not file_id:
+                return
+            file_ref = FileRef(user_id=user_id, file_id=file_id)
+            manifest = repo.load_file_manifest(file_ref)
+            tags = list(dict.fromkeys([*manifest.tags, "auto_draft", f"collection:{collection_slug}"]))
+            repo.save_file_manifest(manifest.model_copy(update={"tags": tags}))
+        except KeyError:
+            return
 
     def run_edit_pipeline(self, **kwargs) -> None:
         repo = self._repository()
@@ -1176,6 +1425,136 @@ class DefaultWorkflowRunner:
             )
         except Exception as exc:
             self._mark_failed(repo, user_id, run_id, exc)
+
+
+def _find_collection_asset(
+    *,
+    repo: StorageRepository,
+    user_id: str,
+    kind: str,
+    collection_slug: str,
+    exclude_file_id: str,
+):
+    collection_tag = f"collection:{collection_slug}"
+    for manifest in repo.list_file_manifests(user_id):
+        if (
+            manifest.file_id != exclude_file_id
+            and manifest.kind == kind
+            and manifest.current_version_id is not None
+            and manifest.archived_at is None
+            and collection_tag in manifest.tags
+        ):
+            return manifest
+    return None
+
+
+def _auto_draft_pair_exists(runs, audio: dict[str, str], source_video: dict[str, str]) -> bool:
+    for run in runs:
+        if run.workflow_type != "auto_draft" or run.archived_at is not None:
+            continue
+        if (
+            run.inputs.get("audio_version_id") == audio["version_id"]
+            and run.inputs.get("source_video_version_id") == source_video["version_id"]
+        ):
+            return True
+    return False
+
+
+def _auto_draft_within_limits(runs) -> bool:
+    max_active = env_int("ECLYPTE_AUTO_DRAFT_MAX_ACTIVE", 1)
+    active_auto_drafts = sum(
+        1
+        for run in runs
+        if run.workflow_type == "auto_draft"
+        and run.status in {"created", "running", "blocked"}
+        and run.archived_at is None
+    )
+    if active_auto_drafts >= max_active:
+        return False
+
+    today = _utc_now()[:10]
+    max_daily = env_int("ECLYPTE_AUTO_DRAFT_MAX_DAILY", 3)
+    daily_auto_drafts = sum(
+        1
+        for run in runs
+        if run.workflow_type == "auto_draft"
+        and run.created_at.startswith(today)
+        and run.archived_at is None
+    )
+    return daily_auto_drafts < max_daily
+
+
+def _normalize_imported_media(
+    repo: StorageRepository,
+    candidate: ImportCandidate,
+    progress_context: dict | None = None,
+) -> bytes:
+    del progress_context
+    raw = repo._store.get_bytes(candidate.source_key)  # type: ignore[attr-defined]
+    with _temporary_directory("eclypte_import_") as td:
+        workdir = Path(td)
+        input_path = workdir / f"input{candidate.source_suffix}"
+        output_path = workdir / candidate.output_filename
+        input_path.write_bytes(raw)
+        if candidate.media_role == "song":
+            _run_ffmpeg(
+                [
+                    "-y",
+                    "-i",
+                    str(input_path),
+                    "-vn",
+                    "-ac",
+                    "2",
+                    "-ar",
+                    "44100",
+                    "-c:a",
+                    "pcm_s16le",
+                    str(output_path),
+                ]
+            )
+        else:
+            _run_ffmpeg(
+                [
+                    "-y",
+                    "-i",
+                    str(input_path),
+                    "-map",
+                    "0:v:0",
+                    "-map",
+                    "0:a?",
+                    "-vf",
+                    "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease,fps=30,format=yuv420p",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "20",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "192k",
+                    "-movflags",
+                    "+faststart",
+                    str(output_path),
+                ]
+            )
+        return output_path.read_bytes()
+
+
+def _run_ffmpeg(args: list[str]) -> None:
+    from imageio_ffmpeg import get_ffmpeg_exe
+
+    completed = subprocess.run(
+        [get_ffmpeg_exe(), *args],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.strip().splitlines()[-1:] or ["ffmpeg failed"]
+        raise RuntimeError(detail[0])
 
 
 def _synthesis_guidance(references) -> str:

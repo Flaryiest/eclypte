@@ -8,8 +8,15 @@ from urllib.parse import urlparse
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
+from api.auto_import import (
+    UnsupportedImportObject,
+    active_run_count,
+    env_int,
+    matching_import_run,
+    parse_import_candidate,
+)
 from api.export_options import resolve_export_options
 from api.storage.factory import (
     get_default_user_id,
@@ -136,6 +143,29 @@ class InternalProgressRequest(BaseModel):
     stage: str = Field(min_length=1)
     percent: int = Field(ge=0, le=100)
     detail: str = ""
+
+
+class ImportEventObject(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    key: str = Field(min_length=1)
+    size: int | None = Field(default=None, ge=0)
+    etag: str | None = Field(default=None, alias="eTag")
+
+
+class ImportEventRequest(BaseModel):
+    bucket: str = Field(min_length=1)
+    object: ImportEventObject
+    action: str | None = None
+    event_time: str | None = Field(default=None, alias="eventTime")
+
+
+class ImportEventResponse(BaseModel):
+    accepted: bool
+    duplicate: bool = False
+    ignored: bool = False
+    reason: str | None = None
+    run: RunManifest | None = None
 
 
 class EditJobStage(BaseModel):
@@ -550,6 +580,65 @@ def create_app(
             detail=request.detail,
         )
         return {"ok": True}
+
+    @app.post(
+        "/internal/import-events",
+        response_model=ImportEventResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    def record_import_event(
+        request: ImportEventRequest,
+        background_tasks: BackgroundTasks,
+        x_eclypte_internal_token: str | None = Header(
+            default=None,
+            alias="X-Eclypte-Internal-Token",
+        ),
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> ImportEventResponse:
+        expected = os.environ.get("ECLYPTE_INTERNAL_PROGRESS_TOKEN")
+        if not expected or not x_eclypte_internal_token or not secrets.compare_digest(
+            expected,
+            x_eclypte_internal_token,
+        ):
+            raise HTTPException(status_code=403, detail="invalid internal token")
+        try:
+            candidate = parse_import_candidate(
+                bucket=request.bucket,
+                key=request.object.key,
+                etag=request.object.etag,
+                size_bytes=request.object.size,
+            )
+        except UnsupportedImportObject as exc:
+            return ImportEventResponse(
+                accepted=False,
+                ignored=True,
+                reason=str(exc),
+            )
+
+        runs = repo.list_run_manifests(uid)
+        existing = matching_import_run(runs, candidate)
+        if existing is not None:
+            return ImportEventResponse(accepted=True, duplicate=True, run=existing)
+
+        max_active = env_int("ECLYPTE_AUTO_IMPORT_MAX_ACTIVE", 2)
+        if active_run_count(runs, "bucket_import") >= max_active:
+            raise HTTPException(status_code=429, detail="auto import queue is full")
+
+        run = create_workflow_run(
+            repo,
+            uid,
+            "bucket_import",
+            candidate.run_inputs(),
+            ["normalize_media", "publish_asset", "analyze_asset", "create_auto_draft"],
+        )
+        background_tasks.add_task(
+            runner.run_bucket_import,
+            user_id=uid,
+            run_id=run.run_id,
+            candidate=candidate.model_dump(mode="json"),
+        )
+        return ImportEventResponse(accepted=True, run=run)
 
     @app.post(
         "/v1/uploads",

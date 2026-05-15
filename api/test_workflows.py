@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from api.youtube_download import YoutubeDownloadAttempt, YoutubeDownloadResult
 from api.storage.refs import FileRef
+from api.storage.refs import FileVersionRef
 from api.storage.refs import RunRef
 from api.storage.repository import StorageRepository
 from api.storage.test_fakes import InMemoryObjectStore
@@ -668,3 +669,223 @@ def test_edit_pipeline_fails_parent_when_child_run_fails(monkeypatch):
     assert failed.current_step == "music"
     assert failed.last_error == "music exploded"
     assert "timeline_file_id" not in failed.outputs
+
+
+def test_bucket_import_normalizes_publishes_asset_and_runs_analysis(monkeypatch):
+    from api.auto_import import parse_import_candidate
+
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    candidate = parse_import_candidate(
+        bucket="eclypte",
+        key="incoming/collections/mario/songs/song.mp3",
+        etag="etag-song",
+        size_bytes=9,
+    )
+    store.put_bytes(candidate.source_key, b"raw-audio", content_type="audio/mpeg")
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="bucket_import",
+        inputs=candidate.run_inputs(),
+        steps=["normalize_media", "publish_asset", "analyze_asset", "create_auto_draft"],
+    )
+
+    monkeypatch.setattr(
+        "api.workflows._normalize_imported_media",
+        lambda repo, candidate, progress_context=None: b"normalized-wav",
+    )
+
+    def run_music_analysis(**kwargs):
+        _complete_analysis_run(
+            repo,
+            run_id=kwargs["run_id"],
+            file_id=f"file_music_analysis_{kwargs['run_id']}",
+            kind="music_analysis",
+            filename="song.json",
+            file_key="music_analysis_file_id",
+            version_key="music_analysis_version_id",
+        )
+
+    monkeypatch.setattr(runner, "run_music_analysis", run_music_analysis)
+
+    runner.run_bucket_import(
+        user_id="user_123",
+        run_id=run.run_id,
+        candidate=candidate.model_dump(),
+    )
+
+    completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=run.run_id))
+    asset = repo.load_file_manifest(
+        FileRef(user_id="user_123", file_id=completed.outputs["asset_file_id"])
+    )
+    version = repo.load_file_version_meta(
+        FileVersionRef(
+            user_id="user_123",
+            file_id=asset.file_id,
+            version_id=completed.outputs["asset_version_id"],
+        )
+    )
+    assert store.get_bytes(version.storage_key) == b"normalized-wav"
+    assert asset.kind == "song_audio"
+    assert asset.tags == ["auto_import", "collection:mario"]
+    assert version.content_type == "audio/wav"
+    assert version.original_filename == "song.wav"
+    assert completed.status == "completed"
+    assert completed.outputs["analysis_run_id"].startswith("run_")
+    assert completed.outputs["analysis_version_id"].startswith("ver_")
+
+
+def test_bucket_import_creates_auto_draft_for_ready_collection_counterpart(monkeypatch):
+    from api.auto_import import parse_import_candidate
+
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    song = _publish_artifact(
+        repo,
+        file_id="file_song_ready",
+        kind="song_audio",
+        filename="song.wav",
+        body=b"wav",
+        content_type="audio/wav",
+    )
+    song_manifest = repo.load_file_manifest(FileRef(user_id="user_123", file_id=song["file_id"]))
+    repo.save_file_manifest(
+        song_manifest.model_copy(update={"tags": ["auto_import", "collection:mario"]})
+    )
+    _complete_analysis_run(
+        repo,
+        run_id=repo.create_run(
+            user_id="user_123",
+            workflow_type="music_analysis",
+            inputs={"audio_file_id": song["file_id"], "audio_version_id": song["version_id"]},
+            steps=["analyze_music", "publish_analysis"],
+        ).run_id,
+        file_id="file_music_ready",
+        kind="music_analysis",
+        filename="song.json",
+        file_key="music_analysis_file_id",
+        version_key="music_analysis_version_id",
+    )
+    candidate = parse_import_candidate(
+        bucket="eclypte",
+        key="incoming/collections/mario/videos/source.mkv",
+        etag="etag-video",
+        size_bytes=9,
+    )
+    store.put_bytes(candidate.source_key, b"raw-video", content_type="video/x-matroska")
+    import_run = repo.create_run(
+        user_id="user_123",
+        workflow_type="bucket_import",
+        inputs=candidate.run_inputs(),
+        steps=["normalize_media", "publish_asset", "analyze_asset", "create_auto_draft"],
+    )
+    auto_draft_calls = []
+    monkeypatch.setattr(
+        "api.workflows._normalize_imported_media",
+        lambda repo, candidate, progress_context=None: b"normalized-mp4",
+    )
+
+    def run_video_analysis(**kwargs):
+        _complete_analysis_run(
+            repo,
+            run_id=kwargs["run_id"],
+            file_id=f"file_video_analysis_{kwargs['run_id']}",
+            kind="video_analysis",
+            filename="source.json",
+            file_key="video_analysis_file_id",
+            version_key="video_analysis_version_id",
+        )
+
+    def run_auto_draft(**kwargs):
+        auto_draft_calls.append(kwargs)
+
+    monkeypatch.setattr(runner, "run_video_analysis", run_video_analysis)
+    monkeypatch.setattr(runner, "run_auto_draft", run_auto_draft)
+
+    runner.run_bucket_import(
+        user_id="user_123",
+        run_id=import_run.run_id,
+        candidate=candidate.model_dump(),
+    )
+
+    completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=import_run.run_id))
+    draft_id = completed.outputs["auto_draft_run_id"]
+    draft = repo.load_run_manifest(RunRef(user_id="user_123", run_id=draft_id))
+    assert draft.workflow_type == "auto_draft"
+    assert draft.inputs["audio_version_id"] == song["version_id"]
+    assert draft.inputs["source_video_version_id"] == completed.outputs["asset_version_id"]
+    assert draft.inputs["export_format"] == "reels_9_16"
+    assert draft.inputs["audio_end_sec"] == "60.000"
+    assert auto_draft_calls[0]["run_id"] == draft_id
+
+
+def test_bucket_import_skips_duplicate_auto_draft_pair(monkeypatch):
+    from api.auto_import import parse_import_candidate
+
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    audio = _publish_artifact(
+        repo,
+        file_id="file_song",
+        kind="song_audio",
+        filename="song.wav",
+        body=b"wav",
+        content_type="audio/wav",
+    )
+    video = _publish_artifact(
+        repo,
+        file_id="file_video",
+        kind="source_video",
+        filename="source.mp4",
+        body=b"mp4",
+        content_type="video/mp4",
+    )
+    for artifact in (audio, video):
+        manifest = repo.load_file_manifest(FileRef(user_id="user_123", file_id=artifact["file_id"]))
+        repo.save_file_manifest(
+            manifest.model_copy(update={"tags": ["auto_import", "collection:mario"]})
+        )
+    existing = repo.create_run(
+        user_id="user_123",
+        workflow_type="auto_draft",
+        inputs={
+            "audio_file_id": audio["file_id"],
+            "audio_version_id": audio["version_id"],
+            "source_video_file_id": video["file_id"],
+            "source_video_version_id": video["version_id"],
+        },
+        steps=["assets", "music", "video", "timeline", "render", "result"],
+    )
+    repo.update_run_status(RunRef(user_id="user_123", run_id=existing.run_id), status="completed")
+    candidate = parse_import_candidate(
+        bucket="eclypte",
+        key="incoming/collections/mario/videos/source.mp4",
+        etag="etag-video",
+        size_bytes=3,
+    )
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="bucket_import",
+        inputs=candidate.run_inputs(),
+        steps=["normalize_media", "publish_asset", "analyze_asset", "create_auto_draft"],
+    )
+
+    created = runner._maybe_create_auto_draft(
+        repo=repo,
+        user_id="user_123",
+        parent_run_id=run.run_id,
+        imported_ref={
+            "file_id": video["file_id"],
+            "version_id": video["version_id"],
+        },
+        imported_kind="source_video",
+        collection_slug="mario",
+    )
+
+    assert created is None

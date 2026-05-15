@@ -32,6 +32,12 @@ class RecordingWorkflowRunner:
     def run_synthesis_consolidation(self, **kwargs):
         self.calls.append(("synthesis_consolidation", kwargs))
 
+    def run_bucket_import(self, **kwargs):
+        self.calls.append(("bucket_import", kwargs))
+
+    def run_auto_draft(self, **kwargs):
+        self.calls.append(("auto_draft", kwargs))
+
 
 class FiniteRunBroadcaster:
     def __init__(self, messages):
@@ -1420,3 +1426,81 @@ def test_invalid_artifact_kind_is_rejected_for_music_analysis():
 
     assert response.status_code == 400
     assert "expected song_audio" in response.json()["detail"]
+
+
+def test_internal_import_event_requires_valid_token(monkeypatch):
+    monkeypatch.setenv("ECLYPTE_INTERNAL_PROGRESS_TOKEN", "secret-token")
+    client, _, _ = build_client()
+
+    response = client.post(
+        "/internal/import-events",
+        json={
+            "bucket": "eclypte",
+            "object": {
+                "key": "incoming/collections/mario/songs/song.mp3",
+                "size": 12,
+                "eTag": "etag-123",
+            },
+        },
+    )
+
+    assert response.status_code == 403
+
+
+def test_internal_import_event_creates_bucket_import_run_and_schedules_background(monkeypatch):
+    monkeypatch.setenv("ECLYPTE_INTERNAL_PROGRESS_TOKEN", "secret-token")
+    client, _, runner = build_client()
+
+    response = client.post(
+        "/internal/import-events",
+        headers={"X-Eclypte-Internal-Token": "secret-token"},
+        json={
+            "bucket": "eclypte",
+            "object": {
+                "key": "incoming/collections/mario/videos/source.mkv",
+                "size": 345,
+                "eTag": "etag-video",
+            },
+            "eventTime": "2026-05-15T12:00:00Z",
+        },
+    )
+
+    body = response.json()
+    assert response.status_code == 202
+    assert body["accepted"] is True
+    assert body["run"]["workflow_type"] == "bucket_import"
+    assert body["run"]["inputs"]["collection_slug"] == "mario"
+    assert body["run"]["inputs"]["import_kind"] == "source_video"
+    assert body["run"]["inputs"]["source_key"] == "incoming/collections/mario/videos/source.mkv"
+    assert runner.calls[-1][0] == "bucket_import"
+    assert runner.calls[-1][1]["candidate"]["output_filename"] == "source.mp4"
+
+
+def test_internal_import_event_is_idempotent_for_same_bucket_key_and_etag(monkeypatch):
+    monkeypatch.setenv("ECLYPTE_INTERNAL_PROGRESS_TOKEN", "secret-token")
+    client, _, runner = build_client()
+    payload = {
+        "bucket": "eclypte",
+        "object": {
+            "key": "incoming/collections/mario/songs/song.mp3",
+            "size": 12,
+            "eTag": "etag-123",
+        },
+    }
+
+    first = client.post(
+        "/internal/import-events",
+        headers={"X-Eclypte-Internal-Token": "secret-token"},
+        json=payload,
+    )
+    second = client.post(
+        "/internal/import-events",
+        headers={"X-Eclypte-Internal-Token": "secret-token"},
+        json=payload,
+    )
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert second.json()["duplicate"] is True
+    assert second.json()["run"]["run_id"] == first.json()["run"]["run_id"]
+    assert [call[0] for call in runner.calls].count("bucket_import") == 1

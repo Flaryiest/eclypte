@@ -145,6 +145,24 @@ Routes:
 - `GET /v1/runs/{run_id}` and `GET /v1/runs/{run_id}/events` inspect workflow status.
 - `GET /v1/runs/stream` and `GET /v1/runs/{run_id}/stream` stream Redis-backed run updates when `REDIS_URL` is configured.
 - `POST /internal/progress` records worker progress and requires `X-Eclypte-Internal-Token`.
+- `POST /internal/import-events` accepts Cloudflare R2 object-create notifications for
+  `incoming/collections/{collection_slug}/songs/` and `/videos/`, creates a
+  `bucket_import` run, normalizes the object into a managed asset, and may start
+  an `auto_draft` run when a same-collection counterpart exists.
+
+Auto-import queue knobs:
+
+```powershell
+$env:ECLYPTE_AUTO_IMPORT_MAX_ACTIVE="2"
+$env:ECLYPTE_AUTO_DRAFT_MAX_ACTIVE="1"
+$env:ECLYPTE_AUTO_DRAFT_MAX_DAILY="3"
+```
+
+```bash
+export ECLYPTE_AUTO_IMPORT_MAX_ACTIVE="2"
+export ECLYPTE_AUTO_DRAFT_MAX_ACTIVE="1"
+export ECLYPTE_AUTO_DRAFT_MAX_DAILY="3"
+```
 
 Deploy the new R2-aware Modal wrappers before using video-analysis/render API
 jobs against live Modal:
