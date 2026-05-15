@@ -2,6 +2,7 @@
 .env.local
 .superpowers/
 .worktrees/
+.wrangler/
 .pytest_cache/
 .pytest-tmp*/
 .pytest-basetemp*/
@@ -13,10 +14,10 @@ content/
 youtube-worker-tmp/
 .youtube-worker-tmp/
 api/youtube-worker-tmp/
+workers/*/.dev.vars
 __pycache__/
 .agent
 .claude/
 docs
 CLAUDE.md
 AGENTS.md
-

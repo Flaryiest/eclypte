@@ -114,13 +114,14 @@ def _complete_analysis_run(
     filename: str,
     file_key: str,
     version_key: str,
+    body: bytes = b"{}",
 ):
     artifact = _publish_artifact(
         repo,
         file_id=file_id,
         kind=kind,
         filename=filename,
-        body=b"{}",
+        body=body,
         content_type="application/json",
     )
     repo.update_run_status(
@@ -821,6 +822,142 @@ def test_bucket_import_creates_auto_draft_for_ready_collection_counterpart(monke
     assert draft.inputs["export_format"] == "reels_9_16"
     assert draft.inputs["audio_end_sec"] == "60.000"
     assert auto_draft_calls[0]["run_id"] == draft_id
+
+
+def test_bucket_import_clamps_auto_draft_export_to_short_song_duration(monkeypatch):
+    from api.auto_import import parse_import_candidate
+
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    song = _publish_artifact(
+        repo,
+        file_id="file_short_song",
+        kind="song_audio",
+        filename="short.wav",
+        body=b"wav",
+        content_type="audio/wav",
+    )
+    song_manifest = repo.load_file_manifest(FileRef(user_id="user_123", file_id=song["file_id"]))
+    repo.save_file_manifest(
+        song_manifest.model_copy(update={"tags": ["auto_import", "collection:shorts"]})
+    )
+    _complete_analysis_run(
+        repo,
+        run_id=repo.create_run(
+            user_id="user_123",
+            workflow_type="music_analysis",
+            inputs={"audio_file_id": song["file_id"], "audio_version_id": song["version_id"]},
+            steps=["analyze_music", "publish_analysis"],
+        ).run_id,
+        file_id="file_short_music_analysis",
+        kind="music_analysis",
+        filename="short.json",
+        file_key="music_analysis_file_id",
+        version_key="music_analysis_version_id",
+        body=json.dumps({"source": {"duration_sec": 20.0}}).encode("utf-8"),
+    )
+    candidate = parse_import_candidate(
+        bucket="eclypte",
+        key="incoming/collections/shorts/videos/source.mp4",
+        etag="etag-video",
+        size_bytes=9,
+    )
+    store.put_bytes(candidate.source_key, b"raw-video", content_type="video/mp4")
+    import_run = repo.create_run(
+        user_id="user_123",
+        workflow_type="bucket_import",
+        inputs=candidate.run_inputs(),
+        steps=["normalize_media", "publish_asset", "analyze_asset", "create_auto_draft"],
+    )
+    auto_draft_calls = []
+    monkeypatch.setattr(
+        "api.workflows._normalize_imported_media",
+        lambda repo, candidate, progress_context=None: b"normalized-mp4",
+    )
+
+    def run_video_analysis(**kwargs):
+        _complete_analysis_run(
+            repo,
+            run_id=kwargs["run_id"],
+            file_id=f"file_video_analysis_{kwargs['run_id']}",
+            kind="video_analysis",
+            filename="source.json",
+            file_key="video_analysis_file_id",
+            version_key="video_analysis_version_id",
+        )
+
+    def run_auto_draft(**kwargs):
+        auto_draft_calls.append(kwargs)
+
+    monkeypatch.setattr(runner, "run_video_analysis", run_video_analysis)
+    monkeypatch.setattr(runner, "run_auto_draft", run_auto_draft)
+
+    runner.run_bucket_import(
+        user_id="user_123",
+        run_id=import_run.run_id,
+        candidate=candidate.model_dump(),
+    )
+
+    completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=import_run.run_id))
+    draft = repo.load_run_manifest(
+        RunRef(user_id="user_123", run_id=completed.outputs["auto_draft_run_id"])
+    )
+    assert draft.inputs["audio_end_sec"] == "20.000"
+
+
+def test_run_auto_draft_clamps_export_to_short_song_duration(monkeypatch):
+    repo = StorageRepository(InMemoryObjectStore())
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    song = _publish_artifact(
+        repo,
+        file_id="file_short_song",
+        kind="song_audio",
+        filename="short.wav",
+        body=b"wav",
+        content_type="audio/wav",
+    )
+    video = _publish_artifact(
+        repo,
+        file_id="file_video",
+        kind="source_video",
+        filename="source.mp4",
+        body=b"mp4",
+        content_type="video/mp4",
+    )
+    _complete_analysis_run(
+        repo,
+        run_id=repo.create_run(
+            user_id="user_123",
+            workflow_type="music_analysis",
+            inputs={"audio_file_id": song["file_id"], "audio_version_id": song["version_id"]},
+            steps=["analyze_music", "publish_analysis"],
+        ).run_id,
+        file_id="file_short_music_analysis",
+        kind="music_analysis",
+        filename="short.json",
+        file_key="music_analysis_file_id",
+        version_key="music_analysis_version_id",
+        body=json.dumps({"source": {"duration_sec": 20.0}}).encode("utf-8"),
+    )
+    captured = {}
+
+    def run_edit_pipeline(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(runner, "run_edit_pipeline", run_edit_pipeline)
+
+    runner.run_auto_draft(
+        user_id="user_123",
+        run_id="run_auto",
+        audio=song,
+        source_video=video,
+        collection_slug="shorts",
+    )
+
+    assert captured["export_options"]["audio_end_sec"] == 20.0
 
 
 def test_bucket_import_skips_duplicate_auto_draft_pair(monkeypatch):

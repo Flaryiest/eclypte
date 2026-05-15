@@ -1,0 +1,12 @@
+{
+  "name": "eclypte-r2-import-forwarder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "deploy": "npx wrangler deploy",
+    "dev": "npx wrangler dev",
+    "tail": "npx wrangler tail"
+  }
+}

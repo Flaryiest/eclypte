@@ -322,7 +322,7 @@ class DefaultWorkflowRunner:
         if _auto_draft_pair_exists(runs, audio, source_video):
             return None
 
-        export_options = resolve_export_options(AUTO_DRAFT_EXPORT_OPTIONS)
+        export_options = _auto_draft_export_options(repo, user_id, audio)
         title = f"Auto draft {collection_slug}"
         run = self._create_child_run(
             repo,
@@ -357,7 +357,7 @@ class DefaultWorkflowRunner:
         user_id = kwargs["user_id"]
         run_id = kwargs["run_id"]
         collection_slug = kwargs.get("collection_slug", "")
-        export_options = resolve_export_options(AUTO_DRAFT_EXPORT_OPTIONS)
+        export_options = _auto_draft_export_options(repo, user_id, kwargs["audio"])
         self.run_edit_pipeline(
             user_id=user_id,
             run_id=run_id,
@@ -1482,6 +1482,54 @@ def _auto_draft_within_limits(runs) -> bool:
         and run.archived_at is None
     )
     return daily_auto_drafts < max_daily
+
+
+def _auto_draft_export_options(
+    repo: StorageRepository,
+    user_id: str,
+    audio: dict[str, str],
+):
+    options = dict(AUTO_DRAFT_EXPORT_OPTIONS)
+    duration_sec = _completed_music_analysis_duration_sec(
+        repo=repo,
+        user_id=user_id,
+        audio_version_id=audio["version_id"],
+    )
+    if duration_sec is not None and duration_sec > 0:
+        options["audio_end_sec"] = min(float(options["audio_end_sec"]), duration_sec)
+    return resolve_export_options(options)
+
+
+def _completed_music_analysis_duration_sec(
+    *,
+    repo: StorageRepository,
+    user_id: str,
+    audio_version_id: str,
+) -> float | None:
+    analysis = _find_completed_analysis(
+        repo=repo,
+        user_id=user_id,
+        workflow_type="music_analysis",
+        input_key="audio_version_id",
+        input_version_id=audio_version_id,
+        file_key="music_analysis_file_id",
+        version_key="music_analysis_version_id",
+        youtube_audio_version_id=audio_version_id,
+    )
+    if analysis is None:
+        return None
+    try:
+        payload = _read_json_version(
+            repo,
+            FileVersionRef(
+                user_id=user_id,
+                file_id=analysis["file_id"],
+                version_id=analysis["version_id"],
+            ),
+        )
+        return float(payload.get("source", {}).get("duration_sec"))
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def _normalize_imported_media(

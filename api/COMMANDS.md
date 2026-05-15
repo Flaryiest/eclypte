@@ -164,6 +164,35 @@ export ECLYPTE_AUTO_DRAFT_MAX_ACTIVE="1"
 export ECLYPTE_AUTO_DRAFT_MAX_DAILY="3"
 ```
 
+Cloudflare R2 import Worker:
+
+```powershell
+cd workers/r2-import-forwarder
+npm test
+npx wrangler secret put ECLYPTE_INTERNAL_TOKEN
+npm run deploy
+npx wrangler r2 bucket notification create eclypte `
+  --event-type object-create `
+  --queue eclypte-import-events `
+  --prefix "incoming/collections/"
+```
+
+```bash
+cd workers/r2-import-forwarder
+npm test
+npx wrangler secret put ECLYPTE_INTERNAL_TOKEN
+npm run deploy
+npx wrangler r2 bucket notification create eclypte \
+  --event-type object-create \
+  --queue eclypte-import-events \
+  --prefix "incoming/collections/"
+```
+
+`workers/r2-import-forwarder/wrangler.jsonc` currently points at
+`https://api-production-8fb8.up.railway.app`. The Worker's
+`ECLYPTE_INTERNAL_TOKEN` secret must match the API service's
+`ECLYPTE_INTERNAL_PROGRESS_TOKEN`.
+
 Deploy the new R2-aware Modal wrappers before using video-analysis/render API
 jobs against live Modal:
 

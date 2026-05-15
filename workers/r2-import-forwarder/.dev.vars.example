@@ -1,0 +1,4 @@
+ECLYPTE_API_BASE_URL=https://api-production-8fb8.up.railway.app
+ECLYPTE_INTERNAL_TOKEN=<same-as-railway-ECLYPTE_INTERNAL_PROGRESS_TOKEN>
+# Optional single-user private lab routing:
+# ECLYPTE_USER_ID=<clerk-user-id>

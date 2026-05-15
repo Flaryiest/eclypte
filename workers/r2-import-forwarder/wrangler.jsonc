@@ -1,0 +1,19 @@
+{
+  "name": "eclypte-r2-import-forwarder",
+  "main": "src/index.js",
+  "compatibility_date": "2026-05-15",
+  "workers_dev": true,
+  "queues": {
+    "consumers": [
+      {
+        "queue": "eclypte-import-events",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 5
+      }
+    ]
+  },
+  "vars": {
+    "ECLYPTE_API_BASE_URL": "https://api-production-8fb8.up.railway.app"
+  }
+}
