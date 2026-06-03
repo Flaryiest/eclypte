@@ -1025,6 +1025,70 @@ def test_run_auto_draft_clamps_export_to_short_song_duration(monkeypatch):
     assert captured["export_options"]["audio_end_sec"] == 20.0
 
 
+def test_run_auto_draft_creates_publish_package_for_completed_render(monkeypatch):
+    repo = StorageRepository(InMemoryObjectStore())
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    song = _publish_artifact(
+        repo,
+        file_id="file_song",
+        kind="song_audio",
+        filename="song.wav",
+        body=b"wav",
+        content_type="audio/wav",
+    )
+    video = _publish_artifact(
+        repo,
+        file_id="file_video",
+        kind="source_video",
+        filename="source.mp4",
+        body=b"mp4",
+        content_type="video/mp4",
+    )
+    parent = repo.create_run(
+        user_id="user_123",
+        workflow_type="auto_draft",
+        inputs={},
+        steps=["assets", "music", "video", "timeline", "render", "result"],
+    )
+
+    def run_edit_pipeline(**kwargs):
+        render = _publish_artifact(
+            repo,
+            file_id="file_render_auto",
+            kind="render_output",
+            filename="auto.mp4",
+            body=b"render",
+            content_type="video/mp4",
+        )
+        repo.update_run_status(
+            RunRef(user_id="user_123", run_id=kwargs["run_id"]),
+            status="completed",
+            current_step=None,
+            outputs={
+                "render_output_file_id": render["file_id"],
+                "render_output_version_id": render["version_id"],
+            },
+        )
+
+    monkeypatch.setattr(runner, "run_edit_pipeline", run_edit_pipeline)
+
+    runner.run_auto_draft(
+        user_id="user_123",
+        run_id=parent.run_id,
+        audio=song,
+        source_video=video,
+        collection_slug="mario",
+    )
+
+    posts = repo.list_publishing_posts("user_123")
+    assert len(posts) == 1
+    assert posts[0].status == "ready"
+    assert posts[0].render_file_id == "file_render_auto"
+    assert posts[0].collection_slug == "mario"
+    assert "#mario" in posts[0].hashtags
+
+
 def test_auto_draft_timeline_falls_back_when_agent_timeline_is_too_short(monkeypatch):
     repo = StorageRepository(InMemoryObjectStore())
     runner = DefaultWorkflowRunner()

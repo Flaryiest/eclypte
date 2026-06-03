@@ -564,7 +564,8 @@
 .activeStage .stageDot,
 .analyzing .badgeDot,
 .running .badgeDot,
-.queued .badgeDot {
+.queued .badgeDot,
+.scheduled .badgeDot {
 	background: var(--ec-ember);
 	box-shadow: 0 0 0 3px var(--ec-ember-soft);
 }
@@ -574,7 +575,8 @@
 .completed .badgeDot,
 .available .badgeDot,
 .approved .badgeDot,
-.imported .badgeDot {
+.imported .badgeDot,
+.published .badgeDot {
 	background: var(--ec-sage);
 	box-shadow: 0 0 0 3px var(--ec-sage-soft);
 }

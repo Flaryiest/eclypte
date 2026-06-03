@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useUser } from "@clerk/nextjs"
-import { Download, Eye, RefreshCw } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { Download, Eye, RefreshCw, Send } from "lucide-react"
 import {
     DashboardPage,
     StatusBadge,
@@ -18,6 +19,7 @@ type Preview = { asset: AssetSummary; url: string }
 
 export default function AutomationPage() {
     const { isLoaded, isSignedIn, user } = useUser()
+    const router = useRouter()
     const [imports, setImports] = useState<RunSummary[]>([])
     const [drafts, setDrafts] = useState<RunSummary[]>([])
     const [renders, setRenders] = useState<AssetSummary[]>([])
@@ -26,6 +28,7 @@ export default function AutomationPage() {
     const [error, setError] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState(false)
     const [downloadingId, setDownloadingId] = useState<string | null>(null)
+    const [publishingId, setPublishingId] = useState<string | null>(null)
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
     const hasActiveRuns = imports.some(isRunActive) || drafts.some(isRunActive)
@@ -153,6 +156,30 @@ export default function AutomationPage() {
         }
     }
 
+    const preparePost = async (asset: AssetSummary) => {
+        if (!api) {
+            return
+        }
+        const ref = versionRef(asset)
+        if (!ref) {
+            setError("Draft render has no current version.")
+            return
+        }
+        setPublishingId(asset.file_id)
+        setError(null)
+        try {
+            await api.createPublishingPost({
+                renderOutput: ref,
+                collectionSlug: collectionFromTags(asset.tags),
+            })
+            router.push("/dashboard/publish")
+        } catch (caught) {
+            setError(errorMessage(caught))
+        } finally {
+            setPublishingId(null)
+        }
+    }
+
     if (!isLoaded) {
         return <DashboardPage eyebrow="Automation" title="Loading automation"><div /></DashboardPage>
     }
@@ -214,6 +241,14 @@ export default function AutomationPage() {
                             disabled={downloadingId === preview.asset.file_id}
                         >
                             <Download size={16} /> {downloadingId === preview.asset.file_id ? "Downloading" : "Download"}
+                        </button>
+                        <button
+                            className={styles.secondaryButton}
+                            type="button"
+                            onClick={() => preparePost(preview.asset)}
+                            disabled={publishingId === preview.asset.file_id}
+                        >
+                            <Send size={16} /> {publishingId === preview.asset.file_id ? "Preparing" : "Prepare post"}
                         </button>
                     </div>
                 </div>

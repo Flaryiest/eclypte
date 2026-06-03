@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import os
 import secrets
+from datetime import datetime, timezone
 from typing import Literal
 from urllib.parse import urlparse
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, Response, status
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -27,6 +28,16 @@ from api.storage.factory import (
 from api.prototyping.edit.synthesis.system_prompt import (
     SYSTEM_PROMPT as DEFAULT_SYNTHESIS_PROMPT,
 )
+from api.publishing import (
+    BufferClient,
+    BufferClientError,
+    BufferChannelStatus,
+    create_publish_post_for_render,
+    format_post_text,
+    generate_caption_draft,
+    prepare_public_media_copy,
+    queue_status_for_mode,
+)
 from api.storage.models import (
     ArtifactKind,
     ContentCandidateRecord,
@@ -34,6 +45,8 @@ from api.storage.models import (
     ContentMediaType,
     FileManifest,
     FileVersionMeta,
+    PublishingPostRecord,
+    PublishingPostStatus,
     RunEvent,
     RunManifest,
     RunStatus,
@@ -176,6 +189,43 @@ class ContentRadarDiscoveryRequest(BaseModel):
     max_pages: int = Field(default=1, ge=1, le=3)
 
 
+class PublishingPostCreateRequest(BaseModel):
+    render_output: FileVersionInput
+    collection_slug: str = ""
+
+
+class PublishingPostUpdateRequest(BaseModel):
+    caption: str | None = None
+    hashtags: list[str] | None = None
+    notes: str | None = None
+    scheduled_at: str | None = None
+
+
+class PublishingPostSendRequest(BaseModel):
+    mode: Literal["queue", "schedule"] = "queue"
+    scheduled_at: str | None = None
+
+
+class PublishingBufferChannelStatus(BaseModel):
+    id: str
+    name: str | None = None
+    service: str | None = None
+    display_name: str | None = None
+    is_disconnected: bool | None = None
+    is_locked: bool | None = None
+    external_link: str | None = None
+    last_error: str | None = None
+
+
+class PublishingConfigResponse(BaseModel):
+    buffer_api_key_configured: bool
+    buffer_channel_id_configured: bool
+    public_media_base_url_configured: bool
+    openai_api_key_configured: bool
+    caption_model: str
+    buffer_channel: PublishingBufferChannelStatus | None = None
+
+
 class EditJobStage(BaseModel):
     id: str
     label: str
@@ -248,12 +298,29 @@ def is_youtube_url(url: str) -> bool:
     )
 
 
+def utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
+def _optional_bool(value: object) -> bool | None:
+    if value is None:
+        return None
+    return bool(value)
+
+
 def create_app(
     *,
     store: ObjectStore | None = None,
     run_store: RunStore | None = None,
     run_broadcaster: RunUpdateBroadcaster | None = None,
     workflow_runner: WorkflowRunner | None = None,
+    buffer_client: BufferClient | None = None,
     cors_origins: list[str] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Eclypte API", version="1.0.0")
@@ -297,6 +364,62 @@ def create_app(
                 detail="run streaming is not configured",
             )
         return selected_broadcaster
+
+    def resolve_buffer_client() -> BufferClient:
+        if buffer_client is not None:
+            return buffer_client
+        try:
+            return BufferClient.from_env()
+        except BufferClientError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    def resolve_buffer_channel_id() -> str:
+        channel_id = os.environ.get("BUFFER_INSTAGRAM_CHANNEL_ID")
+        if not channel_id:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="BUFFER_INSTAGRAM_CHANNEL_ID is not configured",
+            )
+        return channel_id
+
+    def resolve_public_media_base_url() -> str:
+        base_url = os.environ.get("ECLYPTE_R2_PUBLIC_BASE_URL")
+        if not base_url:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="ECLYPTE_R2_PUBLIC_BASE_URL is not configured",
+            )
+        return base_url
+
+    def channel_status_response(
+        channel: object,
+        *,
+        fallback_id: str,
+        last_error: str | None = None,
+    ) -> PublishingBufferChannelStatus:
+        if isinstance(channel, BufferChannelStatus):
+            return PublishingBufferChannelStatus(
+                id=channel.id,
+                name=channel.name,
+                service=channel.service,
+                display_name=channel.display_name,
+                is_disconnected=channel.is_disconnected,
+                is_locked=channel.is_locked,
+                external_link=channel.external_link,
+                last_error=last_error or channel.last_error,
+            )
+        if isinstance(channel, dict):
+            return PublishingBufferChannelStatus(
+                id=str(channel.get("id") or fallback_id),
+                name=_optional_string(channel.get("name")),
+                service=_optional_string(channel.get("service")),
+                display_name=_optional_string(channel.get("display_name") or channel.get("displayName")),
+                is_disconnected=_optional_bool(channel.get("is_disconnected") if "is_disconnected" in channel else channel.get("isDisconnected")),
+                is_locked=_optional_bool(channel.get("is_locked") if "is_locked" in channel else channel.get("isLocked")),
+                external_link=_optional_string(channel.get("external_link") or channel.get("externalLink")),
+                last_error=last_error or _optional_string(channel.get("last_error")),
+            )
+        return PublishingBufferChannelStatus(id=fallback_id, last_error=last_error)
 
     def user_id(x_user_id: str | None = Header(default=None)) -> str:
         return x_user_id or get_default_user_id()
@@ -385,6 +508,16 @@ def create_app(
             return repo.load_content_candidate(user_id=uid, candidate_id=candidate_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="content candidate not found") from exc
+
+    def publishing_post_or_404(
+        repo: StorageRepository,
+        uid: str,
+        post_id: str,
+    ) -> PublishingPostRecord:
+        try:
+            return repo.load_publishing_post(user_id=uid, post_id=post_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="publishing post not found") from exc
 
     def edit_status_from_run(
         repo: StorageRepository,
@@ -948,6 +1081,188 @@ def create_app(
                 expires_in=DOWNLOAD_URL_EXPIRES_IN,
             ),
             expires_in=DOWNLOAD_URL_EXPIRES_IN,
+        )
+
+    @app.get("/v1/publishing/config", response_model=PublishingConfigResponse)
+    def get_publishing_config() -> PublishingConfigResponse:
+        channel_id = os.environ.get("BUFFER_INSTAGRAM_CHANNEL_ID", "")
+        channel: PublishingBufferChannelStatus | None = None
+        if channel_id:
+            try:
+                channel = channel_status_response(
+                    resolve_buffer_client().get_channel(channel_id=channel_id),
+                    fallback_id=channel_id,
+                )
+            except HTTPException as exc:
+                channel = PublishingBufferChannelStatus(id=channel_id, last_error=str(exc.detail))
+            except BufferClientError as exc:
+                channel = PublishingBufferChannelStatus(id=channel_id, last_error=str(exc))
+        return PublishingConfigResponse(
+            buffer_api_key_configured=bool(os.environ.get("BUFFER_API_KEY")),
+            buffer_channel_id_configured=bool(channel_id),
+            public_media_base_url_configured=bool(os.environ.get("ECLYPTE_R2_PUBLIC_BASE_URL")),
+            openai_api_key_configured=bool(os.environ.get("OPENAI_API_KEY")),
+            caption_model=os.environ.get("ECLYPTE_CAPTION_MODEL", "gpt-5.4-mini"),
+            buffer_channel=channel,
+        )
+
+    @app.get("/v1/publishing/posts", response_model=list[PublishingPostRecord])
+    def list_publishing_posts(
+        status_filter: PublishingPostStatus | None = Query(default=None, alias="status"),
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> list[PublishingPostRecord]:
+        return repo.list_publishing_posts(uid, status=status_filter)
+
+    @app.post(
+        "/v1/publishing/posts",
+        response_model=PublishingPostRecord,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_publishing_post(
+        request: PublishingPostCreateRequest,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> PublishingPostRecord:
+        load_version(repo, uid, request.render_output, "render_output")
+        return create_publish_post_for_render(
+            repo,
+            user_id=uid,
+            render_output=request.render_output.model_dump(),
+            collection_slug=request.collection_slug,
+            auto_created=False,
+        )
+
+    @app.patch("/v1/publishing/posts/{post_id}", response_model=PublishingPostRecord)
+    def update_publishing_post(
+        post_id: str,
+        request: PublishingPostUpdateRequest,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> PublishingPostRecord:
+        post = publishing_post_or_404(repo, uid, post_id)
+        update: dict[str, object] = {
+            "updated_at": utc_now(),
+            "last_error": None if post.status == "failed" else post.last_error,
+        }
+        if request.caption is not None:
+            update["caption"] = request.caption.strip()
+        if request.hashtags is not None:
+            update["hashtags"] = request.hashtags
+        if request.notes is not None:
+            update["notes"] = request.notes
+        if request.scheduled_at is not None:
+            update["scheduled_at"] = request.scheduled_at
+        if post.status == "failed":
+            update["status"] = "ready"
+        return repo.save_publishing_post(post.model_copy(update=update))
+
+    @app.post(
+        "/v1/publishing/posts/{post_id}/regenerate-caption",
+        response_model=PublishingPostRecord,
+    )
+    def regenerate_publishing_caption(
+        post_id: str,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> PublishingPostRecord:
+        post = publishing_post_or_404(repo, uid, post_id)
+        draft = generate_caption_draft(
+            render_name=post.render_display_name,
+            collection_slug=post.collection_slug,
+        )
+        return repo.save_publishing_post(
+            post.model_copy(
+                update={
+                    "generated_caption": draft.caption,
+                    "caption": draft.caption,
+                    "hashtags": draft.hashtags,
+                    "notes": draft.notes,
+                    "caption_source": draft.caption_source,
+                    "caption_error": draft.caption_error,
+                    "updated_at": utc_now(),
+                    "last_error": None,
+                    "status": "ready" if post.status == "failed" else post.status,
+                }
+            )
+        )
+
+    @app.post(
+        "/v1/publishing/posts/{post_id}/send-buffer",
+        response_model=PublishingPostRecord,
+    )
+    def send_publishing_post_to_buffer(
+        post_id: str,
+        request: PublishingPostSendRequest,
+        repo: StorageRepository = Depends(repository),
+        resolved_store: ObjectStore = Depends(resolve_store),
+        uid: str = Depends(user_id),
+    ) -> PublishingPostRecord:
+        post = publishing_post_or_404(repo, uid, post_id)
+        if post.status == "canceled":
+            raise HTTPException(status_code=400, detail="publishing post is canceled")
+        channel_id = resolve_buffer_channel_id()
+        public_base_url = resolve_public_media_base_url()
+        mode = "customScheduled" if request.mode == "schedule" else "addToQueue"
+        due_at = request.scheduled_at or post.scheduled_at
+        if mode == "customScheduled" and not due_at:
+            raise HTTPException(status_code=400, detail="scheduled_at is required for schedule mode")
+        prepared = prepare_public_media_copy(
+            repo,
+            store=resolved_store,
+            post=post,
+            public_base_url=public_base_url,
+        )
+        client = resolve_buffer_client()
+        try:
+            result = client.create_video_post(
+                channel_id=channel_id,
+                text=format_post_text(prepared.caption, prepared.hashtags),
+                media_url=prepared.public_media_url or "",
+                mode=mode,
+                due_at=due_at,
+            )
+        except BufferClientError as exc:
+            repo.save_publishing_post(
+                prepared.model_copy(
+                    update={
+                        "status": "failed",
+                        "last_error": str(exc),
+                        "updated_at": utc_now(),
+                    }
+                )
+            )
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return repo.save_publishing_post(
+            prepared.model_copy(
+                update={
+                    "status": queue_status_for_mode(mode),
+                    "buffer_channel_id": channel_id,
+                    "buffer_post_id": result.post_id,
+                    "buffer_status": result.status,
+                    "scheduled_at": due_at,
+                    "post_url": result.post_url,
+                    "last_error": None,
+                    "updated_at": utc_now(),
+                }
+            )
+        )
+
+    @app.post("/v1/publishing/posts/{post_id}/cancel", response_model=PublishingPostRecord)
+    def cancel_publishing_post(
+        post_id: str,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> PublishingPostRecord:
+        post = publishing_post_or_404(repo, uid, post_id)
+        return repo.save_publishing_post(
+            post.model_copy(
+                update={
+                    "status": "canceled",
+                    "updated_at": utc_now(),
+                    "last_error": None,
+                }
+            )
         )
 
     @app.post("/v1/music/analyses", response_model=RunManifest, status_code=202)

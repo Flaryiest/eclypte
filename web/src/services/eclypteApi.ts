@@ -91,6 +91,14 @@ export type RunSummary = RunManifest
 
 export type ContentCandidateStatus = "discovered" | "available" | "approved" | "rejected" | "imported"
 export type ContentMediaType = "movie" | "tv"
+export type PublishingPostStatus =
+    | "draft"
+    | "ready"
+    | "queued"
+    | "scheduled"
+    | "published"
+    | "failed"
+    | "canceled"
 
 export type ContentProvider = {
     provider_id: number
@@ -123,6 +131,57 @@ export type ContentCandidate = {
     tmdb_url: string
     created_at: string
     updated_at: string
+}
+
+export type PublishingPost = {
+    post_id: string
+    owner_user_id: string
+    status: PublishingPostStatus
+    render_file_id: string
+    render_version_id: string
+    render_display_name: string
+    collection_slug: string
+    platform: string
+    provider: string
+    generated_caption: string
+    caption: string
+    hashtags: string[]
+    notes: string
+    caption_source: "openai" | "fallback" | string
+    caption_error: string | null
+    public_media_key: string | null
+    public_media_url: string | null
+    buffer_channel_id: string | null
+    buffer_post_id: string | null
+    buffer_status: string | null
+    scheduled_at: string | null
+    posted_at: string | null
+    post_url: string | null
+    last_error: string | null
+    auto_created: boolean
+    source_run_id: string | null
+    created_at: string
+    updated_at: string
+}
+
+export type PublishingBufferChannel = {
+    id: string
+    name: string | null
+    service: string | null
+    display_name: string | null
+    is_disconnected: boolean | null
+    is_locked: boolean | null
+    external_link: string | null
+    last_error: string | null
+}
+
+export type PublishingConfig = {
+    buffer_api_key_configured: boolean
+    buffer_channel_id_configured: boolean
+    public_media_base_url_configured: boolean
+    openai_api_key_configured: boolean
+    caption_model: string
+    buffer_channel: PublishingBufferChannel | null
 }
 
 export type SynthesisReference = {
@@ -350,6 +409,89 @@ export class EclypteApiClient {
     async markContentCandidateImported(candidateId: string, signal?: AbortSignal) {
         return this.request<ContentCandidate>(
             `/v1/content-candidates/${encodeURIComponent(candidateId)}/mark-imported`,
+            { method: "POST", signal },
+        )
+    }
+
+    async listPublishingPosts(
+        filters: { status?: PublishingPostStatus | "queued_scheduled" | "all" } = {},
+        signal?: AbortSignal,
+    ) {
+        const params = new URLSearchParams()
+        if (filters.status && filters.status !== "all" && filters.status !== "queued_scheduled") {
+            params.set("status", filters.status)
+        }
+        const query = params.size ? `?${params.toString()}` : ""
+        const posts = await this.request<PublishingPost[]>(`/v1/publishing/posts${query}`, { signal })
+        if (filters.status === "queued_scheduled") {
+            return posts.filter((post) => post.status === "queued" || post.status === "scheduled")
+        }
+        return posts
+    }
+
+    async getPublishingConfig(signal?: AbortSignal) {
+        return this.request<PublishingConfig>("/v1/publishing/config", { signal })
+    }
+
+    async createPublishingPost(
+        input: { renderOutput: FileVersionInput; collectionSlug?: string },
+        signal?: AbortSignal,
+    ) {
+        return this.request<PublishingPost>("/v1/publishing/posts", {
+            method: "POST",
+            body: JSON.stringify({
+                render_output: input.renderOutput,
+                collection_slug: input.collectionSlug ?? "",
+            }),
+            signal,
+        })
+    }
+
+    async updatePublishingPost(
+        postId: string,
+        input: { caption?: string; hashtags?: string[]; notes?: string; scheduledAt?: string | null },
+        signal?: AbortSignal,
+    ) {
+        return this.request<PublishingPost>(`/v1/publishing/posts/${encodeURIComponent(postId)}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+                caption: input.caption,
+                hashtags: input.hashtags,
+                notes: input.notes,
+                scheduled_at: input.scheduledAt,
+            }),
+            signal,
+        })
+    }
+
+    async regeneratePublishingCaption(postId: string, signal?: AbortSignal) {
+        return this.request<PublishingPost>(
+            `/v1/publishing/posts/${encodeURIComponent(postId)}/regenerate-caption`,
+            { method: "POST", signal },
+        )
+    }
+
+    async sendPublishingPostToBuffer(
+        postId: string,
+        input: { mode: "queue" | "schedule"; scheduledAt?: string | null },
+        signal?: AbortSignal,
+    ) {
+        return this.request<PublishingPost>(
+            `/v1/publishing/posts/${encodeURIComponent(postId)}/send-buffer`,
+            {
+                method: "POST",
+                body: JSON.stringify({
+                    mode: input.mode,
+                    scheduled_at: input.scheduledAt,
+                }),
+                signal,
+            },
+        )
+    }
+
+    async cancelPublishingPost(postId: string, signal?: AbortSignal) {
+        return this.request<PublishingPost>(
+            `/v1/publishing/posts/${encodeURIComponent(postId)}/cancel`,
             { method: "POST", signal },
         )
     }

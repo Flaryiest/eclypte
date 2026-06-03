@@ -152,6 +152,8 @@ Routes:
 - `POST /v1/music/analyses`, `POST /v1/video/analyses`, `POST /v1/timelines`, and `POST /v1/renders` create run manifests and schedule background work.
 - `POST /v1/content-radar/discover` creates a `content_radar_discovery` run that pulls TMDb candidates, filters by watch-provider availability, and stores review records.
 - `GET /v1/content-candidates` lists TMDb movie/TV candidates; `POST /v1/content-candidates/{candidate_id}/approve`, `/reject`, and `/mark-imported` update review state.
+- `GET /v1/publishing/config` reports non-secret Buffer/OpenAI/public-media setup.
+- `GET /v1/publishing/posts`, `POST /v1/publishing/posts`, `PATCH /v1/publishing/posts/{post_id}`, `POST /v1/publishing/posts/{post_id}/regenerate-caption`, `POST /v1/publishing/posts/{post_id}/send-buffer`, and `POST /v1/publishing/posts/{post_id}/cancel` manage review-gated Buffer publishing packages.
 - `GET /v1/runs/{run_id}` and `GET /v1/runs/{run_id}/events` inspect workflow status.
 - `GET /v1/runs/stream` and `GET /v1/runs/{run_id}/stream` stream Redis-backed run updates when `REDIS_URL` is configured.
 - `POST /internal/progress` records worker progress and requires `X-Eclypte-Internal-Token`.
@@ -173,6 +175,41 @@ export ECLYPTE_AUTO_IMPORT_MAX_ACTIVE="2"
 export ECLYPTE_AUTO_DRAFT_MAX_ACTIVE="1"
 export ECLYPTE_AUTO_DRAFT_MAX_DAILY="3"
 ```
+
+Buffer publishing environment:
+
+```powershell
+$env:BUFFER_API_KEY="..."
+$env:BUFFER_INSTAGRAM_CHANNEL_ID="..."
+$env:ECLYPTE_R2_PUBLIC_BASE_URL="https://media.example.com"
+$env:OPENAI_API_KEY="..."
+$env:ECLYPTE_CAPTION_MODEL="gpt-5.4-mini"
+```
+
+```bash
+export BUFFER_API_KEY="..."
+export BUFFER_INSTAGRAM_CHANNEL_ID="..."
+export ECLYPTE_R2_PUBLIC_BASE_URL="https://media.example.com"
+export OPENAI_API_KEY="..."
+export ECLYPTE_CAPTION_MODEL="gpt-5.4-mini"
+```
+
+Publishing smoke:
+
+```powershell
+Invoke-RestMethod `
+  -Uri "http://127.0.0.1:8000/v1/publishing/config" `
+  -Headers @{"X-User-Id"="local_dev"}
+```
+
+```bash
+curl -H "X-User-Id: local_dev" \
+  http://127.0.0.1:8000/v1/publishing/config
+```
+
+`/dashboard/publish` is review-gated. Auto-drafts create editable publishing
+packages, but public R2 copies under `public/publishing/` and Buffer posts are
+created only when a user queues or schedules a package.
 
 Cloudflare R2 import Worker:
 

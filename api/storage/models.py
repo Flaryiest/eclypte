@@ -19,6 +19,15 @@ SynthesisReferenceStatus = Literal["queued", "running", "completed", "failed"]
 ContentCandidateStatus = Literal["discovered", "available", "approved", "rejected", "imported"]
 ContentMediaType = Literal["movie", "tv"]
 ContentProviderType = Literal["flatrate", "free", "ads", "rent", "buy"]
+PublishingPostStatus = Literal[
+    "draft",
+    "ready",
+    "queued",
+    "scheduled",
+    "published",
+    "failed",
+    "canceled",
+]
 
 
 class DerivedFrom(BaseModel):
@@ -167,6 +176,39 @@ class ContentCandidateRecord(BaseModel):
     providers: list[ContentProvider] = Field(default_factory=list)
     score: float = 0.0
     tmdb_url: str
+    created_at: str
+    updated_at: str
+
+
+class PublishingPostRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    post_id: str
+    owner_user_id: str
+    status: PublishingPostStatus
+    render_file_id: str
+    render_version_id: str
+    render_display_name: str
+    collection_slug: str = ""
+    platform: str = "instagram"
+    provider: str = "buffer"
+    generated_caption: str = ""
+    caption: str = ""
+    hashtags: list[str] = Field(default_factory=list)
+    notes: str = ""
+    caption_source: str = "fallback"
+    caption_error: str | None = None
+    public_media_key: str | None = None
+    public_media_url: str | None = None
+    buffer_channel_id: str | None = None
+    buffer_post_id: str | None = None
+    buffer_status: str | None = None
+    scheduled_at: str | None = None
+    posted_at: str | None = None
+    post_url: str | None = None
+    last_error: str | None = None
+    auto_created: bool = False
+    source_run_id: str | None = None
     created_at: str
     updated_at: str
 

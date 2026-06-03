@@ -22,6 +22,7 @@ from api.youtube_download import (
 from api.prototyping.edit.synthesis.system_prompt import (
     SYSTEM_PROMPT as DEFAULT_SYNTHESIS_PROMPT,
 )
+from api.publishing import create_publish_post_for_render
 from api.storage.config import R2Config
 from api.storage.factory import get_storage_repository, load_storage_env
 from api.storage.refs import FileRef, FileVersionRef, RunRef
@@ -410,6 +411,15 @@ class DefaultWorkflowRunner:
             manifest = repo.load_file_manifest(file_ref)
             tags = list(dict.fromkeys([*manifest.tags, "auto_draft", f"collection:{collection_slug}"]))
             repo.save_file_manifest(manifest.model_copy(update={"tags": tags}))
+            version_id = completed.outputs.get("render_output_version_id")
+            if version_id:
+                create_publish_post_for_render(
+                    repo,
+                    user_id=user_id,
+                    render_output={"file_id": file_id, "version_id": version_id},
+                    collection_slug=collection_slug,
+                    auto_created=True,
+                )
         except KeyError:
             return
 

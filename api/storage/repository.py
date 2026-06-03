@@ -7,6 +7,8 @@ from typing import Any
 from .keys import (
     content_candidate_key,
     content_candidate_prefix,
+    publishing_post_key,
+    publishing_post_prefix,
     synthesis_prompt_state_key,
     synthesis_prompt_version_key,
     synthesis_prompt_version_prefix,
@@ -21,6 +23,8 @@ from .models import (
     DerivedFrom,
     FileManifest,
     FileVersionMeta,
+    PublishingPostRecord,
+    PublishingPostStatus,
     RunEvent,
     RunManifest,
     RunStatus,
@@ -791,6 +795,56 @@ class StorageRepository:
                 }
             )
         )
+
+    def save_publishing_post(
+        self,
+        record: PublishingPostRecord,
+    ) -> PublishingPostRecord:
+        self._store.put_json(
+            publishing_post_key(user_id=record.owner_user_id, post_id=record.post_id),
+            record.model_dump(mode="json"),
+        )
+        return record
+
+    def load_publishing_post(
+        self,
+        *,
+        user_id: str,
+        post_id: str,
+    ) -> PublishingPostRecord:
+        return PublishingPostRecord.model_validate(
+            self._store.get_json(publishing_post_key(user_id=user_id, post_id=post_id))
+        )
+
+    def list_publishing_posts(
+        self,
+        user_id: str,
+        *,
+        status: PublishingPostStatus | None = None,
+    ) -> list[PublishingPostRecord]:
+        keys = self._store.list_keys(publishing_post_prefix(user_id=user_id))
+        records = [
+            PublishingPostRecord.model_validate(self._store.get_json(key))
+            for key in keys
+        ]
+        if status is not None:
+            records = [record for record in records if record.status == status]
+        return sorted(records, key=lambda item: item.updated_at, reverse=True)
+
+    def find_publishing_post_for_render(
+        self,
+        *,
+        user_id: str,
+        render_file_id: str,
+        render_version_id: str,
+    ) -> PublishingPostRecord | None:
+        for record in self.list_publishing_posts(user_id):
+            if (
+                record.render_file_id == render_file_id
+                and record.render_version_id == render_version_id
+            ):
+                return record
+        return None
 
     def default_synthesis_prompt_version(
         self,

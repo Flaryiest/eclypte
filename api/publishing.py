@@ -1,0 +1,487 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+import json
+import os
+import re
+from typing import Any, Literal
+from urllib import request as urlrequest
+from urllib.error import HTTPError, URLError
+
+from api.storage.models import PublishingPostRecord
+from api.storage.r2_client import ObjectStore
+from api.storage.refs import FileRef, FileVersionRef
+from api.storage.repository import StorageRepository
+
+BufferShareMode = Literal["addToQueue", "customScheduled"]
+
+
+@dataclass(frozen=True)
+class CaptionDraft:
+    caption: str
+    hashtags: list[str]
+    notes: str = ""
+    caption_source: str = "fallback"
+    caption_error: str | None = None
+
+
+@dataclass(frozen=True)
+class BufferPostResult:
+    post_id: str
+    status: str | None = None
+    post_url: str | None = None
+
+
+@dataclass(frozen=True)
+class BufferChannelStatus:
+    id: str
+    name: str | None = None
+    service: str | None = None
+    display_name: str | None = None
+    is_disconnected: bool | None = None
+    is_locked: bool | None = None
+    external_link: str | None = None
+    last_error: str | None = None
+
+
+class BufferClientError(RuntimeError):
+    pass
+
+
+class BufferClient:
+    def __init__(self, *, api_key: str, api_url: str = "https://api.buffer.com"):
+        self._api_key = api_key
+        self._api_url = api_url
+
+    @classmethod
+    def from_env(cls) -> "BufferClient":
+        api_key = os.environ.get("BUFFER_API_KEY")
+        if not api_key:
+            raise BufferClientError("BUFFER_API_KEY is not configured")
+        return cls(api_key=api_key, api_url=os.environ.get("BUFFER_API_URL", "https://api.buffer.com"))
+
+    def create_video_post(
+        self,
+        *,
+        channel_id: str,
+        text: str,
+        media_url: str,
+        mode: BufferShareMode,
+        due_at: str | None = None,
+    ) -> BufferPostResult:
+        payload = build_buffer_create_post_payload(
+            channel_id=channel_id,
+            text=text,
+            media_url=media_url,
+            mode=mode,
+            due_at=due_at,
+        )
+        response = self._graphql(payload)
+        if response.get("errors"):
+            raise BufferClientError(_first_error_message(response["errors"]))
+        result = response.get("data", {}).get("createPost")
+        if not isinstance(result, dict):
+            raise BufferClientError("Buffer did not return a createPost result")
+        if result.get("message"):
+            raise BufferClientError(str(result["message"]))
+        post = result.get("post")
+        if not isinstance(post, dict) or not post.get("id"):
+            raise BufferClientError("Buffer did not return a post id")
+        return BufferPostResult(
+            post_id=str(post["id"]),
+            status=str(post["status"]) if post.get("status") is not None else None,
+            post_url=str(post["url"]) if post.get("url") else None,
+        )
+
+    def get_channel(self, *, channel_id: str) -> BufferChannelStatus:
+        response = self._graphql(build_buffer_channel_payload(channel_id=channel_id))
+        if response.get("errors"):
+            raise BufferClientError(_first_error_message(response["errors"]))
+        channel = response.get("data", {}).get("channel")
+        if not isinstance(channel, dict):
+            raise BufferClientError("Buffer did not return a channel")
+        return BufferChannelStatus(
+            id=str(channel.get("id") or channel_id),
+            name=_optional_str(channel.get("name")),
+            service=_optional_str(channel.get("service")),
+            display_name=_optional_str(channel.get("displayName")),
+            is_disconnected=_optional_bool(channel.get("isDisconnected")),
+            is_locked=_optional_bool(channel.get("isLocked")),
+            external_link=_optional_str(channel.get("externalLink")),
+        )
+
+    def _graphql(self, payload: dict[str, Any]) -> dict[str, Any]:
+        body = json.dumps(payload).encode("utf-8")
+        request = urlrequest.Request(
+            self._api_url,
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+        )
+        try:
+            with urlrequest.urlopen(request, timeout=30) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise BufferClientError(f"Buffer HTTP {exc.code}: {detail}") from exc
+        except (URLError, TimeoutError) as exc:
+            raise BufferClientError(f"Buffer request failed: {exc}") from exc
+
+
+def build_buffer_create_post_payload(
+    *,
+    channel_id: str,
+    text: str,
+    media_url: str,
+    mode: BufferShareMode,
+    due_at: str | None = None,
+) -> dict[str, Any]:
+    input_payload: dict[str, Any] = {
+        "text": text,
+        "channelId": channel_id,
+        "schedulingType": "automatic",
+        "mode": mode,
+        "assets": [{"video": {"url": media_url}}],
+    }
+    if due_at:
+        input_payload["dueAt"] = due_at
+    return {
+        "query": """
+            mutation CreatePost($input: CreatePostInput!) {
+              createPost(input: $input) {
+                ... on PostActionSuccess {
+                  post {
+                    id
+                    status
+                    dueAt
+                    text
+                    channelId
+                    assets {
+                      source
+                    }
+                  }
+                }
+                ... on MutationError {
+                  message
+                }
+              }
+            }
+        """,
+        "variables": {"input": input_payload},
+    }
+
+
+def build_buffer_channel_payload(*, channel_id: str) -> dict[str, Any]:
+    return {
+        "query": """
+            query Channel($input: ChannelInput!) {
+              channel(input: $input) {
+                id
+                name
+                service
+                displayName
+                isDisconnected
+                isLocked
+                externalLink
+              }
+            }
+        """,
+        "variables": {"input": {"id": channel_id}},
+    }
+
+
+def generate_caption_draft(
+    *,
+    render_name: str,
+    collection_slug: str = "",
+    openai_client: Any | None = None,
+    model: str | None = None,
+) -> CaptionDraft:
+    fallback = _fallback_caption_draft(render_name=render_name, collection_slug=collection_slug)
+    try:
+        client = openai_client or _openai_client_from_env()
+        if client is None:
+            return fallback
+        payload = _openai_caption_draft(
+            client=client,
+            render_name=render_name,
+            collection_slug=collection_slug,
+            model=model or os.environ.get("ECLYPTE_CAPTION_MODEL", "gpt-5.4-mini"),
+        )
+        if not payload.caption.strip():
+            raise ValueError("caption model returned an empty caption")
+        return payload
+    except Exception as exc:
+        return CaptionDraft(
+            caption=fallback.caption,
+            hashtags=fallback.hashtags,
+            notes=fallback.notes,
+            caption_source="fallback",
+            caption_error=str(exc),
+        )
+
+
+def _fallback_caption_draft(
+    *,
+    render_name: str,
+    collection_slug: str = "",
+) -> CaptionDraft:
+    collection_label = _humanize(collection_slug) if collection_slug else "this edit"
+    hook = f"{collection_label} hit different on this drop."
+    caption = f"{hook}\n\nPrivate Eclypte draft, ready for the timeline."
+    hashtags = _dedupe_hashtags(
+        [
+            "#amv",
+            "#edit",
+            "#animeedit",
+            "#reels",
+            _hashtag(collection_slug) if collection_slug else "",
+            _hashtag(render_name.rsplit(".", 1)[0]),
+        ]
+    )
+    return CaptionDraft(
+        caption=caption[:2200],
+        hashtags=hashtags[:30],
+        caption_source="fallback",
+    )
+
+
+def _openai_caption_draft(
+    *,
+    client: Any,
+    render_name: str,
+    collection_slug: str,
+    model: str,
+) -> CaptionDraft:
+    collection_label = collection_slug or "uncategorized"
+    response = client.responses.create(
+        model=model,
+        instructions=(
+            "You write concise Instagram Reels captions for AMV edits. "
+            "Return only valid JSON with keys caption, hashtags, and notes. "
+            "Caption must be punchy, safe to edit, under 2200 characters, and not claim rights or official status. "
+            "Hashtags must be an array of up to 12 hashtag strings."
+        ),
+        input=(
+            f"Render filename: {render_name}\n"
+            f"Collection: {collection_label}\n"
+            "Create one caption for a review-gated Instagram Reel post."
+        ),
+        text={
+            "format": {
+                "type": "json_schema",
+                "name": "eclypte_caption",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "caption": {"type": "string", "minLength": 1},
+                        "hashtags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "maxItems": 12,
+                        },
+                        "notes": {"type": "string"},
+                    },
+                    "required": ["caption", "hashtags", "notes"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        store=False,
+    )
+    data = json.loads(str(getattr(response, "output_text", "") or ""))
+    if not isinstance(data, dict):
+        raise ValueError("caption model returned invalid JSON")
+    caption = str(data.get("caption") or "").strip()
+    raw_hashtags = data.get("hashtags") or []
+    if not isinstance(raw_hashtags, list):
+        raise ValueError("caption model returned invalid hashtags")
+    return CaptionDraft(
+        caption=caption[:2200],
+        hashtags=_dedupe_hashtags([str(item) for item in raw_hashtags])[:30],
+        notes=str(data.get("notes") or "").strip(),
+        caption_source="openai",
+    )
+
+
+def _openai_client_from_env() -> Any | None:
+    if not os.environ.get("OPENAI_API_KEY"):
+        return None
+    from openai import OpenAI
+
+    return OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+
+def create_publish_post_for_render(
+    repo: StorageRepository,
+    *,
+    user_id: str,
+    render_output: dict[str, str],
+    collection_slug: str = "",
+    auto_created: bool = False,
+) -> PublishingPostRecord:
+    existing = repo.find_publishing_post_for_render(
+        user_id=user_id,
+        render_file_id=render_output["file_id"],
+        render_version_id=render_output["version_id"],
+    )
+    if existing is not None:
+        return existing
+
+    manifest = repo.load_file_manifest(
+        FileRef(user_id=user_id, file_id=render_output["file_id"])
+    )
+    meta = repo.load_file_version_meta(
+        FileVersionRef(
+            user_id=user_id,
+            file_id=render_output["file_id"],
+            version_id=render_output["version_id"],
+        )
+    )
+    resolved_collection = collection_slug or _collection_from_tags(manifest.tags)
+    draft = generate_caption_draft(
+        render_name=manifest.display_name or meta.original_filename,
+        collection_slug=resolved_collection,
+    )
+    now = _utc_now()
+    record = PublishingPostRecord(
+        post_id=f"pub_{_safe_id(render_output['version_id'])}",
+        owner_user_id=user_id,
+        status="ready",
+        render_file_id=render_output["file_id"],
+        render_version_id=render_output["version_id"],
+        render_display_name=manifest.display_name or meta.original_filename,
+        collection_slug=resolved_collection,
+        generated_caption=draft.caption,
+        caption=draft.caption,
+        hashtags=draft.hashtags,
+        notes=draft.notes,
+        caption_source=draft.caption_source,
+        caption_error=draft.caption_error,
+        auto_created=auto_created,
+        source_run_id=manifest.source_run_id,
+        created_at=now,
+        updated_at=now,
+    )
+    return repo.save_publishing_post(record)
+
+
+def prepare_public_media_copy(
+    repo: StorageRepository,
+    *,
+    store: ObjectStore,
+    post: PublishingPostRecord,
+    public_base_url: str,
+) -> PublishingPostRecord:
+    source_ref = FileVersionRef(
+        user_id=post.owner_user_id,
+        file_id=post.render_file_id,
+        version_id=post.render_version_id,
+    )
+    meta = repo.load_file_version_meta(source_ref)
+    extension = _extension(meta.original_filename) or "mp4"
+    key = (
+        f"public/publishing/{post.owner_user_id}/"
+        f"{post.post_id}/{post.render_version_id}.{extension}"
+    )
+    store.put_bytes(
+        key,
+        repo.read_version_bytes(source_ref),
+        content_type=meta.content_type or "video/mp4",
+        metadata={
+            "eclypte-post-id": post.post_id,
+            "eclypte-render-version-id": post.render_version_id,
+        },
+    )
+    return repo.save_publishing_post(
+        post.model_copy(
+            update={
+                "public_media_key": key,
+                "public_media_url": f"{public_base_url.rstrip('/')}/{key}",
+                "updated_at": _utc_now(),
+                "last_error": None,
+            }
+        )
+    )
+
+
+def format_post_text(caption: str, hashtags: list[str]) -> str:
+    clean_caption = caption.strip()
+    clean_hashtags = " ".join(_dedupe_hashtags(hashtags))
+    if clean_caption and clean_hashtags:
+        return f"{clean_caption}\n\n{clean_hashtags}"
+    return clean_caption or clean_hashtags
+
+
+def queue_status_for_mode(mode: BufferShareMode) -> str:
+    return "scheduled" if mode == "customScheduled" else "queued"
+
+
+def _first_error_message(errors: Any) -> str:
+    if isinstance(errors, list) and errors:
+        first = errors[0]
+        if isinstance(first, dict) and first.get("message"):
+            return str(first["message"])
+    return "Buffer returned an error"
+
+
+def _optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    return bool(value)
+
+
+def _collection_from_tags(tags: list[str]) -> str:
+    return next((tag.removeprefix("collection:") for tag in tags if tag.startswith("collection:")), "")
+
+
+def _dedupe_hashtags(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        normalized = value.strip()
+        if not normalized:
+            continue
+        if not normalized.startswith("#"):
+            normalized = f"#{normalized}"
+        normalized = re.sub(r"[^#A-Za-z0-9_]", "", normalized)
+        key = normalized.lower()
+        if len(normalized) > 1 and key not in seen:
+            seen.add(key)
+            result.append(normalized.lower())
+    return result
+
+
+def _extension(filename: str) -> str:
+    if "." not in filename:
+        return ""
+    extension = filename.rsplit(".", 1)[-1].lower()
+    return re.sub(r"[^a-z0-9]", "", extension)
+
+
+def _hashtag(value: str) -> str:
+    return f"#{re.sub(r'[^A-Za-z0-9_]', '', value.replace('-', '_').replace(' ', '_'))}"
+
+
+def _humanize(value: str) -> str:
+    return value.replace("-", " ").replace("_", " ").strip() or value
+
+
+def _safe_id(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_]", "_", value)
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

@@ -38,6 +38,14 @@ def content_candidate_key(*, user_id: str, candidate_id: str) -> str:
     return f"{content_candidate_prefix(user_id=user_id)}{candidate_id}.json"
 
 
+def publishing_post_prefix(*, user_id: str) -> str:
+    return f"users/{user_id}/publishing/posts/"
+
+
+def publishing_post_key(*, user_id: str, post_id: str) -> str:
+    return f"{publishing_post_prefix(user_id=user_id)}{post_id}.json"
+
+
 def synthesis_prompt_state_key(*, user_id: str) -> str:
     return f"users/{user_id}/synthesis/prompt/state.json"
 

@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useUser } from "@clerk/nextjs"
-import { Download, RefreshCw, Trash2 } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { Download, RefreshCw, Send, Trash2 } from "lucide-react"
 import {
     DashboardPage,
     StatusBadge,
@@ -18,6 +19,7 @@ type RenderPreview = { asset: AssetSummary; url: string }
 
 export default function RendersPage() {
     const { isLoaded, isSignedIn, user } = useUser()
+    const router = useRouter()
     const [outputs, setOutputs] = useState<AssetSummary[]>([])
     const [runs, setRuns] = useState<RunSummary[]>([])
     const [preview, setPreview] = useState<RenderPreview | null>(null)
@@ -25,6 +27,7 @@ export default function RendersPage() {
     const [isLoading, setIsLoading] = useState(false)
     const [downloadingId, setDownloadingId] = useState<string | null>(null)
     const [deletingId, setDeletingId] = useState<string | null>(null)
+    const [publishingId, setPublishingId] = useState<string | null>(null)
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
     const hasActiveRuns = runs.some(isRunActive)
@@ -165,6 +168,27 @@ export default function RendersPage() {
         }
     }
 
+    const preparePost = async (asset: AssetSummary) => {
+        if (!api) {
+            return
+        }
+        const ref = versionRef(asset)
+        if (!ref) {
+            setError("Render output has no current version.")
+            return
+        }
+        setPublishingId(asset.file_id)
+        setError(null)
+        try {
+            await api.createPublishingPost({ renderOutput: ref })
+            router.push("/dashboard/publish")
+        } catch (caught) {
+            setError(errorMessage(caught))
+        } finally {
+            setPublishingId(null)
+        }
+    }
+
     if (!isLoaded) {
         return <DashboardPage eyebrow="Renders" title="Loading renders"><div /></DashboardPage>
     }
@@ -210,6 +234,14 @@ export default function RendersPage() {
                                     disabled={downloadingId === preview.asset.file_id}
                                 >
                                     <Download size={16} /> {downloadingId === preview.asset.file_id ? "Downloading" : "Download MP4"}
+                                </button>
+                                <button
+                                    className={styles.secondaryButton}
+                                    type="button"
+                                    onClick={() => preparePost(preview.asset)}
+                                    disabled={publishingId === preview.asset.file_id}
+                                >
+                                    <Send size={16} /> {publishingId === preview.asset.file_id ? "Preparing" : "Prepare post"}
                                 </button>
                                 <button
                                     className={styles.dangerButton}
