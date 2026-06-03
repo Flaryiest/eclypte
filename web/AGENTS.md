@@ -11,12 +11,14 @@ Repo-wide architecture and backend guidance lives in `../AGENTS.md`; this file a
 - App Router lives in `src/app/`.
 - `src/app/page.tsx` is the main marketing landing page and composes most shared homepage components.
 - `src/app/pricing/page.tsx` is still lightweight.
+- `src/app/demo/page.tsx` is a marketing demo-reel showcase page with embedded sample videos.
 - `src/app/dashboard/page.tsx` redirects to the creator console default route at `/dashboard/new-edit`.
 - The dashboard console uses real App Router pages:
   - `/dashboard/new-edit` selects existing song/video assets, previews the source crop, sets export format and audio trim, reuses completed analyses when available, auto-runs missing analysis, then chains AI-agent timeline planning by default, rendering, and final preview/download. It also exposes deterministic planning, optional creative brief, job cancel/delete, and redo for failed/canceled jobs.
   - `/dashboard/assets` uploads persistent WAV/MP4 assets to R2, cleans up failed upload reservations, lists the R2-backed library including hidden archived items, starts manual analysis, imports YouTube songs, opens preview/download URLs, and deletes/restores assets.
   - `/dashboard/radar` reviews TMDb-powered available-now movie/TV candidates, runs `content_radar_discovery`, filters by media/status/provider/genre/release window, and marks candidates approved/rejected/imported.
   - `/dashboard/automation` reviews private R2 auto-import runs, active auto-draft jobs, completed auto-draft render assets, and collection filters.
+  - `/dashboard/publish` reviews Buffer publishing packages for Instagram Reels, shows setup diagnostics, previews render outputs, edits/regenerates captions, queues/schedules posts, and records Buffer/public-media status.
   - `/dashboard/synthesis` queues Instagram Reel references, runs synthesis consolidation, exposes the effective system prompt, saves prompt versions, and reactivates older versions.
   - `/dashboard/renders` lists render runs and output MP4 assets with preview/download actions, refreshing active render runs from run streams with polling fallback.
   - `/dashboard/settings` shows the API base URL, signed-in Clerk user id, API health, YouTube-cookie configuration, and active synthesis prompt version.
@@ -37,6 +39,8 @@ Repo-wide architecture and backend guidance lives in `../AGENTS.md`; this file a
 - `/dashboard/assets` can import songs from YouTube via `POST /v1/music/youtube-imports`; imports publish a `song_audio` asset and auto-run music analysis.
 - `/dashboard/radar` uses `POST /v1/content-radar/discover`, `GET /v1/content-candidates`, and candidate status action endpoints. Discovery needs server-side TMDb credentials; the browser never receives them.
 - R2 auto-import events arrive at `POST /internal/import-events` from a Cloudflare Queue/Worker, normalize `incoming/collections/{collection_slug}/songs/` or `/videos/` objects into managed assets, and may start private `auto_draft` runs.
+- `/dashboard/publish` uses `/v1/publishing/*` endpoints through `src/services/eclypteApi.ts`. Buffer/OpenAI secrets stay server-side; the browser only receives non-secret config booleans, channel metadata, publishing records, and signed preview/download URLs.
+- Publish packages are review-gated. Auto-drafts create editable packages, but public R2 publishing copies and Buffer posts are only created when the user queues or schedules a post.
 - YouTube media download stays backend-side in `api/youtube_download.py`. The frontend should poll the returned run manifest and surface `RunManifest.last_error` for failures rather than attempting browser-side media extraction.
 - Backend YouTube import runs record provider-level `youtube_download_attempt` events, but the current dashboard client does not expose run events as a first-class UI view.
 - New Edit uses `/v1/edits` durable edit jobs, subscribes to `/v1/runs/stream` while jobs are active, falls back to polling, and then requests the render download URL. The UI exposes cancel, delete/archive, and redo through the edit-job lifecycle endpoints.

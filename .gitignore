@@ -16,8 +16,3 @@ youtube-worker-tmp/
 api/youtube-worker-tmp/
 workers/*/.dev.vars
 __pycache__/
-.agent
-.claude/
-docs
-CLAUDE.md
-AGENTS.md
