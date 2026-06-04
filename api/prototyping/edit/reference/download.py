@@ -1,8 +1,7 @@
 """
 Download a viral AMV from Instagram Reels as (wav, mp4) for Phase-2 ingestion.
 
-Separate from `music/ytdownload.py` because that one is audio-only and
-doesn't track metadata we need here (yt_video_id, duration, author).
+This downloader tracks metadata we need here (yt_video_id, duration, author).
 Files land in a caller-owned tempdir; the caller is expected to delete
 the tempdir after running the two analyses. We keep only the derived
 JSON, not the media — source is re-downloadable from the URL.
