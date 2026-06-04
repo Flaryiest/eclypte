@@ -13,6 +13,7 @@ import {
 } from "lucide-react"
 import {
     DashboardPage,
+    SkeletonList,
     StatusBadge,
     formatDate,
 } from "../dashboardCommon"
@@ -217,7 +218,11 @@ export default function PublishPage() {
     }
 
     if (!isLoaded) {
-        return <DashboardPage eyebrow="Publish" title="Loading publishing"><div /></DashboardPage>
+        return (
+            <DashboardPage eyebrow="Publish" title="Loading publishing">
+                <SkeletonList count={3} />
+            </DashboardPage>
+        )
     }
     if (!isSignedIn || !user) {
         return (
@@ -287,7 +292,9 @@ export default function PublishPage() {
                             <p>{visiblePosts.length} post{visiblePosts.length === 1 ? "" : "s"}</p>
                         </div>
                     </div>
-                    {visiblePosts.length === 0 ? (
+                    {isLoading && visiblePosts.length === 0 ? (
+                        <SkeletonList count={3} />
+                    ) : visiblePosts.length === 0 ? (
                         <div className={styles.emptyState}>No posts in this lane.</div>
                     ) : (
                         <div className={styles.assetTable}>

@@ -1,9 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
-import { Download, Eye, RefreshCw, RotateCcw, Trash2, WandSparkles, XCircle } from "lucide-react"
-import { DashboardPage, StatusBadge, formatBytes, formatDate, kindLabel, versionRef } from "../dashboardCommon"
+import { Download, Eye, Play, RefreshCw, RotateCcw, Trash2, WandSparkles, XCircle } from "lucide-react"
+import { DashboardPage, SkeletonList, StatusBadge, formatBytes, formatDate, kindLabel, versionRef } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import { downloadSignedUrl, safeDownloadFilename } from "@/services/downloadFile"
 import {
@@ -41,6 +41,8 @@ export default function NewEditPage() {
     const [deletingId, setDeletingId] = useState<string | null>(null)
     const [redoingId, setRedoingId] = useState<string | null>(null)
     const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({})
+    const [posterUrls, setPosterUrls] = useState<Record<string, string>>({})
+    const posterRequested = useRef<Set<string>>(new Set())
     const [sourcePreviewUrl, setSourcePreviewUrl] = useState<string | null>(null)
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
@@ -88,6 +90,30 @@ export default function NewEditPage() {
     useEffect(() => {
         void loadDashboard()
     }, [loadDashboard])
+
+    // Eagerly fetch the cheap poster image for completed jobs so the card shows an
+    // instant "mock" of the render; the heavy MP4 only loads when the user hits play.
+    useEffect(() => {
+        if (!api) {
+            return
+        }
+        const controller = new AbortController()
+        for (const job of jobs) {
+            const posterRef = job.render_poster
+            if (job.status !== "completed" || !posterRef) {
+                continue
+            }
+            if (posterRequested.current.has(job.run_id)) {
+                continue
+            }
+            posterRequested.current.add(job.run_id)
+            void api
+                .getDownloadUrl(posterRef, controller.signal)
+                .then((res) => setPosterUrls((cur) => ({ ...cur, [job.run_id]: res.download_url })))
+                .catch(() => posterRequested.current.delete(job.run_id))
+        }
+        return () => controller.abort()
+    }, [api, jobs])
 
     useEffect(() => {
         setSongDurationSec(null)
@@ -609,7 +635,9 @@ export default function NewEditPage() {
                             <p>{jobs.length} job{jobs.length === 1 ? "" : "s"} · {selectedAssets.length}/2 ready</p>
                         </div>
                     </div>
-                    {jobs.length === 0 ? (
+                    {isLoading && jobs.length === 0 ? (
+                        <SkeletonList count={2} />
+                    ) : jobs.length === 0 ? (
                         <div className={styles.emptyState}>No edit jobs yet.</div>
                     ) : (
                         <div className={styles.jobList}>
@@ -618,6 +646,7 @@ export default function NewEditPage() {
                                     key={job.run_id}
                                     job={job}
                                     previewUrl={previewUrls[job.run_id]}
+                                    posterUrl={posterUrls[job.run_id]}
                                     isDownloading={downloadingId === job.run_id}
                                     isCanceling={cancelingId === job.run_id}
                                     isDeleting={deletingId === job.run_id}
@@ -640,6 +669,7 @@ export default function NewEditPage() {
 function EditJobCard({
     job,
     previewUrl,
+    posterUrl,
     isDownloading,
     isCanceling,
     isDeleting,
@@ -652,6 +682,7 @@ function EditJobCard({
 }: {
     job: EditJobStatus
     previewUrl?: string
+    posterUrl?: string
     isDownloading: boolean
     isCanceling: boolean
     isDeleting: boolean
@@ -664,6 +695,14 @@ function EditJobCard({
 }) {
     const isComplete = job.status === "completed" && job.render_output
     const isActive = isJobActive(job)
+    const now = useTick(isActive)
+    const startedMs = Date.parse(job.created_at)
+    const elapsedSec =
+        isActive && Number.isFinite(startedMs) ? Math.max(0, (now - startedMs) / 1000) : null
+    const etaSec =
+        elapsedSec !== null && job.progress_percent >= 5 && job.progress_percent < 100
+            ? (elapsedSec * (100 - job.progress_percent)) / job.progress_percent
+            : null
     const canRedo = job.status === "failed" || job.status === "canceled"
     const canDelete = job.status === "failed" || job.status === "canceled" || job.status === "completed"
     return (
@@ -677,7 +716,14 @@ function EditJobCard({
             </div>
             <div className={styles.progressHeader}>
                 <span>{job.progress_percent}%</span>
-                <span>{job.status}</span>
+                {isActive && elapsedSec !== null ? (
+                    <span>
+                        {formatElapsed(elapsedSec)} elapsed
+                        {etaSec !== null ? ` · ~${formatElapsed(etaSec)} left` : ""}
+                    </span>
+                ) : (
+                    <span>{job.status}</span>
+                )}
             </div>
             <div className={styles.progressTrack} aria-label={`${job.title} progress`}>
                 <div className={styles.progressFill} style={{ width: `${clampPercent(job.progress_percent)}%` }} />
@@ -717,7 +763,29 @@ function EditJobCard({
                     )}
                 </div>
             )}
-            {previewUrl && <video className={styles.previewMedia} controls src={previewUrl} />}
+            {previewUrl ? (
+                <video
+                    className={styles.previewMedia}
+                    controls
+                    autoPlay
+                    preload="auto"
+                    poster={posterUrl}
+                    src={previewUrl}
+                />
+            ) : posterUrl && isComplete ? (
+                <button
+                    type="button"
+                    className={styles.posterButton}
+                    onClick={onPreview}
+                    aria-label={`Play ${job.title}`}
+                >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img className={styles.previewMedia} src={posterUrl} alt={`${job.title} preview`} />
+                    <span className={styles.posterPlayIcon}>
+                        <Play size={28} />
+                    </span>
+                </button>
+            ) : null}
         </article>
     )
 }
@@ -739,6 +807,27 @@ function StageProgress({ stage }: { stage: EditJobStage }) {
 
 function isJobActive(job: EditJobStatus) {
     return job.status === "created" || job.status === "running" || job.status === "blocked"
+}
+
+function useTick(active: boolean) {
+    const [now, setNow] = useState(() => Date.now())
+    useEffect(() => {
+        if (!active) {
+            return
+        }
+        const id = window.setInterval(() => setNow(Date.now()), 1000)
+        return () => window.clearInterval(id)
+    }, [active])
+    return now
+}
+
+function formatElapsed(totalSec: number) {
+    const seconds = Math.max(0, Math.round(totalSec))
+    if (seconds < 60) {
+        return `${seconds}s`
+    }
+    const minutes = Math.floor(seconds / 60)
+    return `${minutes}m ${seconds % 60}s`
 }
 
 function stageClass(status: EditJobStage["status"]) {

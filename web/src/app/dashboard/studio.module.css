@@ -761,6 +761,94 @@
 	border: 1px solid var(--ec-rule);
 }
 
+.posterButton {
+	position: relative;
+	display: block;
+	width: 100%;
+	padding: 0;
+	border: none;
+	background: none;
+	cursor: pointer;
+}
+
+.posterButton .previewMedia {
+	display: block;
+	object-fit: cover;
+}
+
+.posterPlayIcon {
+	position: absolute;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	color: var(--ec-paper);
+	background: rgba(15, 15, 15, 0.28);
+	transition: background 160ms ease;
+}
+
+.posterButton:hover .posterPlayIcon,
+.posterButton:focus-visible .posterPlayIcon {
+	background: rgba(15, 15, 15, 0.45);
+}
+
+.skeletonList {
+	display: flex;
+	flex-direction: column;
+	gap: 0.8rem;
+}
+
+.skeletonCard {
+	border: 1px solid var(--ec-rule);
+	background: var(--ec-paper-2);
+	padding: 1.05rem 1.15rem;
+	display: flex;
+	flex-direction: column;
+	gap: 0.7rem;
+}
+
+.skeleton {
+	display: block;
+	height: 0.8rem;
+	width: 100%;
+	border-radius: 0;
+	background: linear-gradient(
+		90deg,
+		var(--ec-paper-sunk) 0%,
+		var(--ec-rule) 50%,
+		var(--ec-paper-sunk) 100%
+	);
+	background-size: 200% 100%;
+	animation: skeletonShimmer 1.4s ease-in-out infinite;
+}
+
+.skeletonTitle {
+	height: 1.1rem;
+	width: 45%;
+}
+
+.skeletonLine {
+	width: 90%;
+}
+
+.skeletonLineShort {
+	width: 60%;
+}
+
+@keyframes skeletonShimmer {
+	from {
+		background-position: 200% 0;
+	}
+	to {
+		background-position: -200% 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.skeleton {
+		animation: none;
+	}
+}
+
 .codeBlock {
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;

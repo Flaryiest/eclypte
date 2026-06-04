@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { Download, RefreshCw, Send, Trash2 } from "lucide-react"
 import {
     DashboardPage,
+    SkeletonList,
     StatusBadge,
     formatBytes,
     formatDate,
@@ -190,7 +191,11 @@ export default function RendersPage() {
     }
 
     if (!isLoaded) {
-        return <DashboardPage eyebrow="Renders" title="Loading renders"><div /></DashboardPage>
+        return (
+            <DashboardPage eyebrow="Renders" title="Loading renders">
+                <SkeletonList count={3} />
+            </DashboardPage>
+        )
     }
     if (!isSignedIn || !user) {
         return (
@@ -213,7 +218,9 @@ export default function RendersPage() {
         >
             {error && <div className={styles.errorBanner}>{error}</div>}
 
-            {outputs.length === 0 ? (
+            {isLoading && outputs.length === 0 ? (
+                <SkeletonList count={3} />
+            ) : outputs.length === 0 ? (
                 <div className={styles.emptyState}>No renders yet. Create one from New Edit.</div>
             ) : (
                 <>

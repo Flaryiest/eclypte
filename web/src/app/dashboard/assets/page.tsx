@@ -5,6 +5,7 @@ import { useUser } from "@clerk/nextjs"
 import { Activity, Download, Link2, RefreshCw, RotateCcw, Trash2, Upload } from "lucide-react"
 import {
     DashboardPage,
+    SkeletonList,
     StatusBadge,
     formatBytes,
     formatDate,
@@ -271,7 +272,11 @@ export default function AssetsPage() {
     }
 
     if (!isLoaded) {
-        return <DashboardPage eyebrow="Assets" title="Loading assets"><div /></DashboardPage>
+        return (
+            <DashboardPage eyebrow="Assets" title="Loading assets">
+                <SkeletonList count={3} />
+            </DashboardPage>
+        )
     }
     if (!isSignedIn || !user) {
         return (

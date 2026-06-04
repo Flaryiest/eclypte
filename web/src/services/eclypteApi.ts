@@ -219,6 +219,7 @@ export type EditJobStatus = {
     stages: EditJobStage[]
     child_runs: Record<string, string>
     render_output: FileVersionInput | null
+    render_poster: FileVersionInput | null
     last_error: string | null
     created_at: string
     updated_at: string
@@ -241,6 +242,8 @@ export type DownloadUrlResponse = {
 export type HealthResponse = {
     ok: boolean
     youtube_cookies_configured?: boolean
+    realtime_streaming_configured?: boolean
+    worker_progress_configured?: boolean
 }
 
 export const ECLYPTE_API_BASE_URL =

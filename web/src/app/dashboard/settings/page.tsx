@@ -94,6 +94,14 @@ export default function SettingsPage() {
                         <span className={styles.settingsRowLabel}>YouTube cookies</span>
                         <span className={styles.settingsRowValue}>{healthDetails?.youtube_cookies_configured ? "Configured" : "Not configured"}</span>
                     </div>
+                    <div className={styles.settingsRow}>
+                        <span className={styles.settingsRowLabel}>Realtime updates</span>
+                        <span className={styles.settingsRowValue}>{healthDetails?.realtime_streaming_configured ? "Redis (live)" : "Polling fallback"}</span>
+                    </div>
+                    <div className={styles.settingsRow}>
+                        <span className={styles.settingsRowLabel}>Worker progress</span>
+                        <span className={styles.settingsRowValue}>{healthDetails?.worker_progress_configured ? "Configured" : "R2-event fallback"}</span>
+                    </div>
                 </div>
 
                 <div className={styles.settingsGroup}>

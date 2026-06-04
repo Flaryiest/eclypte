@@ -46,6 +46,30 @@ export function StatusBadge({
     )
 }
 
+export function Skeleton({ className }: { className?: string }) {
+    return <span className={`${styles.skeleton} ${className ?? ""}`} aria-hidden />
+}
+
+export function SkeletonCard() {
+    return (
+        <div className={styles.skeletonCard} aria-hidden>
+            <Skeleton className={styles.skeletonTitle} />
+            <Skeleton className={styles.skeletonLine} />
+            <Skeleton className={styles.skeletonLineShort} />
+        </div>
+    )
+}
+
+export function SkeletonList({ count = 3 }: { count?: number }) {
+    return (
+        <div className={styles.skeletonList} role="status" aria-label="Loading">
+            {Array.from({ length: count }, (_, index) => (
+                <SkeletonCard key={index} />
+            ))}
+        </div>
+    )
+}
+
 export function formatBytes(bytes: number | null | undefined) {
     if (bytes === null || bytes === undefined) {
         return "—"
