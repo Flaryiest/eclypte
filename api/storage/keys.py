@@ -30,14 +30,6 @@ def synthesis_reference_key(*, user_id: str, reference_id: str) -> str:
     return f"{synthesis_reference_prefix(user_id=user_id)}{reference_id}.json"
 
 
-def content_candidate_prefix(*, user_id: str) -> str:
-    return f"users/{user_id}/content/candidates/"
-
-
-def content_candidate_key(*, user_id: str, candidate_id: str) -> str:
-    return f"{content_candidate_prefix(user_id=user_id)}{candidate_id}.json"
-
-
 def publishing_post_prefix(*, user_id: str) -> str:
     return f"users/{user_id}/publishing/posts/"
 

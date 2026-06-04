@@ -9,15 +9,8 @@ from urllib.parse import urlparse
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
-from api.auto_import import (
-    UnsupportedImportObject,
-    active_run_count,
-    env_int,
-    matching_import_run,
-    parse_import_candidate,
-)
 from api.export_options import resolve_export_options
 from api.storage.factory import (
     get_default_user_id,
@@ -40,9 +33,6 @@ from api.publishing import (
 )
 from api.storage.models import (
     ArtifactKind,
-    ContentCandidateRecord,
-    ContentCandidateStatus,
-    ContentMediaType,
     FileManifest,
     FileVersionMeta,
     PublishingPostRecord,
@@ -159,34 +149,6 @@ class InternalProgressRequest(BaseModel):
     stage: str = Field(min_length=1)
     percent: int = Field(ge=0, le=100)
     detail: str = ""
-
-
-class ImportEventObject(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    key: str = Field(min_length=1)
-    size: int | None = Field(default=None, ge=0)
-    etag: str | None = Field(default=None, alias="eTag")
-
-
-class ImportEventRequest(BaseModel):
-    bucket: str = Field(min_length=1)
-    object: ImportEventObject
-    action: str | None = None
-    event_time: str | None = Field(default=None, alias="eventTime")
-
-
-class ImportEventResponse(BaseModel):
-    accepted: bool
-    duplicate: bool = False
-    ignored: bool = False
-    reason: str | None = None
-    run: RunManifest | None = None
-
-
-class ContentRadarDiscoveryRequest(BaseModel):
-    region: str = Field(default="US", min_length=2, max_length=2)
-    max_pages: int = Field(default=1, ge=1, le=3)
 
 
 class PublishingPostCreateRequest(BaseModel):
@@ -499,16 +461,6 @@ def create_app(
             raise HTTPException(status_code=404, detail="edit job not found")
         return run
 
-    def content_candidate_or_404(
-        repo: StorageRepository,
-        uid: str,
-        candidate_id: str,
-    ) -> ContentCandidateRecord:
-        try:
-            return repo.load_content_candidate(user_id=uid, candidate_id=candidate_id)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail="content candidate not found") from exc
-
     def publishing_post_or_404(
         repo: StorageRepository,
         uid: str,
@@ -731,185 +683,6 @@ def create_app(
             detail=request.detail,
         )
         return {"ok": True}
-
-    @app.post(
-        "/internal/import-events",
-        response_model=ImportEventResponse,
-        status_code=status.HTTP_202_ACCEPTED,
-    )
-    def record_import_event(
-        request: ImportEventRequest,
-        background_tasks: BackgroundTasks,
-        x_eclypte_internal_token: str | None = Header(
-            default=None,
-            alias="X-Eclypte-Internal-Token",
-        ),
-        repo: StorageRepository = Depends(repository),
-        uid: str = Depends(user_id),
-    ) -> ImportEventResponse:
-        expected = os.environ.get("ECLYPTE_INTERNAL_PROGRESS_TOKEN")
-        if not expected or not x_eclypte_internal_token or not secrets.compare_digest(
-            expected,
-            x_eclypte_internal_token,
-        ):
-            raise HTTPException(status_code=403, detail="invalid internal token")
-        try:
-            candidate = parse_import_candidate(
-                bucket=request.bucket,
-                key=request.object.key,
-                etag=request.object.etag,
-                size_bytes=request.object.size,
-            )
-        except UnsupportedImportObject as exc:
-            return ImportEventResponse(
-                accepted=False,
-                ignored=True,
-                reason=str(exc),
-            )
-
-        runs = repo.list_run_manifests(uid)
-        existing = matching_import_run(runs, candidate)
-        if existing is not None:
-            return ImportEventResponse(accepted=True, duplicate=True, run=existing)
-
-        max_active = env_int("ECLYPTE_AUTO_IMPORT_MAX_ACTIVE", 2)
-        if active_run_count(runs, "bucket_import") >= max_active:
-            raise HTTPException(status_code=429, detail="auto import queue is full")
-
-        run = create_workflow_run(
-            repo,
-            uid,
-            "bucket_import",
-            candidate.run_inputs(),
-            ["normalize_media", "publish_asset", "analyze_asset", "create_auto_draft"],
-        )
-        background_tasks.add_task(
-            runner.run_bucket_import,
-            user_id=uid,
-            run_id=run.run_id,
-            candidate=candidate.model_dump(mode="json"),
-        )
-        return ImportEventResponse(accepted=True, run=run)
-
-    @app.post(
-        "/v1/content-radar/discover",
-        response_model=RunManifest,
-        status_code=status.HTTP_202_ACCEPTED,
-    )
-    def create_content_radar_discovery(
-        request: ContentRadarDiscoveryRequest,
-        background_tasks: BackgroundTasks,
-        repo: StorageRepository = Depends(repository),
-        uid: str = Depends(user_id),
-    ) -> RunManifest:
-        region = request.region.upper()
-        run = create_workflow_run(
-            repo,
-            uid,
-            "content_radar_discovery",
-            {"region": region, "max_pages": str(request.max_pages)},
-            ["fetch_tmdb", "filter_available", "save_candidates"],
-        )
-        background_tasks.add_task(
-            runner.run_content_radar_discovery,
-            user_id=uid,
-            run_id=run.run_id,
-            region=region,
-            max_pages=request.max_pages,
-        )
-        return run
-
-    @app.get("/v1/content-candidates", response_model=list[ContentCandidateRecord])
-    def list_content_candidates(
-        media_type: ContentMediaType | None = None,
-        status: ContentCandidateStatus | None = None,
-        provider: str | None = None,
-        genre: str | None = None,
-        release_from: str | None = None,
-        release_to: str | None = None,
-        repo: StorageRepository = Depends(repository),
-        uid: str = Depends(user_id),
-    ) -> list[ContentCandidateRecord]:
-        candidates = repo.list_content_candidates(uid)
-        if media_type is not None:
-            candidates = [candidate for candidate in candidates if candidate.media_type == media_type]
-        if status is not None:
-            candidates = [candidate for candidate in candidates if candidate.status == status]
-        if provider:
-            provider_filter = provider.strip().lower()
-            candidates = [
-                candidate
-                for candidate in candidates
-                if any(provider_filter in item.name.lower() for item in candidate.providers)
-            ]
-        if genre:
-            genre_filter = genre.strip().lower()
-            candidates = [
-                candidate
-                for candidate in candidates
-                if any(genre_filter == item.lower() for item in candidate.genres)
-            ]
-        if release_from:
-            candidates = [
-                candidate
-                for candidate in candidates
-                if candidate.release_date is not None and candidate.release_date >= release_from
-            ]
-        if release_to:
-            candidates = [
-                candidate
-                for candidate in candidates
-                if candidate.release_date is not None and candidate.release_date <= release_to
-            ]
-        return candidates
-
-    @app.post(
-        "/v1/content-candidates/{candidate_id}/approve",
-        response_model=ContentCandidateRecord,
-    )
-    def approve_content_candidate(
-        candidate_id: str,
-        repo: StorageRepository = Depends(repository),
-        uid: str = Depends(user_id),
-    ) -> ContentCandidateRecord:
-        content_candidate_or_404(repo, uid, candidate_id)
-        return repo.update_content_candidate_status(
-            user_id=uid,
-            candidate_id=candidate_id,
-            status="approved",
-        )
-
-    @app.post(
-        "/v1/content-candidates/{candidate_id}/reject",
-        response_model=ContentCandidateRecord,
-    )
-    def reject_content_candidate(
-        candidate_id: str,
-        repo: StorageRepository = Depends(repository),
-        uid: str = Depends(user_id),
-    ) -> ContentCandidateRecord:
-        content_candidate_or_404(repo, uid, candidate_id)
-        return repo.update_content_candidate_status(
-            user_id=uid,
-            candidate_id=candidate_id,
-            status="rejected",
-        )
-
-    @app.post(
-        "/v1/content-candidates/{candidate_id}/mark-imported",
-        response_model=ContentCandidateRecord,
-    )
-    def mark_content_candidate_imported(
-        candidate_id: str,
-        repo: StorageRepository = Depends(repository),
-        uid: str = Depends(user_id),
-    ) -> ContentCandidateRecord:
-        content_candidate_or_404(repo, uid, candidate_id)
-        return repo.update_content_candidate_status(
-            user_id=uid,
-            candidate_id=candidate_id,
-            status="imported",
-        )
 
     @app.post(
         "/v1/uploads",
