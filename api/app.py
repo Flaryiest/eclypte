@@ -66,6 +66,19 @@ EDIT_STAGE_LABELS = {
     "result": "Result",
 }
 EDIT_STAGE_ORDER = list(EDIT_STAGE_LABELS)
+# Approximate share of total wall-clock per stage, used to weight the overall
+# progress_percent so the bar tracks real time instead of treating every stage
+# equally. Render dominates; asset prep and result are near-instant. (A reused
+# music/video analysis completes instantly at 100%, correctly jumping the bar by
+# its weight since that work was genuinely skipped.)
+EDIT_STAGE_WEIGHTS = {
+    "assets": 0.02,
+    "music": 0.15,
+    "video": 0.22,
+    "timeline": 0.20,
+    "render": 0.39,
+    "result": 0.02,
+}
 
 
 class FileVersionInput(BaseModel):
@@ -205,6 +218,7 @@ class EditJobStatus(BaseModel):
     stages: list[EditJobStage]
     child_runs: dict[str, str]
     render_output: FileVersionInput | None
+    render_poster: FileVersionInput | None
     last_error: str | None
     created_at: str
     updated_at: str
@@ -449,6 +463,13 @@ def create_app(
             return None
         return FileVersionInput(file_id=file_id, version_id=version_id)
 
+    def edit_render_poster(run: RunManifest) -> FileVersionInput | None:
+        file_id = run.outputs.get("render_poster_file_id")
+        version_id = run.outputs.get("render_poster_version_id")
+        if not file_id or not version_id:
+            return None
+        return FileVersionInput(file_id=file_id, version_id=version_id)
+
     def is_active_run(run: RunManifest) -> bool:
         return run.status in {"created", "running", "blocked"}
 
@@ -504,9 +525,14 @@ def create_app(
                     detail=str(progress.get("detail") or status_value),
                 )
             )
-        progress_percent = 100 if run.status == "completed" else round(
-            sum(stage.percent for stage in stages) / len(stages)
-        )
+        if run.status == "completed":
+            progress_percent = 100
+        else:
+            weighted = sum(
+                stage.percent * EDIT_STAGE_WEIGHTS.get(stage.id, 0.0) for stage in stages
+            )
+            total_weight = sum(EDIT_STAGE_WEIGHTS.get(stage.id, 0.0) for stage in stages)
+            progress_percent = round(weighted / total_weight) if total_weight else 0
         return EditJobStatus(
             run_id=run.run_id,
             workflow_type=run.workflow_type,
@@ -516,6 +542,7 @@ def create_app(
             stages=stages,
             child_runs=edit_child_runs(run),
             render_output=edit_render_output(run),
+            render_poster=edit_render_poster(run),
             last_error=run.last_error,
             created_at=run.created_at,
             updated_at=run.updated_at,
@@ -659,6 +686,14 @@ def create_app(
                 os.environ.get("ECLYPTE_YOUTUBE_COOKIES_B64")
                 or os.environ.get("ECLYPTE_YOUTUBE_COOKIES")
             ),
+            # Non-secret diagnostics: do realtime run streams (Redis) and the
+            # Modal->API worker-progress path exist? When both are false, progress
+            # still flows via the slower R2-event + polling fallback.
+            "realtime_streaming_configured": bool(os.environ.get("REDIS_URL")),
+            "worker_progress_configured": bool(
+                os.environ.get("ECLYPTE_INTERNAL_PROGRESS_URL")
+                and os.environ.get("ECLYPTE_INTERNAL_PROGRESS_TOKEN")
+            ),
         }
 
     @app.post("/internal/progress")
@@ -772,7 +807,11 @@ def create_app(
         if kind is not None:
             manifests = [manifest for manifest in manifests if manifest.kind == kind]
         else:
-            manifests = [manifest for manifest in manifests if manifest.kind != "render_output"]
+            manifests = [
+                manifest
+                for manifest in manifests
+                if manifest.kind not in ("render_output", "render_poster")
+            ]
         if not include_archived:
             manifests = [manifest for manifest in manifests if manifest.archived_at is None]
         manifests = [manifest for manifest in manifests if manifest.current_version_id is not None]

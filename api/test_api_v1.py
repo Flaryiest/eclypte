@@ -91,7 +91,9 @@ def test_health_and_cors_allow_vercel_origin():
         },
     )
 
-    assert health.json() == {"ok": True, "youtube_cookies_configured": False}
+    body = health.json()
+    assert body["ok"] is True
+    assert body["youtube_cookies_configured"] is False
     assert preflight.headers["access-control-allow-origin"] == "https://eclypte.vercel.app"
 
 
@@ -103,6 +105,33 @@ def test_health_reports_youtube_cookies_configuration(monkeypatch):
 
     assert health.status_code == 200
     assert health.json()["youtube_cookies_configured"] is True
+
+
+def test_edit_progress_percent_weights_render_heaviest():
+    client, store, _ = build_client()
+    repo = StorageRepository(store)
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="edit_pipeline",
+        inputs={"title": "Weighted"},
+        steps=["assets", "music", "video", "timeline", "render", "result"],
+    )
+    repo.append_run_progress(
+        run_ref=RunRef(user_id="user_123", run_id=run.run_id),
+        stage="render",
+        percent=100,
+        detail="encoding",
+    )
+
+    body = client.get(
+        f"/v1/edits/{run.run_id}",
+        headers={"X-User-Id": "user_123"},
+    ).json()
+
+    # Render carries the largest stage weight (0.39); a flat 6-stage average would
+    # report ~17. The weighted value proves render dominates the overall percent.
+    assert body["progress_percent"] == 39
+    assert body["render_poster"] is None
 
 
 def test_direct_upload_create_complete_metadata_and_download_url():

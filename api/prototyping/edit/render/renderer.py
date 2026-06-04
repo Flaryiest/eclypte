@@ -42,6 +42,7 @@ def render_timeline(
     encode_preset: str = DEFAULT_ENCODE_PRESET,
     threads: int | None = None,
     progress_callback=None,
+    poster_path: Path | str | None = None,
 ) -> Path:
     total_started = time.perf_counter()
     timeline_path = Path(timeline_path)
@@ -86,6 +87,16 @@ def render_timeline(
         _log_timing("concat/compose", concat_started)
         _report(progress_callback, 45, "Composed timeline")
 
+        if poster_path is not None:
+            poster_path = Path(poster_path)
+            poster_path.parent.mkdir(parents=True, exist_ok=True)
+            poster_t = max(0.0, min(1.0, float(timeline.output.duration_sec) / 2.0))
+            try:
+                _save_poster_jpeg(final, poster_t, poster_path)
+            except Exception as exc:  # poster is best-effort; never fail the render for it
+                print(f"[renderer] poster generation skipped: {exc}")
+            _report(progress_callback, 50, "Saved poster frame")
+
         out_path.parent.mkdir(parents=True, exist_ok=True)
         write_started = time.perf_counter()
         _report(progress_callback, 55, "Encoding MP4")
@@ -97,6 +108,7 @@ def render_timeline(
             preset=encode_preset,
             threads=threads,
             ffmpeg_params=["-movflags", "+faststart"],
+            logger=_make_encode_logger(progress_callback),
         )
         _log_timing("write_videofile", write_started)
         _report(progress_callback, 100, "Encoded MP4")
@@ -119,6 +131,50 @@ def render_timeline(
 def _report(progress_callback, percent, detail):
     if progress_callback is not None:
         progress_callback(percent, detail)
+
+
+def _save_poster_jpeg(clip, t, poster_path):
+    """Save a single RGB JPEG frame. Composited clips (e.g. letterbox) expose an
+    RGBA frame that JPEG can't encode, so we drop any alpha channel first."""
+    import numpy as np
+    from PIL import Image
+
+    frame = np.asarray(clip.get_frame(t))
+    if frame.ndim == 3 and frame.shape[2] == 4:
+        frame = frame[:, :, :3]
+    Image.fromarray(frame.astype("uint8")).convert("RGB").save(
+        str(poster_path), format="JPEG", quality=85
+    )
+
+
+def _make_encode_logger(progress_callback):
+    """Bridge MoviePy's proglog progress into `progress_callback`.
+
+    `write_videofile` reports frame-writing progress through proglog's
+    ``"frame_index"`` bar. We map that bar's index/total onto the 55->99 band so
+    the encode — the longest step — animates instead of freezing at 55%. Falls
+    back to MoviePy's default ``"bar"`` logger when no callback is wired or
+    proglog is unavailable.
+    """
+    if progress_callback is None:
+        return "bar"
+    try:
+        from proglog import ProgressBarLogger
+    except Exception:  # pragma: no cover - proglog ships with moviepy
+        return "bar"
+
+    class _EncodeLogger(ProgressBarLogger):
+        def bars_callback(self, bar, attr, value, old_value=None):
+            if bar != "frame_index" or attr != "index":
+                return
+            total = self.bars.get(bar, {}).get("total")
+            if not total:
+                return
+            frac = max(0.0, min(1.0, float(value) / float(total)))
+            mapped = 55 + int(frac * 44)
+            _report(progress_callback, mapped, f"Encoding MP4 ({int(frac * 100)}%)")
+
+    return _EncodeLogger()
 
 
 def _load_timeline(path: Path) -> Timeline:

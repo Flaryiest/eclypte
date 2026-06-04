@@ -556,16 +556,22 @@ class DefaultWorkflowRunner:
         )
         completed = _require_completed_run(repo, user_id, child.run_id)
         render_output = _output_ref(completed, "render_output_file_id", "render_output_version_id")
+        render_outputs = {
+            "render_output_file_id": render_output["file_id"],
+            "render_output_version_id": render_output["version_id"],
+        }
+        poster_file_id = completed.outputs.get("render_poster_file_id")
+        poster_version_id = completed.outputs.get("render_poster_version_id")
+        if poster_file_id and poster_version_id:
+            render_outputs["render_poster_file_id"] = poster_file_id
+            render_outputs["render_poster_version_id"] = poster_version_id
         self._set_edit_progress(
             repo,
             parent_ref,
             "render",
             100,
             "Render complete",
-            outputs={
-                "render_output_file_id": render_output["file_id"],
-                "render_output_version_id": render_output["version_id"],
-            },
+            outputs=render_outputs,
         )
         return render_output
 
@@ -1091,18 +1097,27 @@ class DefaultWorkflowRunner:
                 source_run_id=run_id,
             )
             version_ref = repo.reserve_file_version(file_ref)
+            poster_ref = FileRef(user_id=user_id, file_id=f"file_render_poster_{run_id}")
+            repo.create_file_manifest(
+                file_ref=poster_ref,
+                kind="render_poster",
+                display_name=f"{run_id}.jpg",
+                source_run_id=run_id,
+            )
+            poster_version_ref = repo.reserve_file_version(poster_ref)
             render = modal.Function.from_name("eclypte-render-r2", "render_r2")
-            args = [
+            remote_kwargs = {"poster_output_key": poster_version_ref.blob_key}
+            if progress_context is not None:
+                remote_kwargs["progress_context"] = progress_context
+            output = render.remote(
                 self._r2_config_payload(),
                 timeline_meta.storage_key,
                 source_meta.storage_key,
                 audio_meta.storage_key,
                 version_ref.blob_key,
                 f"{run_id}.mp4",
-            ]
-            if progress_context is not None:
-                args.append(progress_context)
-            output = render.remote(*args)
+                **remote_kwargs,
+            )
             repo.record_existing_version(
                 file_ref=file_ref,
                 version_ref=version_ref,
@@ -1119,13 +1134,29 @@ class DefaultWorkflowRunner:
                 ],
                 derived_from_run_id=run_id,
             )
+            run_outputs = {
+                "render_output_file_id": file_ref.file_id,
+                "render_output_version_id": version_ref.version_id,
+            }
+            if output.get("poster_storage_key"):
+                repo.record_existing_version(
+                    file_ref=poster_ref,
+                    version_ref=poster_version_ref,
+                    content_type=output.get("poster_content_type", "image/jpeg"),
+                    size_bytes=int(output["poster_size_bytes"]),
+                    sha256=output["poster_sha256"],
+                    original_filename=f"{run_id}.jpg",
+                    created_by_step="render",
+                    derived_from_step="render",
+                    input_file_version_ids=[version_ref.version_id],
+                    derived_from_run_id=run_id,
+                )
+                run_outputs["render_poster_file_id"] = poster_ref.file_id
+                run_outputs["render_poster_version_id"] = poster_version_ref.version_id
             repo.update_run_status(
                 RunRef(user_id=user_id, run_id=run_id),
                 status="completed",
-                outputs={
-                    "render_output_file_id": file_ref.file_id,
-                    "render_output_version_id": version_ref.version_id,
-                },
+                outputs=run_outputs,
             )
         except Exception as exc:
             self._mark_failed(repo, user_id, run_id, exc)

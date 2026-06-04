@@ -67,6 +67,7 @@ def render_r2(
     output_key: str,
     output_filename: str = "output.mp4",
     progress_context: dict | None = None,
+    poster_output_key: str | None = None,
 ) -> dict:
     from edit.render.renderer import render_timeline
     from progress_events import emit_progress
@@ -79,6 +80,7 @@ def render_r2(
         source_path = workdir / "source.mp4"
         audio_path = workdir / "song.wav"
         output_path = workdir / Path(output_filename).name
+        poster_path = workdir / "poster.jpg"
 
         emit_progress(progress_context, 5, "Downloading timeline")
         _download(client, bucket, timeline_key, timeline_path)
@@ -112,6 +114,7 @@ def render_r2(
                 35 + int((percent / 100) * 50),
                 detail,
             ),
+            poster_path=poster_path if poster_output_key else None,
         )
 
         body = output_path.read_bytes()
@@ -122,10 +125,29 @@ def render_r2(
             Body=body,
             ContentType="video/mp4",
         )
-        emit_progress(progress_context, 100, "Render uploaded")
-        return {
+
+        result = {
             "storage_key": output_key,
             "size_bytes": len(body),
             "sha256": hashlib.sha256(body).hexdigest(),
             "content_type": "video/mp4",
         }
+        if poster_output_key and poster_path.exists():
+            poster_bytes = poster_path.read_bytes()
+            client.put_object(
+                Bucket=bucket,
+                Key=poster_output_key,
+                Body=poster_bytes,
+                ContentType="image/jpeg",
+            )
+            result.update(
+                {
+                    "poster_storage_key": poster_output_key,
+                    "poster_size_bytes": len(poster_bytes),
+                    "poster_sha256": hashlib.sha256(poster_bytes).hexdigest(),
+                    "poster_content_type": "image/jpeg",
+                }
+            )
+
+        emit_progress(progress_context, 100, "Render uploaded")
+        return result
