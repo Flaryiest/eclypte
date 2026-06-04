@@ -19,14 +19,11 @@ Core invariants:
 - `web/`: Next.js 16.2.3, React 19.2, TypeScript, App Router. `web/AGENTS.md` has frontend-specific warnings.
 - `api/`: FastAPI app, workflow orchestration, storage substrate, YouTube downloader, and prototype media pipelines.
 - `api/publishing.py`: review-gated Buffer publishing helpers for Instagram Reels, OpenAI/fallback caption generation, public R2 media copies, Buffer GraphQL payloads, and channel diagnostics.
-- `api/content_radar.py`: TMDb-backed movie/TV discovery for new/trending available-now candidates, including watch-provider filtering and scoring.
-- `api/auto_import.py`: parses incoming R2 collection media keys into bucket-import candidates for the auto-import/auto-draft lane.
-- `api/storage/`: R2 object access, file manifests, file versions, upload reservations, run manifests/events/progress, prompt versions, references, content candidates, publishing posts, Postgres run store, Redis broadcaster, staging helpers, and tests.
+- `api/storage/`: R2 object access, file manifests, file versions, upload reservations, run manifests/events/progress, prompt versions, references, publishing posts, Postgres run store, Redis broadcaster, staging helpers, and tests.
 - `api/prototyping/music/`: YouTube/audio ingestion, Modal allin1 analysis, lyrics lookup, optional R2 publish.
 - `api/prototyping/video/`: scene detection, optical-flow motion analysis, impact detection, local CPU and Modal GPU runtimes, R2-aware Modal wrapper.
 - `api/prototyping/edit/`: deterministic planner, CLIP index, OpenAI synthesis agent, reference consolidator, timeline schemas/validators, MoviePy renderer, Modal render/index wrappers.
 - `api/COMMANDS.md`: command runbook. Prefer updating it when operational instructions change.
-- `workers/r2-import-forwarder/`: Cloudflare Worker queue consumer for R2 object-create events. It filters `incoming/collections/` media keys and forwards accepted events to `POST /internal/import-events`.
 - `docs/`: older plans/specs and Superpowers design artifacts.
 - `.agent/`, `.superpowers/`: agent/process assets, not runtime app code.
 - `content/` and `api/prototyping/**/content/`: local scratch/generated media.
@@ -78,8 +75,6 @@ Optional env vars:
 - `ECLYPTE_YOUTUBE_VISITOR_DATA` and `ECLYPTE_YOUTUBE_PO_TOKEN`: PO-token path for `pytubefix`.
 - `BUFFER_API_KEY`, `BUFFER_INSTAGRAM_CHANNEL_ID`, and `ECLYPTE_R2_PUBLIC_BASE_URL`: enable review-gated Buffer Instagram publishing from public R2 copies.
 - `OPENAI_API_KEY`: enables AI caption generation for publishing packages. `ECLYPTE_CAPTION_MODEL` is optional and defaults to a small GPT-5.4-class model; deterministic fallback captions are used when OpenAI is unavailable.
-- `TMDB_READ_ACCESS_TOKEN` or `TMDB_API_KEY`: enable Content Radar TMDb discovery. `ECLYPTE_CONTENT_RADAR_REGION` and `ECLYPTE_CONTENT_RADAR_MAX_PAGES` tune discovery defaults.
-- `ECLYPTE_AUTO_IMPORT_MAX_ACTIVE`, `ECLYPTE_AUTO_DRAFT_MAX_ACTIVE`, and `ECLYPTE_AUTO_DRAFT_MAX_DAILY`: cap the auto-import/auto-draft queues.
 
 Routes:
 
@@ -90,8 +85,7 @@ Routes:
 - Runs: `GET /v1/runs`, `GET /v1/runs/{run_id}`, `GET /v1/runs/{run_id}/events`, `GET /v1/runs/stream`, `GET /v1/runs/{run_id}/stream`.
 - Synthesis: `POST /v1/synthesis/references`, `GET /v1/synthesis/references`, `POST /v1/synthesis/consolidations`, `GET /v1/synthesis/prompt`, `POST /v1/synthesis/prompt/versions`, `POST /v1/synthesis/prompt/versions/{version_id}/activate`.
 - Publishing: `GET /v1/publishing/config`, `GET /v1/publishing/posts`, `POST /v1/publishing/posts`, `PATCH /v1/publishing/posts/{post_id}`, `POST /v1/publishing/posts/{post_id}/regenerate-caption`, `POST /v1/publishing/posts/{post_id}/send-buffer`, `POST /v1/publishing/posts/{post_id}/cancel`.
-- Content Radar: `POST /v1/content-radar/discover`, `GET /v1/content-candidates`, `POST /v1/content-candidates/{candidate_id}/approve`, `POST /v1/content-candidates/{candidate_id}/reject`, `POST /v1/content-candidates/{candidate_id}/mark-imported`.
-- Internal: `POST /internal/progress` and `POST /internal/import-events`, each requiring `X-Eclypte-Internal-Token`. `/internal/import-events` accepts Cloudflare R2 object-create payloads and creates `bucket_import` runs.
+- Internal: `POST /internal/progress`, requiring `X-Eclypte-Internal-Token`.
 
 ## Storage Substrate
 
@@ -106,8 +100,6 @@ Routes:
 - `SynthesisPromptVersion`
 - `SynthesisPromptState`
 - `StoredSynthesisPromptState`
-- `ContentProvider`
-- `ContentCandidateRecord`
 - `PublishingPostRecord`
 
 Artifact kinds are:
@@ -137,9 +129,6 @@ Important workflows:
 - `run_timeline_plan`: uses agent planning by default, deterministic planning when requested, and publishes `timeline`.
 - `run_render`: calls `eclypte-render-r2::render_r2`, publishes `render_output`.
 - `run_edit_pipeline`: parent workflow that selects saved assets, ensures missing analysis, plans, renders, and writes child run ids/output refs onto the parent run.
-- `run_bucket_import`: normalizes incoming songs to WAV and videos to MP4, publishes managed `song_audio`/`source_video` assets tagged `auto_import` and `collection:{collection_slug}`, runs analysis, and may create one `auto_draft` for a same-collection song/video pair.
-- Auto-draft renders tagged `auto_draft` create editable publishing packages, but Buffer queue/schedule remains review-gated and public R2 copies are created only when sending to Buffer.
-- `run_content_radar_discovery`: fetches TMDb trending/list candidates, filters to available-now watch providers in the region, and saves `ContentCandidateRecord` review state.
 - `run_synthesis_reference_ingest`: downloads/analyzes reference AMVs and records metrics.
 - `run_synthesis_consolidation`: consolidates queued/completed references into generated prompt guidance and prompt versions.
 
@@ -214,11 +203,10 @@ Subsystems:
 - `synthesis/adapter.py`: converts agent output into renderable timelines, dedupes near-duplicate source timestamps, trims song-duration overshoot, and runs continuity post-processing.
 - `index/frames.py`: sequential frame extraction. Do not revert to per-frame `CAP_PROP_POS_MSEC` seeking on long videos.
 - `index/embed.py`: CLIP frame/text embeddings.
-- `index/index_modal.py` and `index/query_modal.py`: volume-based prototype CLIP apps.
+- `index/query.py`: `query_ranges` motion-statistics ranking used by the deterministic planner.
 - `index/storage_modal.py`: R2-aware API CLIP app `eclypte-clip-index-r2`, with `build_index_r2` and `query_index_r2`.
 - `reference/`: reference AMV download, metrics, ingest, consolidation, and prompt-weight parsing.
 - `render/renderer.py`: MoviePy v2 renderer. It should read timeline JSON and media only, not planner internals.
-- `render_modal.py`: volume-based prototype renderer, must be invoked from `api/prototyping/`.
 - `render_storage_modal.py`: R2-aware API renderer `eclypte-render-r2`.
 
 Agent planning defaults:
@@ -251,8 +239,6 @@ Frontend architecture:
 - `web/src/app/dashboard/page.tsx`: redirects to `/dashboard/new-edit`.
 - `web/src/app/dashboard/new-edit/page.tsx`: compose/edit pipeline UI.
 - `web/src/app/dashboard/assets/page.tsx`: upload/import/manage asset library.
-- `web/src/app/dashboard/radar/page.tsx`: TMDb-powered available-now movie/TV candidate review with filters and approve/reject/imported actions.
-- `web/src/app/dashboard/automation/page.tsx`: auto-import runs, failed normalizations, active/completed auto-draft jobs, and collection filters.
 - `web/src/app/dashboard/synthesis/page.tsx`: references and prompt management.
 - `web/src/app/dashboard/publish/page.tsx`: Buffer publishing queue with setup diagnostics, render preview, caption editing/regeneration, queue/schedule actions, and posted/error metadata.
 - `web/src/app/dashboard/renders/page.tsx`: render outputs and recent render runs.
@@ -285,10 +271,7 @@ API-facing R2-aware apps:
 
 Prototype/volume apps:
 
-- `eclypte-video`
-- `eclypte-index`
-- `eclypte-query`
-- `eclypte-edit`
+- `eclypte-video` (used in production by synthesis reference ingest via `analyze_remote_bytes`)
 
 Modal wrappers should use pure local modules through `add_local_python_source()` or explicit storage wrappers. Pure analysis modules should not import Modal.
 
@@ -298,7 +281,6 @@ Modal wrappers should use pure local modules through `add_local_python_source()`
 - API contract changes: run `python -m pytest api/test_api_v1.py -v` and update `web/src/services/eclypteApi.ts`.
 - Storage changes: run `python -m pytest api/storage -v`.
 - Publishing changes: run `python -m pytest api/test_publishing.py -v`.
-- Content Radar changes: run `python -m pytest api/test_content_radar.py -v`.
 - Export option changes: run `python -m pytest api/test_export_options.py -v`.
 - Synthesis/index changes: run `python -m pytest api/prototyping/edit/synthesis api/prototyping/edit/index -v`.
 - Frontend changes: from `web/`, run `npm run lint` and `npm run build`.

@@ -36,7 +36,7 @@ Secrets (`api/prototyping/edit/synthesis/.env`):
 OPENAI_API_KEY=sk-...
 ```
 
-`agent.py` reads this via `load_dotenv()` when `--agent` mode runs.
+The synthesis agent (`api/prototyping/edit/synthesis/agent.py`) reads this via `load_dotenv()`.
 
 ---
 
@@ -64,10 +64,6 @@ $env:DATABASE_URL="postgresql://..."
 $env:REDIS_URL="redis://..."
 $env:ECLYPTE_INTERNAL_PROGRESS_URL="https://<api-host>/internal/progress"
 $env:ECLYPTE_INTERNAL_PROGRESS_TOKEN="..."
-# Optional TMDb content radar:
-$env:TMDB_READ_ACCESS_TOKEN="..."
-$env:ECLYPTE_CONTENT_RADAR_REGION="US"
-$env:ECLYPTE_CONTENT_RADAR_MAX_PAGES="1"
 ```
 
 ```bash
@@ -82,10 +78,6 @@ export DATABASE_URL="postgresql://..."
 export REDIS_URL="redis://..."
 export ECLYPTE_INTERNAL_PROGRESS_URL="https://<api-host>/internal/progress"
 export ECLYPTE_INTERNAL_PROGRESS_TOKEN="..."
-# Optional TMDb content radar:
-export TMDB_READ_ACCESS_TOKEN="..."
-export ECLYPTE_CONTENT_RADAR_REGION="US"
-export ECLYPTE_CONTENT_RADAR_MAX_PAGES="1"
 ```
 
 CORS defaults to `https://eclypte.vercel.app`, `http://localhost:3000`, and
@@ -150,31 +142,11 @@ Routes:
 - `GET /v1/files/{file_id}` and `GET /v1/files/{file_id}/versions/{version_id}` read manifests.
 - `GET /v1/files/{file_id}/versions/{version_id}/download-url` returns a presigned R2 GET URL.
 - `POST /v1/music/analyses`, `POST /v1/video/analyses`, `POST /v1/timelines`, and `POST /v1/renders` create run manifests and schedule background work.
-- `POST /v1/content-radar/discover` creates a `content_radar_discovery` run that pulls TMDb candidates, filters by watch-provider availability, and stores review records.
-- `GET /v1/content-candidates` lists TMDb movie/TV candidates; `POST /v1/content-candidates/{candidate_id}/approve`, `/reject`, and `/mark-imported` update review state.
 - `GET /v1/publishing/config` reports non-secret Buffer/OpenAI/public-media setup.
 - `GET /v1/publishing/posts`, `POST /v1/publishing/posts`, `PATCH /v1/publishing/posts/{post_id}`, `POST /v1/publishing/posts/{post_id}/regenerate-caption`, `POST /v1/publishing/posts/{post_id}/send-buffer`, and `POST /v1/publishing/posts/{post_id}/cancel` manage review-gated Buffer publishing packages.
 - `GET /v1/runs/{run_id}` and `GET /v1/runs/{run_id}/events` inspect workflow status.
 - `GET /v1/runs/stream` and `GET /v1/runs/{run_id}/stream` stream Redis-backed run updates when `REDIS_URL` is configured.
 - `POST /internal/progress` records worker progress and requires `X-Eclypte-Internal-Token`.
-- `POST /internal/import-events` accepts Cloudflare R2 object-create notifications for
-  `incoming/collections/{collection_slug}/songs/` and `/videos/`, creates a
-  `bucket_import` run, normalizes the object into a managed asset, and may start
-  an `auto_draft` run when a same-collection counterpart exists.
-
-Auto-import queue knobs:
-
-```powershell
-$env:ECLYPTE_AUTO_IMPORT_MAX_ACTIVE="2"
-$env:ECLYPTE_AUTO_DRAFT_MAX_ACTIVE="1"
-$env:ECLYPTE_AUTO_DRAFT_MAX_DAILY="3"
-```
-
-```bash
-export ECLYPTE_AUTO_IMPORT_MAX_ACTIVE="2"
-export ECLYPTE_AUTO_DRAFT_MAX_ACTIVE="1"
-export ECLYPTE_AUTO_DRAFT_MAX_DAILY="3"
-```
 
 Buffer publishing environment:
 
@@ -207,38 +179,8 @@ curl -H "X-User-Id: local_dev" \
   http://127.0.0.1:8000/v1/publishing/config
 ```
 
-`/dashboard/publish` is review-gated. Auto-drafts create editable publishing
-packages, but public R2 copies under `public/publishing/` and Buffer posts are
-created only when a user queues or schedules a package.
-
-Cloudflare R2 import Worker:
-
-```powershell
-cd workers/r2-import-forwarder
-npm test
-npx wrangler secret put ECLYPTE_INTERNAL_TOKEN
-npm run deploy
-npx wrangler r2 bucket notification create eclypte `
-  --event-type object-create `
-  --queue eclypte-import-events `
-  --prefix "incoming/collections/"
-```
-
-```bash
-cd workers/r2-import-forwarder
-npm test
-npx wrangler secret put ECLYPTE_INTERNAL_TOKEN
-npm run deploy
-npx wrangler r2 bucket notification create eclypte \
-  --event-type object-create \
-  --queue eclypte-import-events \
-  --prefix "incoming/collections/"
-```
-
-`workers/r2-import-forwarder/wrangler.jsonc` currently points at
-`https://api-production-8fb8.up.railway.app`. The Worker's
-`ECLYPTE_INTERNAL_TOKEN` secret must match the API service's
-`ECLYPTE_INTERNAL_PROGRESS_TOKEN`.
+`/dashboard/publish` is review-gated. Public R2 copies under `public/publishing/`
+and Buffer posts are created only when a user queues or schedules a package.
 
 Deploy the new R2-aware Modal wrappers before using video-analysis/render API
 jobs against live Modal:
@@ -266,32 +208,15 @@ Modal function from `api/prototyping/music/analysis_modal.py`.
 
 ## Music analysis (Modal GPU)
 
-Download a YouTube song → WAV → allin1 analysis JSON:
+Analyze an existing WAV with allin1 on Modal:
 
 ```powershell
 cd api/prototyping/music
-python main.py                # end-to-end: ytdownload + Modal analyze + lyrics
-# or, if the WAV already exists:
 modal run analysis_modal.py::main --wav content/output.wav
 ```
 
-If you also want the music workflow to publish `output.wav`, `output.json`, and
-`lyrics.txt` to R2 after local success, create `api/.env` from
-`api/.env.example` and fill in:
-
-```powershell
-$env:ECLYPTE_R2_ACCOUNT_ID="..."
-$env:ECLYPTE_R2_BUCKET="eclypte"
-$env:ECLYPTE_R2_ACCESS_KEY_ID="..."
-$env:ECLYPTE_R2_SECRET_ACCESS_KEY="..."
-$env:ECLYPTE_R2_REGION_NAME="auto"
-$env:ECLYPTE_DEFAULT_USER_ID="local_dev"
-```
-
-If those vars are missing, `python main.py` still succeeds locally and prints
-`R2 publish skipped: storage not configured.`
-
-Output: `api/prototyping/music/content/output.wav` + `output.json`.
+Output: `api/prototyping/music/content/output.json`. Production music analysis
+calls `eclypte-analysis::analyze_remote` directly from the cloud API.
 
 ---
 
@@ -318,32 +243,7 @@ Output: `api/prototyping/video/content/<name>.json`.
 
 ## CLIP index (Phase-3 prerequisite)
 
-Upload the source video to the edit volume (one-time per video):
-
-```powershell
-modal volume create eclypte-edit                                   # once, ever
-modal volume put eclypte-edit "api/prototyping/video/content/Project Hail Mary.mp4"
-modal volume put eclypte-edit api/prototyping/music/content/output.wav
-```
-
-Build the CLIP index (from `api/prototyping/`):
-
-```powershell
-cd api/prototyping
-modal run edit/index/index_modal.py --video-filename "Project Hail Mary.mp4"
-```
-
-Deploy the query endpoint (one-time):
-
-```powershell
-cd api/prototyping
-$env:PYTHONIOENCODING="utf-8"
-modal deploy edit/index/query_modal.py
-```
-
-(The `PYTHONIOENCODING` prefix only matters when Modal's pip output hits Unicode characters; harmless otherwise.)
-
-Deploy the R2-backed API index/query app used by `/v1/timelines` agent mode:
+Deploy the R2-backed API index/query app (`eclypte-clip-index-r2`) used by `/v1/timelines` agent mode:
 
 ```powershell
 cd api/prototyping
@@ -351,146 +251,9 @@ $env:PYTHONIOENCODING="utf-8"
 modal deploy edit/index/storage_modal.py
 ```
 
-The cloud API builds missing `clip_index` artifacts on demand, reuses existing ones derived from the selected source video version, and stores them in R2. The older `eclypte-edit` volume commands above are still for local/prototype CLI runs.
+(The `PYTHONIOENCODING` prefix only matters when Modal's pip output hits Unicode characters; harmless otherwise.)
 
----
-
-## Plan a timeline (Phase-1: deterministic)
-
-From the repo root:
-
-```powershell
-python -m api.prototyping.edit.main `
-    --song "api/prototyping/music/content/output.wav" `
-    --source "api/prototyping/video/content/Project Hail Mary.mp4" `
-    --out "api/prototyping/edit/content/timeline.json"
-```
-
-```bash
-python -m api.prototyping.edit.main \
-    --song "api/prototyping/music/content/output.wav" \
-    --source "api/prototyping/video/content/Project Hail Mary.mp4" \
-    --out "api/prototyping/edit/content/timeline.json"
-```
-
----
-
-## Plan a timeline (Phase-3: gpt-5.4 agent)
-
-Requires: CLIP index built, `eclypte-query` deployed, `OPENAI_API_KEY` set in `.env`.
-
-```powershell
-python -m api.prototyping.edit.main `
-    --song "api/prototyping/music/content/output.wav" `
-    --source "api/prototyping/video/content/Project Hail Mary.mp4" `
-    --out "api/prototyping/edit/content/timeline_agent.json" `
-    --agent `
-    --instructions "Fast-paced action AMV, open strong, tell the full story chronologically."
-```
-
-Single-line version (paste-friendly):
-
-```powershell
-python -m api.prototyping.edit.main --song "api/prototyping/music/content/output.wav" --source "api/prototyping/video/content/Project Hail Mary.mp4" --out "api/prototyping/edit/content/timeline_agent.json" --agent --instructions "Fast-paced action AMV, open strong, tell the full story chronologically."
-```
-
----
-
-## Plan + render in one command
-
-Add `--render` to any of the plan commands above. It subprocesses `modal run edit/render_modal.py` after writing the timeline:
-
-```powershell
-python -m api.prototyping.edit.main `
-    --song "api/prototyping/music/content/output.wav" `
-    --source "api/prototyping/video/content/Project Hail Mary.mp4" `
-    --out "api/prototyping/edit/content/timeline_agent.json" `
-    --agent `
-    --instructions "Fast-paced action AMV, open strong, tell the full story chronologically." `
-    --render `
-    --render-out "api/prototyping/edit/content/output_agent.mp4"
-```
-
-`--render-out` defaults to `api/prototyping/edit/content/output.mp4` if omitted.
-
-For faster render turnaround with no encode-quality change, add:
-
-```powershell
---render-store-only
-```
-
-`--render-store-only` keeps the MP4 on the `eclypte-edit` Modal volume instead
-of returning the full file over the function response.
-
-`--render-preset` is still available if you want a different x264 speed/compression
-tradeoff, but the quality-safe fast path is just `--render-store-only`.
-
-For the higher-capacity benchmark profile, add:
-
-```powershell
---render-profile boosted
-```
-
-To test whether local container staging beats repeated volume reads on long renders,
-add:
-
-```powershell
---render-stage-inputs-local
-```
-
----
-
-## Render a timeline manually (Phase-1 or Phase-3)
-
-From `api/prototyping/` (required — `add_local_python_source("edit")` resolves relative to cwd):
-
-```powershell
-cd api/prototyping
-modal run edit/render_modal.py `
-    --timeline edit/content/timeline.json `
-    --out edit/content/output.mp4
-```
-
-Faster remote-only variant:
-
-```powershell
-cd api/prototyping
-modal run edit/render_modal.py `
-    --timeline edit/content/timeline.json `
-    --out edit/content/output.mp4 `
-    --store-only
-```
-
-Higher-capacity benchmark variant:
-
-```powershell
-cd api/prototyping
-modal run edit/render_modal.py `
-    --timeline edit/content/timeline.json `
-    --out edit/content/output.mp4 `
-    --render-profile boosted `
-    --store-only
-```
-
-Higher-capacity + local-staging benchmark:
-
-```powershell
-cd api/prototyping
-modal run edit/render_modal.py `
-    --timeline edit/content/timeline.json `
-    --out edit/content/output.mp4 `
-    --render-profile boosted `
-    --render-stage-inputs-local `
-    --store-only
-```
-
-Query warm-container tuning note:
-if you want the `scaledown_window=600` change on the deployed query app, redeploy it:
-
-```powershell
-cd api/prototyping
-modal deploy edit/index/query_modal.py
-```
+The cloud API builds missing `clip_index` artifacts on demand, reuses existing ones derived from the selected source video version, and stores them in R2.
 
 ---
 
@@ -509,14 +272,6 @@ python -m api.prototyping.edit.reference show <ref_id>
 
 # Consolidate via LLM → rewrites knowledge/references.md
 python -m api.prototyping.edit.reference consolidate
-```
-
-Apply the consolidated pattern weights to a Phase-1 plan:
-
-```powershell
-python -m api.prototyping.edit.main `
-    --song ... --source ... --out ... `
-    --use-annotations
 ```
 
 ---
@@ -565,6 +320,5 @@ explicit opt-in env vars.
 
 ```powershell
 modal app list                                # see deployed + running apps
-modal volume ls eclypte-edit                  # list files on a volume
-modal volume get eclypte-edit output_agent.mp4 ./    # download from volume
+modal volume ls eclypte-video-input           # list files on a volume
 ```

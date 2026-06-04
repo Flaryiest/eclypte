@@ -74,11 +74,10 @@ Before saying a task is done:
   - `api/prototyping/video/`: scene detection, motion/impact extraction, and the Modal-backed video analysis flow.
   - `api/prototyping/video/storage_modal.py`: R2-aware Modal video-analysis wrapper for API jobs. It reads the source blob from R2 and returns analysis JSON without Railway downloading the video.
   - `api/prototyping/edit/`: the main AMV pipeline. Phase 1 is deterministic planning, Phase 2 ingests and consolidates reference AMVs into `knowledge/references.md`, and Phase 3 uses OpenAI Responses plus Modal CLIP retrieval to synthesize timelines before rendering.
-  - `api/prototyping/edit/render_modal.py` and `api/prototyping/edit/render/`: Modal entrypoint plus MoviePy renderer for turning timeline JSON into MP4 output.
+  - `api/prototyping/edit/render/`: MoviePy renderer for turning timeline JSON into MP4 output.
   - `api/prototyping/edit/render_storage_modal.py`: R2-aware Modal render wrapper for API jobs. It pulls timeline/media refs from R2 and writes the rendered MP4 back to R2.
   - `api/prototyping/edit/index/`: frame extraction, CLIP embedding, Modal index build/query, and tests for retrieval helpers.
   - `api/prototyping/edit/synthesis/`: timeline schema, validator, deterministic planner, agent loop, adapter, and tests.
-  - `api/prototyping/agent/main.py`: a small OpenAI smoke script, not the main editing pipeline.
   - `web/`: Next.js 16 + React 19 frontend with Clerk auth, a marketing landing page, lightweight pricing route, and a real dashboard console for uploads, saved assets, edit pipelines, synthesis prompt management, render browsing, and settings.
 - **Testing Reality**: Automated coverage is concentrated in `api/storage/`, `api/test_api_v1.py`, `api/prototyping/music/`, `api/prototyping/edit/index/`, and `api/prototyping/edit/synthesis/`. Use `python -m pytest api -v` for the broad backend check. `pytest.ini` disables pytest's cache provider and sets tmp-path retention to zero to reduce local test artifacts. There is still no comparable frontend test suite in the repo; use `npm run lint` and `npm run build` from `web/` for frontend verification.
 - **R2 Direction**: R2 is now the v1 metadata and artifact store for the cloud API. `FileManifest`, `FileVersionMeta`, `UploadReservation`, `RunManifest`, and `RunEvent` are the canonical persistence model. Direct browser-to-R2 upload reservation/completion is implemented; music/video analysis, timeline planning, and rendering all publish output artifacts through R2-backed run manifests.
@@ -91,9 +90,7 @@ Before saying a task is done:
   - Synthesis: `POST /v1/synthesis/references`, `GET /v1/synthesis/references`, `POST /v1/synthesis/consolidations`, `GET /v1/synthesis/prompt`, `POST /v1/synthesis/prompt/versions`, `POST /v1/synthesis/prompt/versions/{version_id}/activate`
 - **Cloud REST API Workflow Shape**: workflow endpoints create a `RunManifest` with `status="running"` and return `202` immediately. FastAPI background tasks call `DefaultWorkflowRunner`; if a worker dies mid-run, the run remains inspectable in R2 and can be retried manually or by a future durable queue.
 - **Music Workflow Status**:
-  - `api/prototyping/music/main.py` still runs local-first: YouTube download -> WAV -> Modal analysis -> lyrics text. If shared storage is configured, it also publishes the generated WAV, analysis JSON, and lyrics text to R2 and records a `music_pipeline` run manifest.
+  - Production music analysis runs through `api/workflows.py::run_music_analysis`, which calls `eclypte-analysis::analyze_remote` and publishes a `music_analysis` artifact through `api/storage/`.
   - The shared storage entrypoint is `api.storage.factory.get_object_store()`. It loads `api/.env` if present and returns `None` in optional mode when required R2 env vars are missing.
-  - `api/prototyping/music/storage_publish.py` is the first real workflow publisher into `api/storage/`. It creates one run plus three immutable artifacts: `song_audio`, `music_analysis`, and `lyrics`.
-  - `api/prototyping/music/lyrics.py` now redirects `syncedlyrics` cache writes to `api/prototyping/music/content/.cache` on Windows so local `AppData` permission issues do not break or warn during normal runs.
+  - `api/prototyping/music/lyrics.py` redirects `syncedlyrics` cache writes to `api/prototyping/music/content/.cache` on Windows so local `AppData` permission issues do not break or warn during normal runs.
   - On Windows, `pytubefix` progress output may still require `PYTHONIOENCODING=utf-8` for clean terminal execution.
-  - The currently verified Windows invocation shape is: activate `api/.venv`, set `PYTHONPATH` to the repo root, optionally set `PYTHONIOENCODING=utf-8`, then run `main.py` from `api/prototyping/music/`. That keeps `api.storage` imports working locally while letting `analysis_modal.py` resolve `add_local_python_source("analysis")` correctly for Modal.
