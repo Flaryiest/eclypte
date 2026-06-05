@@ -234,9 +234,7 @@ def _fallback_caption_draft(
     render_name: str,
     collection_slug: str = "",
 ) -> CaptionDraft:
-    collection_label = _humanize(collection_slug) if collection_slug else "this edit"
-    hook = f"{collection_label} hit different on this drop."
-    caption = f"{hook}\n\nPrivate Eclypte draft, ready for the timeline."
+    caption = f"{_humanize(collection_slug)} edit fr 🔥" if collection_slug else "this one goes crazy fr 🔥"
     hashtags = _dedupe_hashtags(
         [
             "#amv",
@@ -265,15 +263,28 @@ def _openai_caption_draft(
     response = client.responses.create(
         model=model,
         instructions=(
-            "You write concise Instagram Reels captions for AMV edits. "
-            "Return only valid JSON with keys caption, hashtags, and notes. "
-            "Caption must be punchy, safe to edit, under 2200 characters, and not claim rights or official status. "
-            "Hashtags must be an array of up to 12 hashtag strings."
+            "You write Instagram Reels captions for anime edits (AMVs) the way a real "
+            "Gen-Z creator posts them — NOT like a brand, marketer, or AI. "
+            "Return only valid JSON with keys caption, hashtags, and notes.\n"
+            "VOICE: short and casual, internet-native. Usually one line (a few words is "
+            "fine), mostly lowercase, at most 1-2 emojis. Slang is good. The caption does "
+            "NOT need to describe the video — a relatable, funny, or trending/nonsense "
+            "one-liner works great.\n"
+            "HARD BANS (these scream AI, never do them): listing pacing/transitions/energy; "
+            "the phrases 'hits different', 'quick thoughts', 'if you're into', 'worth the "
+            "watch', 'drop a rating', 'the vibe', 'let that sink in'; em dashes; any "
+            "corporate/marketing tone; claiming rights or official status.\n"
+            "Vary it every time. Vibe examples (DO NOT copy, just match the energy): "
+            "'ok this one ate'; 'no bc why did this go so hard'; 'pov: you cant stop "
+            "rewatching'; 'they really said cinema'; 'this is my roman empire fr'; "
+            "'lowkey cooked'; 'hi yes one ticket to this please'.\n"
+            "Caption under 2200 characters (keep it short). hashtags = array of up to 12 "
+            "lowercase hashtag strings. notes = a brief internal note for the editor."
         ),
         input=(
-            f"Render filename: {render_name}\n"
-            f"Collection: {collection_label}\n"
-            "Create one caption for a review-gated Instagram Reel post."
+            "Make a caption for this anime edit (AMV) reel. "
+            f"Loose context you can riff on or completely ignore: source/collection = "
+            f"{collection_label}. Write ONE caption a real creator would actually post."
         ),
         text={
             "format": {

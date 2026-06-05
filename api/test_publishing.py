@@ -81,7 +81,10 @@ class NoopWorkflowRunner:
     def run_synthesis_consolidation(self, **kwargs): ...
 
 
-def test_caption_draft_is_punchy_and_collection_aware():
+def test_caption_draft_is_punchy_and_collection_aware(monkeypatch):
+    # Force the deterministic fallback (no live OpenAI call) so the test is
+    # not sensitive to OPENAI_API_KEY being present in the environment.
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     draft = generate_caption_draft(
         render_name="run_auto_123.mp4",
         collection_slug="mario",
