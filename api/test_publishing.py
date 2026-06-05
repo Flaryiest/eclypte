@@ -18,6 +18,7 @@ class RecordingBufferClient:
     def __init__(self):
         self.calls = []
         self.channel_calls = []
+        self.post_calls = []
 
     def create_video_post(self, *, channel_id, text, media_url, mode, due_at=None):
         self.calls.append(
@@ -46,6 +47,22 @@ class RecordingBufferClient:
             "is_locked": False,
             "external_link": "https://instagram.com/eclypte",
         }
+
+    def get_post(self, *, post_id):
+        self.post_calls.append(post_id)
+        return BufferPostResult(
+            post_id=post_id,
+            status="sent",
+            post_url="https://instagram.com/reel/abc123",
+        )
+
+
+class QueuedBufferClient(RecordingBufferClient):
+    """createPost returns no permalink yet (queued); get_post back-fills it later."""
+
+    def create_video_post(self, **kwargs):
+        self.calls.append(kwargs)
+        return BufferPostResult(post_id="buf_777", status="queued", post_url=None)
 
 
 class FailingBufferClient(RecordingBufferClient):
@@ -249,6 +266,48 @@ def test_publishing_api_prepares_updates_and_queues_buffer_post(monkeypatch):
         }
     ]
     assert [item["post_id"] for item in listed.json()] == [post_id]
+
+
+def test_refresh_status_backfills_post_url_from_buffer(monkeypatch):
+    monkeypatch.setenv("BUFFER_INSTAGRAM_CHANNEL_ID", "channel_instagram")
+    monkeypatch.setenv("ECLYPTE_R2_PUBLIC_BASE_URL", "https://media.example.com")
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    render = _publish_render(repo, body=b"render-video")
+    buffer = QueuedBufferClient()
+    client = TestClient(
+        create_app(
+            store=store,
+            workflow_runner=NoopWorkflowRunner(),
+            buffer_client=buffer,
+        )
+    )
+
+    post_id = client.post(
+        "/v1/publishing/posts",
+        headers={"X-User-Id": "user_123"},
+        json={"render_output": render},
+    ).json()["post_id"]
+    queued = client.post(
+        f"/v1/publishing/posts/{post_id}/send-buffer",
+        headers={"X-User-Id": "user_123"},
+        json={"mode": "queue"},
+    ).json()
+
+    assert queued["status"] == "queued"
+    assert queued["post_url"] is None
+    assert queued["buffer_post_id"] == "buf_777"
+
+    refreshed = client.post(
+        f"/v1/publishing/posts/{post_id}/refresh-status",
+        headers={"X-User-Id": "user_123"},
+    ).json()
+
+    assert buffer.post_calls == ["buf_777"]
+    assert refreshed["post_url"] == "https://instagram.com/reel/abc123"
+    assert refreshed["buffer_status"] == "sent"
+    assert refreshed["status"] == "published"
+    assert refreshed["posted_at"]
 
 
 def test_publishing_config_reports_non_secret_setup_and_buffer_channel(monkeypatch):

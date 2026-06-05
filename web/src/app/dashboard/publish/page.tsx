@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import {
     CalendarClock,
@@ -49,6 +49,7 @@ export default function PublishPage() {
     const [error, setError] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState(false)
     const [isWorking, setIsWorking] = useState(false)
+    const polledRef = useRef<Set<string>>(new Set())
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
     const visiblePosts = useMemo(() => filterPosts(posts, tab), [posts, tab])
@@ -117,6 +118,36 @@ export default function PublishPage() {
                 setError(errorMessage(caught))
             }
         })
+        return () => {
+            ignore = true
+        }
+    }, [api, selected])
+
+    // A sent post has no live permalink until Buffer actually publishes it, and we
+    // never poll again afterward. So when the selected post has a Buffer id but no
+    // post URL yet, ask Buffer once (per post, on load/selection) to back-fill it.
+    useEffect(() => {
+        if (!api || !selected || !selected.buffer_post_id || selected.post_url) {
+            return
+        }
+        if (polledRef.current.has(selected.post_id)) {
+            return
+        }
+        polledRef.current.add(selected.post_id)
+        const postId = selected.post_id
+        let ignore = false
+        void api
+            .refreshPublishingPostStatus(postId)
+            .then((next) => {
+                if (!ignore) {
+                    setPosts((current) =>
+                        current.map((post) => (post.post_id === next.post_id ? next : post)),
+                    )
+                }
+            })
+            .catch(() => {
+                polledRef.current.delete(postId)
+            })
         return () => {
             ignore = true
         }

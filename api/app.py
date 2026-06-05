@@ -1060,6 +1060,33 @@ def create_app(
             )
         )
 
+    @app.post(
+        "/v1/publishing/posts/{post_id}/refresh-status",
+        response_model=PublishingPostRecord,
+    )
+    def refresh_publishing_post_status(
+        post_id: str,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> PublishingPostRecord:
+        post = publishing_post_or_404(repo, uid, post_id)
+        if not post.buffer_post_id:
+            return post
+        client = resolve_buffer_client()
+        try:
+            result = client.get_post(post_id=post.buffer_post_id)
+        except BufferClientError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        update = {"updated_at": utc_now()}
+        if result.status:
+            update["buffer_status"] = result.status
+        if result.post_url:
+            update["post_url"] = result.post_url
+            if post.status != "published":
+                update["status"] = "published"
+                update["posted_at"] = post.posted_at or utc_now()
+        return repo.save_publishing_post(post.model_copy(update=update))
+
     @app.post("/v1/publishing/posts/{post_id}/cancel", response_model=PublishingPostRecord)
     def cancel_publishing_post(
         post_id: str,

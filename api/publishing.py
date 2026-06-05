@@ -88,11 +88,16 @@ class BufferClient:
         post = result.get("post")
         if not isinstance(post, dict) or not post.get("id"):
             raise BufferClientError("Buffer did not return a post id")
-        return BufferPostResult(
-            post_id=str(post["id"]),
-            status=str(post["status"]) if post.get("status") is not None else None,
-            post_url=str(post["url"]) if post.get("url") else None,
-        )
+        return _buffer_post_result(post)
+
+    def get_post(self, *, post_id: str) -> BufferPostResult:
+        response = self._graphql(build_buffer_get_post_payload(post_id=post_id))
+        if response.get("errors"):
+            raise BufferClientError(_first_error_message(response["errors"]))
+        post = response.get("data", {}).get("post")
+        if not isinstance(post, dict) or not post.get("id"):
+            raise BufferClientError("Buffer did not return a post")
+        return _buffer_post_result(post)
 
     def get_channel(self, *, channel_id: str) -> BufferChannelStatus:
         response = self._graphql(build_buffer_channel_payload(channel_id=channel_id))
@@ -161,6 +166,7 @@ def build_buffer_create_post_payload(
                   post {
                     id
                     status
+                    externalLink
                     dueAt
                     text
                     channelId
@@ -177,6 +183,30 @@ def build_buffer_create_post_payload(
         """,
         "variables": {"input": input_payload},
     }
+
+
+def build_buffer_get_post_payload(*, post_id: str) -> dict[str, Any]:
+    return {
+        "query": """
+            query Post($input: PostInput!) {
+              post(input: $input) {
+                id
+                status
+                externalLink
+                sentAt
+              }
+            }
+        """,
+        "variables": {"input": {"id": post_id}},
+    }
+
+
+def _buffer_post_result(post: dict[str, Any]) -> BufferPostResult:
+    return BufferPostResult(
+        post_id=str(post["id"]),
+        status=str(post["status"]) if post.get("status") is not None else None,
+        post_url=str(post["externalLink"]) if post.get("externalLink") else None,
+    )
 
 
 def build_buffer_channel_payload(*, channel_id: str) -> dict[str, Any]:

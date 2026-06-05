@@ -395,6 +395,13 @@ export class EclypteApiClient {
         )
     }
 
+    async refreshPublishingPostStatus(postId: string, signal?: AbortSignal) {
+        return this.request<PublishingPost>(
+            `/v1/publishing/posts/${encodeURIComponent(postId)}/refresh-status`,
+            { method: "POST", signal },
+        )
+    }
+
     async createUpload(request: UploadCreateRequest, signal?: AbortSignal) {
         return this.request<UploadCreateResponse>("/v1/uploads", {
             method: "POST",
