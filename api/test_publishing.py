@@ -156,6 +156,7 @@ def test_buffer_video_post_payload_targets_queue_with_public_media_url():
                 },
             }
         ],
+        "metadata": {"instagram": {"type": "reel", "shouldShareToFeed": True}},
     }
 
 

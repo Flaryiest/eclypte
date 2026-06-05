@@ -147,6 +147,9 @@ def build_buffer_create_post_payload(
         "schedulingType": "automatic",
         "mode": mode,
         "assets": [{"video": {"url": media_url}}],
+        # Buffer requires a channel-specific post type for Instagram; we publish
+        # Reels. `shouldShareToFeed` is also non-null on InstagramPostMetadataInput.
+        "metadata": {"instagram": {"type": "reel", "shouldShareToFeed": True}},
     }
     if due_at:
         input_payload["dueAt"] = due_at
