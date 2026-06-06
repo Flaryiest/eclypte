@@ -10,7 +10,7 @@ from api.prototyping.edit.index.query import query_clips
 
 _ENV_PATH = Path(__file__).resolve().parent / ".env"
 
-MODEL = "gpt-5.4"
+MODEL = "gpt-5.5"
 REASONING_EFFORT = "high"
 VERBOSITY = "low"
 MAX_LOOPS = 10

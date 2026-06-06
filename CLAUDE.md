@@ -213,7 +213,7 @@ Subsystems:
 Agent planning defaults:
 
 - `PlanningMode` is `"agent"` unless explicitly set to `"deterministic"`.
-- `synthesis/agent.py` currently uses `MODEL = "gpt-5.4"`, `reasoning_effort="high"`, and `verbosity="low"`.
+- `synthesis/agent.py` currently uses `MODEL = "gpt-5.5"`, `reasoning_effort="high"`, and `verbosity="low"`.
 - Responses API state is carried through `previous_response_id`; do not re-upload full message history each loop.
 - Tools are `query_clips(query, top_k)` and `finish_edit(timeline)`.
 - Agent mode may create/reuse `clip_index` assets and records `clip_index_file_id`, `clip_index_version_id`, and `synthesis_prompt_version_id`.
