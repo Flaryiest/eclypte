@@ -67,6 +67,33 @@ def test_run_synthesis_loop():
         assert any(i.get("type") == "message" and "Reminder" in i.get("content", "") for i in second_input)
 
 
+def test_source_duration_added_to_user_prompt():
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai, \
+         patch("api.prototyping.edit.synthesis.agent.query_clips"):
+
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+
+        finish = _fake_response(
+            [_function_call(
+                "finish_edit",
+                '{"timeline": [{"start_time": 0, "end_time": 2, "source_timestamp": 5.0}]}',
+                "call_1",
+            )],
+            response_id="resp_1",
+        )
+        mock_create = MagicMock(side_effect=[finish])
+        mock_client.responses.create = mock_create
+
+        run_synthesis_loop("dummy.mp4", "make a cool video", source_duration_sec=137.0)
+
+        # The source extent + full-span mandate must reach the model so it knows
+        # where the end of the film is, regardless of the active system prompt.
+        first_input = mock_create.call_args_list[0].kwargs["input"]
+        assert "137" in first_input
+        assert "full source" in first_input.lower()
+
+
 def test_run_synthesis_loop_accepts_injected_prompt_and_query_function():
     with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
         mock_client = MagicMock()

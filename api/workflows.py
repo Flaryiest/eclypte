@@ -942,6 +942,7 @@ class DefaultWorkflowRunner:
             song=song,
             system_prompt=active_prompt.prompt_text,
             query_clips_fn=query_clip_index,
+            source_duration_sec=float(video["source"]["duration_sec"]),
         )
         self._append_progress_context(repo, progress_context, 70, "Adapting agent timeline")
         timeline = adapt(
@@ -1384,6 +1385,7 @@ def _run_agent_synthesis(
     song: dict,
     system_prompt: str,
     query_clips_fn,
+    source_duration_sec: float | None = None,
 ) -> list[dict]:
     from api.prototyping.edit.synthesis.agent import run_synthesis_loop
 
@@ -1393,6 +1395,7 @@ def _run_agent_synthesis(
         song=song,
         system_prompt=system_prompt,
         query_clips_fn=query_clips_fn,
+        source_duration_sec=source_duration_sec,
     )
 
 

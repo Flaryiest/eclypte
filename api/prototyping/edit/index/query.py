@@ -34,6 +34,7 @@ def query_ranges(
     max_duration_sec: float = 4.0,
     exclude_scene_indices: set[int] | None = None,
     embeddings_path: Path | str | None = None,
+    time_window: tuple[float, float] | None = None,
 ) -> list[dict]:
     """
     Return up to `n` candidate ranges ordered by score (highest first).
@@ -42,6 +43,11 @@ def query_ranges(
 
     `query_text` and `embeddings_path` are accepted and ignored - they exist
     so Phase-3 CLIP retrieval can be swapped in without changing callers.
+
+    `time_window`, when given as `(lo, hi)`, restricts candidates to scenes whose
+    midpoint falls within that source-time window. This lets the planner bias a
+    shot toward the region of the source that matches its song position, so the
+    edit spans the full source regardless of length.
     """
     del query_text, section, embeddings_path
 
@@ -54,6 +60,11 @@ def query_ranges(
         duration = float(scene.get("duration_sec", 0.0))
         if duration < min_duration_sec:
             continue
+
+        if time_window is not None:
+            midpoint = (float(scene["start_sec"]) + float(scene["end_sec"])) / 2.0
+            if not (time_window[0] <= midpoint <= time_window[1]):
+                continue
 
         motion = scene.get("motion") or {}
         avg_intensity = float(motion.get("avg_intensity", 0.0))

@@ -65,6 +65,13 @@ def plan(
             "label": "instrumental",
         }]
 
+    # Map song progress -> source position so the edit spans the full source
+    # regardless of length: a shot at fraction f through the song is biased
+    # toward fraction f through the source. See _pick_range/query_ranges.
+    song_start = float(segments[0]["start_sec"])
+    song_end = float(segments[-1]["end_sec"])
+    song_span = max(song_end - song_start, 1e-6)
+
     explicit_audio_start = audio_start_sec is not None
     audio_start = 0.0 if explicit_audio_start else _pick_audio_start(segments[0], downbeats)
     render_audio_start = float(audio_start_sec) if explicit_audio_start else audio_start
@@ -107,6 +114,8 @@ def plan(
             if duration < MIN_SHOT_SEC:
                 continue
 
+            progress = min(1.0, max(0.0, (song_t0 - song_start) / song_span))
+            target_center = progress * source_duration
             pick = _pick_range(
                 scenes,
                 {"label": label, "start_sec": seg_start, "end_sec": seg_end},
@@ -114,6 +123,8 @@ def plan(
                 energy_target=energy_target,
                 duration=duration,
                 exclude={last_scene} if last_scene is not None else set(),
+                target_center=target_center,
+                source_duration=source_duration,
             )
             if pick is None:
                 continue
@@ -261,14 +272,33 @@ def _pick_range(
     energy_target: float,
     duration: float,
     exclude: set[int],
+    target_center: float | None = None,
+    source_duration: float | None = None,
 ) -> dict | None:
-    # Try progressively looser constraints — always return something.
-    for ex, min_dur in [
-        (exclude, duration),
-        (set(),   duration),
-        (set(),   max(0.3, duration * 0.5)),
-        (set(),   0.0),
-    ]:
+    # When a target source position is given, bias toward scenes near it via a
+    # time window, widening then dropping the window across attempts so a pick is
+    # always found while early (preferred) attempts stay near the target region.
+    base_w = None
+    if target_center is not None and source_duration:
+        base_w = max(float(source_duration) * 0.12, 8.0)
+
+    # (exclude_set, min_duration, window_multiplier); window_multiplier=None drops
+    # the time window. Progressively looser — always returns something.
+    attempts: list[tuple[set[int], float, float | None]] = [
+        (exclude, duration, 1.0),
+        (set(),   duration, 1.0),
+        (set(),   duration, 2.5),
+        (set(),   max(0.3, duration * 0.5), 2.5),
+        (set(),   max(0.3, duration * 0.5), None),
+        (set(),   0.0, None),
+    ]
+    for ex, min_dur, window_mult in attempts:
+        time_window = None
+        if base_w is not None and window_mult is not None:
+            time_window = (
+                target_center - base_w * window_mult,
+                target_center + base_w * window_mult,
+            )
         ranges = query_ranges(
             scenes,
             section=section,
@@ -278,6 +308,7 @@ def _pick_range(
             min_duration_sec=min_dur,
             max_duration_sec=duration + 2.0,
             exclude_scene_indices=ex,
+            time_window=time_window,
         )
         if ranges:
             return ranges[0]

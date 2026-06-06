@@ -30,7 +30,7 @@ Editorial guidelines (baseline — follow unless the user's instructions overrid
 - Pace shots against the sections. Denser cuts in high-energy sections (chorus, drop); longer holds in low-energy sections (intro, verse, bridge).
 - The opening is the most important section. Invest the most creativity and pattern variety at the start: tight cuts on impacts, held beats, motion-driven transitions. This is what hooks the viewer.
 - After the opening, plain cut transitions are fine. You do not need to apply creative patterns to every shot — the rest of the edit should carry the story, not show off.
-- Cover the full narrative arc of the source (or as much of it as fits the song), not just a cluster of high-energy moments.
+- Span the full source from beginning to end regardless of song length: the edit must reach the ending of the source, not just a cluster of early or high-energy moments. A shorter song means fewer, more spread-out shots — not a smaller slice of the film. You may still dwell on or revisit a standout moment.
 - Pick shots mostly in chronological order from the source video. Small re-orderings for pacing are OK, but the overall progression should move forward through the source.
 - CRITICAL: every `source_timestamp` in your final `finish_edit` call MUST be DISTINCT from every other `source_timestamp` (differ by more than 1 second). The adapter will drop any duplicates — repeated shots will be silently removed, shortening your AMV. This is the most common failure mode; double-check before calling `finish_edit`.
 
@@ -111,6 +111,19 @@ def _format_song_context(song: dict) -> str:
     return "\n".join(lines)
 
 
+def _format_source_context(source_duration_sec: float) -> str:
+    d = float(source_duration_sec)
+    return (
+        f"Source video: {d:.0f} seconds long.\n"
+        f"Span the FULL source from start to end regardless of song length: your "
+        f"earliest shots should come from near 0s and your latest from near {d:.0f}s. "
+        f"A shorter song means fewer, more spread-out shots — NOT a smaller slice of "
+        f"the film. You may still dwell on or revisit a standout moment (a climax, a "
+        f"key scene); coverage need not be even, but do not leave the back half or "
+        f"ending of the source unrepresented."
+    )
+
+
 def _create(
     client: OpenAI,
     *,
@@ -140,6 +153,7 @@ def run_synthesis_loop(
     openai_api_key: str | None = None,
     system_prompt: str | None = None,
     query_clips_fn: Callable[[str, str, int], list[dict]] | None = None,
+    source_duration_sec: float | None = None,
 ) -> list[dict]:
     """
     Runs an LLM agent loop to construct an AMV timeline based on instructions.
@@ -159,9 +173,15 @@ def run_synthesis_loop(
     active_system_prompt = system_prompt or SYSTEM_PROMPT
     clip_query = query_clips_fn or query_clips
 
-    user_content = instructions
+    context_blocks: list[str] = []
     if song is not None:
-        user_content = _format_song_context(song) + "\n\nUser brief:\n" + instructions
+        context_blocks.append(_format_song_context(song))
+    if source_duration_sec is not None and float(source_duration_sec) > 0:
+        context_blocks.append(_format_source_context(source_duration_sec))
+    if context_blocks:
+        user_content = "\n\n".join(context_blocks) + "\n\nUser brief:\n" + instructions
+    else:
+        user_content = instructions
 
     print(f"Agent thinking (loop 1)...")
     response = _create(client, input_=user_content, system_prompt=active_system_prompt)
