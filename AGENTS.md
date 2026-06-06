@@ -25,7 +25,7 @@ Eclypte is an AMV creator monorepo. The product path is a Next.js dashboard back
 
 ## Product Flow
 
-- Users upload WAV audio and MP4 source video from the dashboard through presigned R2 PUT URLs.
+- Users upload audio (WAV, or any common format such as MP3/M4A/FLAC auto-converted to WAV server-side) and MP4 source video from the dashboard through presigned R2 PUT URLs.
 - Assets are stored as strict `FileManifest` and immutable `FileVersionMeta` records. Default asset lists hide archived files, render outputs, and render posters unless requested.
 - Workflow endpoints return `RunManifest` records immediately; `DefaultWorkflowRunner` continues work in FastAPI background tasks.
 - Music analysis, video analysis, YouTube import, timeline planning, rendering, edit pipelines, and synthesis consolidation all surface status through run manifests and events.
@@ -42,7 +42,7 @@ Eclypte is an AMV creator monorepo. The product path is a Next.js dashboard back
 
 - Health: `GET /healthz` (also reports non-secret YouTube-cookie, realtime/Redis, and Modal worker-progress configuration booleans).
 - Uploads/files/assets: `POST /v1/uploads`, `POST /v1/uploads/{upload_id}/complete`, `DELETE /v1/uploads/{upload_id}`, `GET /v1/files/{file_id}`, `GET /v1/files/{file_id}/versions/{version_id}`, `GET /v1/files/{file_id}/versions/{version_id}/download-url`, `GET /v1/assets`, `DELETE /v1/assets/{file_id}`, `POST /v1/assets/{file_id}/restore`.
-- Workflows: `POST /v1/music/analyses`, `POST /v1/music/youtube-imports`, `POST /v1/video/analyses`, `POST /v1/timelines`, `POST /v1/renders`.
+- Workflows: `POST /v1/music/analyses`, `POST /v1/music/youtube-imports`, `POST /v1/music/conversions`, `POST /v1/video/analyses`, `POST /v1/timelines`, `POST /v1/renders`.
 - Publishing: `GET /v1/publishing/config`, `GET /v1/publishing/posts`, `POST /v1/publishing/posts`, `PATCH /v1/publishing/posts/{post_id}`, `POST /v1/publishing/posts/{post_id}/regenerate-caption`, `POST /v1/publishing/posts/{post_id}/send-buffer`, `POST /v1/publishing/posts/{post_id}/refresh-status`, `POST /v1/publishing/posts/{post_id}/cancel`.
 - Edit jobs: `POST /v1/edits`, `GET /v1/edits`, `GET /v1/edits/{run_id}`, `POST /v1/edits/{run_id}/cancel`, `DELETE /v1/edits/{run_id}`, `POST /v1/edits/{run_id}/redo`.
 - Runs: `GET /v1/runs`, `GET /v1/runs/{run_id}`, `GET /v1/runs/{run_id}/events`, `GET /v1/runs/stream`, `GET /v1/runs/{run_id}/stream`.
@@ -64,7 +64,7 @@ Eclypte is an AMV creator monorepo. The product path is a Next.js dashboard back
   - `/dashboard/settings`: API/user/prompt/YouTube-cookie health plus realtime (Redis) and worker-progress status.
 - `NEXT_PUBLIC_ECLYPTE_API_BASE_URL` controls the API base and defaults to `http://127.0.0.1:8000`.
 - Temporary auth sends Clerk `user.id` as `X-User-Id`; backend Clerk JWT verification is intentionally deferred.
-- Browser uploads only accept WAV audio and MP4 video in the current v1 path.
+- Browser audio uploads accept WAV or any common audio format (MP3/M4A/AAC/FLAC/OGG), with non-WAV audio auto-converted to WAV server-side via `POST /v1/music/conversions`; video uploads are MP4-only.
 - Prefer extending `web/src/services/eclypteApi.ts` over ad hoc browser `fetch` calls.
 - Keep visual work aligned with the existing landing/dashboard design language. The dashboard is utilitarian product UI, not a placeholder.
 

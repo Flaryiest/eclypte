@@ -139,6 +139,11 @@ def _convert_to_wav(source_path: Path, wav_path: Path) -> Path:
     return wav_path
 
 
+def convert_audio_to_wav(source_path: Path, wav_path: Path) -> Path:
+    """Transcode any ffmpeg-supported audio file (mp3/m4a/flac/...) to WAV."""
+    return _convert_to_wav(source_path, wav_path)
+
+
 def _yt_dlp_downloaded_path(info: dict, ydl) -> Path:
     for download in info.get("requested_downloads") or []:
         filepath = download.get("filepath")

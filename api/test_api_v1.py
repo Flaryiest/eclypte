@@ -14,6 +14,9 @@ class RecordingWorkflowRunner:
     def run_youtube_song_import(self, **kwargs):
         self.calls.append(("youtube_song_import", kwargs))
 
+    def run_audio_conversion(self, **kwargs):
+        self.calls.append(("audio_conversion", kwargs))
+
     def run_video_analysis(self, **kwargs):
         self.calls.append(("video", kwargs))
 
@@ -1022,6 +1025,23 @@ def test_youtube_song_import_endpoint_creates_run_and_schedules_background_task(
     assert response.json()["inputs"]["youtube_url"] == "https://www.youtube.com/watch?v=abc123"
     assert [call[0] for call in runner.calls] == ["youtube_song_import"]
     assert runner.calls[0][1]["url"] == "https://www.youtube.com/watch?v=abc123"
+
+
+def test_audio_conversion_endpoint_creates_run_and_schedules_background_task():
+    client, _, runner = build_client()
+
+    response = client.post(
+        "/v1/music/conversions",
+        headers={"X-User-Id": "user_123"},
+        json={"audio": {"file_id": "file_raw_audio", "version_id": "ver_raw"}},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["workflow_type"] == "audio_conversion"
+    assert response.json()["inputs"]["audio_file_id"] == "file_raw_audio"
+    assert [call[0] for call in runner.calls] == ["audio_conversion"]
+    assert runner.calls[0][1]["source_file_id"] == "file_raw_audio"
+    assert runner.calls[0][1]["source_version_id"] == "ver_raw"
 
 
 def test_youtube_song_import_rejects_non_youtube_url():

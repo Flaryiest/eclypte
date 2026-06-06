@@ -12,7 +12,7 @@ Core invariants:
 - Time fields use seconds and the `_sec` suffix. Do not leak frame indices into shared schemas.
 - `RunManifest.outputs` keys are frontend contracts. Change them only with coordinated API and frontend updates.
 - Export behavior belongs in `api/export_options.py`; do not reimplement format/trim/crop logic in pages, planners, adapters, or renderers.
-- Browser uploads are WAV audio and MP4 video only in the current v1 flow.
+- Browser audio uploads may be WAV or any common audio format (MP3/M4A/AAC/FLAC/OGG), auto-converted to WAV server-side; video uploads are MP4 only.
 
 ## Top-Level Layout
 
@@ -80,7 +80,7 @@ Routes:
 
 - Health: `GET /healthz` — also reports non-secret booleans for YouTube cookies, realtime streaming (`REDIS_URL`), and Modal worker-progress configuration.
 - Uploads/files/assets: `POST /v1/uploads`, `POST /v1/uploads/{upload_id}/complete`, `DELETE /v1/uploads/{upload_id}`, `GET /v1/files/{file_id}`, `GET /v1/files/{file_id}/versions/{version_id}`, `GET /v1/files/{file_id}/versions/{version_id}/download-url`, `GET /v1/assets`, `DELETE /v1/assets/{file_id}`, `POST /v1/assets/{file_id}/restore`.
-- Workflows: `POST /v1/music/analyses`, `POST /v1/music/youtube-imports`, `POST /v1/video/analyses`, `POST /v1/timelines`, `POST /v1/renders`.
+- Workflows: `POST /v1/music/analyses`, `POST /v1/music/youtube-imports`, `POST /v1/music/conversions` (transcode an uploaded non-WAV audio file into a WAV `song_audio` asset), `POST /v1/video/analyses`, `POST /v1/timelines`, `POST /v1/renders`.
 - Edit jobs: `POST /v1/edits`, `GET /v1/edits`, `GET /v1/edits/{run_id}`, `POST /v1/edits/{run_id}/cancel`, `DELETE /v1/edits/{run_id}`, `POST /v1/edits/{run_id}/redo`.
 - Runs: `GET /v1/runs`, `GET /v1/runs/{run_id}`, `GET /v1/runs/{run_id}/events`, `GET /v1/runs/stream`, `GET /v1/runs/{run_id}/stream`.
 - Synthesis: `POST /v1/synthesis/references`, `GET /v1/synthesis/references`, `POST /v1/synthesis/consolidations`, `GET /v1/synthesis/prompt`, `POST /v1/synthesis/prompt/versions`, `POST /v1/synthesis/prompt/versions/{version_id}/activate`.

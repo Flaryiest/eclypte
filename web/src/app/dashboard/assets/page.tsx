@@ -103,14 +103,30 @@ export default function AssetsPage() {
         setError(null)
         setIsUploading(true)
         try {
-            await uploadAsset(api, {
+            const isAudio = slot === "audio"
+            const extension = file.name.toLowerCase().split(".").pop() ?? ""
+            const isWav = file.type === "audio/wav" || extension === "wav"
+            const contentType = isAudio ? file.type || "application/octet-stream" : "video/mp4"
+            const uploaded = await uploadAsset(api, {
                 file,
-                kind: slot === "audio" ? "song_audio" : "source_video",
-                contentType: slot === "audio" ? "audio/wav" : "video/mp4",
+                kind: isAudio ? "song_audio" : "source_video",
+                contentType,
                 signal: controller.signal,
                 onStatus: setStatus,
             })
-            setStatus("Upload complete")
+            if (isAudio && !isWav) {
+                // Non-WAV audio is converted server-side into a WAV song_audio asset.
+                setStatus("Converting to WAV")
+                const run = await api.createAudioConversion(uploaded, controller.signal)
+                await waitForRunCompletion(api, run, {
+                    signal: controller.signal,
+                    onUpdate: (next) =>
+                        setStatus(next.status === "failed" ? "Conversion failed" : "Converting to WAV"),
+                })
+                setStatus("Converted to WAV")
+            } else {
+                setStatus("Upload complete")
+            }
             setFile(null)
             await loadAssets()
         } catch (caught) {
@@ -334,15 +350,15 @@ export default function AssetsPage() {
                         <label className={styles.fieldLabel}>
                             Asset type
                             <select className={styles.select} value={slot} onChange={(event) => onSlotChange(event.target.value as UploadSlot)}>
-                                <option value="audio">WAV song</option>
+                                <option value="audio">Song (WAV/MP3/…)</option>
                                 <option value="video">MP4 source video</option>
                             </select>
                         </label>
                         <label className={styles.filePicker}>
                             <span className={styles.fileName}>{file ? file.name : "Choose a file"}</span>
-                            <span className={styles.muted}>{slot === "audio" ? "audio/wav" : "video/mp4"}</span>
+                            <span className={styles.muted}>{slot === "audio" ? "WAV, MP3, M4A, FLAC… (auto-converted to WAV)" : "video/mp4"}</span>
                             {file && <span className={styles.smallText}>{formatBytes(file.size)}</span>}
-                            <input type="file" accept={slot === "audio" ? "audio/wav,.wav" : "video/mp4,.mp4"} onChange={onFileChange} />
+                            <input type="file" accept={slot === "audio" ? AUDIO_UPLOAD_ACCEPT : "video/mp4,.mp4"} onChange={onFileChange} />
                         </label>
                         <button className={styles.primaryButton} type="button" onClick={uploadSelected} disabled={!file || Boolean(validateUpload(file, slot)) || isWorking}>
                             <Upload size={16} /> {isUploading ? "Uploading" : "Upload asset"}
@@ -573,6 +589,9 @@ function AssetDetail({
     )
 }
 
+const AUDIO_UPLOAD_EXTENSIONS = ["wav", "mp3", "m4a", "aac", "flac", "ogg", "opus", "aiff", "wma"]
+const AUDIO_UPLOAD_ACCEPT = `audio/*,${AUDIO_UPLOAD_EXTENSIONS.map((ext) => `.${ext}`).join(",")}`
+
 function validateUpload(file: File | null, slot: UploadSlot) {
     if (!file) {
         return null
@@ -580,9 +599,13 @@ function validateUpload(file: File | null, slot: UploadSlot) {
     if (file.size <= 0) {
         return "Use a non-empty file."
     }
-    const extension = file.name.toLowerCase().split(".").pop()
-    if (slot === "audio" && file.type !== "audio/wav" && extension !== "wav") {
-        return "Use a WAV file."
+    const extension = file.name.toLowerCase().split(".").pop() ?? ""
+    if (
+        slot === "audio" &&
+        !file.type.startsWith("audio/") &&
+        !AUDIO_UPLOAD_EXTENSIONS.includes(extension)
+    ) {
+        return "Use an audio file (WAV, MP3, M4A, AAC, FLAC, OGG)."
     }
     if (slot === "video" && file.type !== "video/mp4" && extension !== "mp4") {
         return "Use an MP4 file."

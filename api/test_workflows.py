@@ -230,6 +230,63 @@ def test_youtube_song_import_publishes_audio_and_analysis(monkeypatch):
     assert completed.outputs["music_analysis_file_id"] == f"file_music_analysis_{run.run_id}"
 
 
+def test_audio_conversion_publishes_wav_and_archives_raw(monkeypatch):
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    source = _publish_artifact(
+        repo,
+        file_id="file_raw_audio",
+        kind="song_audio",
+        filename="song.mp3",
+        body=b"mp3-bytes",
+        content_type="audio/mpeg",
+    )
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="audio_conversion",
+        inputs={
+            "audio_file_id": source["file_id"],
+            "audio_version_id": source["version_id"],
+        },
+        steps=["convert_audio", "publish_audio"],
+    )
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setenv("ECLYPTE_TEMP_DIR", str(Path.cwd() / ".pytest-tmp-convert"))
+
+    def fake_convert(src_path, wav_path):
+        assert Path(src_path).read_bytes() == b"mp3-bytes"
+        Path(wav_path).write_bytes(b"wav-bytes")
+        return wav_path
+
+    monkeypatch.setattr("api.workflows._convert_audio_to_wav", fake_convert)
+
+    runner.run_audio_conversion(
+        user_id="user_123",
+        run_id=run.run_id,
+        source_file_id=source["file_id"],
+        source_version_id=source["version_id"],
+    )
+
+    completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=run.run_id))
+    assert completed.status == "completed"
+    assert completed.outputs["audio_file_id"] == f"file_audio_{run.run_id}"
+
+    wav_ref = FileVersionRef(
+        user_id="user_123",
+        file_id=completed.outputs["audio_file_id"],
+        version_id=completed.outputs["audio_version_id"],
+    )
+    wav_meta = repo.load_file_version_meta(wav_ref)
+    assert wav_meta.content_type == "audio/wav"
+    assert wav_meta.original_filename == "song.wav"
+    assert repo.read_version_bytes(wav_ref) == b"wav-bytes"
+
+    # The raw upload is archived so the library shows only the WAV.
+    raw_manifest = repo.load_file_manifest(FileRef(user_id="user_123", file_id="file_raw_audio"))
+    assert raw_manifest.archived_at is not None
+
+
 def test_youtube_song_import_records_download_attempt_events(monkeypatch):
     store = InMemoryObjectStore()
     repo = StorageRepository(store)

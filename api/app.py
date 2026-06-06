@@ -115,6 +115,10 @@ class MusicAnalysisRequest(BaseModel):
     audio: FileVersionInput
 
 
+class AudioConversionRequest(BaseModel):
+    audio: FileVersionInput
+
+
 class YouTubeSongImportRequest(BaseModel):
     url: str = Field(min_length=1)
 
@@ -1148,6 +1152,32 @@ def create_app(
             user_id=uid,
             run_id=run.run_id,
             url=request.url,
+        )
+        return run
+
+    @app.post("/v1/music/conversions", response_model=RunManifest, status_code=202)
+    def create_audio_conversion(
+        request: AudioConversionRequest,
+        background_tasks: BackgroundTasks,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> RunManifest:
+        run = create_workflow_run(
+            repo,
+            uid,
+            "audio_conversion",
+            {
+                "audio_file_id": request.audio.file_id,
+                "audio_version_id": request.audio.version_id,
+            },
+            ["convert_audio", "publish_audio"],
+        )
+        background_tasks.add_task(
+            runner.run_audio_conversion,
+            user_id=uid,
+            run_id=run.run_id,
+            source_file_id=request.audio.file_id,
+            source_version_id=request.audio.version_id,
         )
         return run
 

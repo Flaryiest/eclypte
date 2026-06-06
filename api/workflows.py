@@ -14,6 +14,7 @@ from api.youtube_download import (
     YoutubeDownloadAttempt,
     YoutubeDownloadError,
     YoutubeDownloadResult,
+    convert_audio_to_wav,
     download_youtube_wav,
 )
 from api.prototyping.edit.synthesis.system_prompt import (
@@ -36,6 +37,7 @@ TIMELINE_COVERAGE_TOLERANCE_SEC = 0.75
 class WorkflowRunner(Protocol):
     def run_music_analysis(self, **kwargs) -> None: ...
     def run_youtube_song_import(self, **kwargs) -> None: ...
+    def run_audio_conversion(self, **kwargs) -> None: ...
     def run_video_analysis(self, **kwargs) -> None: ...
     def run_timeline_plan(self, **kwargs) -> None: ...
     def run_render(self, **kwargs) -> None: ...
@@ -716,6 +718,86 @@ class DefaultWorkflowRunner:
                 stage="publish_analysis",
                 percent=100,
                 detail="YouTube song imported and analyzed",
+            )
+        except Exception as exc:
+            self._mark_failed(repo, user_id, run_id, exc)
+
+    def run_audio_conversion(self, **kwargs) -> None:
+        repo = self._repository()
+        user_id = kwargs["user_id"]
+        run_id = kwargs["run_id"]
+        source_file_id = kwargs["source_file_id"]
+        source_version_id = kwargs["source_version_id"]
+        run_ref = RunRef(user_id=user_id, run_id=run_id)
+        try:
+            source_version_ref = FileVersionRef(
+                user_id=user_id,
+                file_id=source_file_id,
+                version_id=source_version_id,
+            )
+            source_meta = repo.load_file_version_meta(source_version_ref)
+            raw_bytes = repo.read_version_bytes(source_version_ref)
+
+            repo.append_run_progress(
+                run_ref=run_ref,
+                stage="convert_audio",
+                percent=20,
+                detail="Converting audio to WAV",
+            )
+
+            original_name = source_meta.original_filename or "audio"
+            base = _safe_audio_basename(Path(original_name).stem)
+            suffix = Path(original_name).suffix or ".audio"
+            filename = f"{base}.wav"
+            with _temporary_directory("eclypte_convert_") as td:
+                src_path = Path(td) / f"input{suffix}"
+                src_path.write_bytes(raw_bytes)
+                wav_path = _convert_audio_to_wav(src_path, Path(td) / "output.wav")
+                wav_bytes = wav_path.read_bytes()
+
+            repo.append_run_progress(
+                run_ref=run_ref,
+                stage="publish_audio",
+                percent=70,
+                detail="Publishing WAV asset",
+            )
+            audio_ref = FileRef(user_id=user_id, file_id=f"file_audio_{run_id}")
+            repo.create_file_manifest(
+                file_ref=audio_ref,
+                kind="song_audio",
+                display_name=filename,
+                source_run_id=run_id,
+            )
+            audio_version = repo.publish_bytes(
+                file_ref=audio_ref,
+                body=wav_bytes,
+                content_type="audio/wav",
+                original_filename=filename,
+                created_by_step="convert_audio",
+                derived_from_step="convert_audio",
+                input_file_version_ids=[source_version_id],
+                derived_from_run_id=run_id,
+            )
+
+            # Replace the raw upload: archive it so the library shows only the WAV.
+            repo.archive_file_manifest(
+                FileRef(user_id=user_id, file_id=source_file_id),
+                reason="converted_to_wav",
+            )
+
+            repo.update_run_status(
+                run_ref,
+                status="completed",
+                outputs={
+                    "audio_file_id": audio_ref.file_id,
+                    "audio_version_id": audio_version.version_id,
+                },
+            )
+            repo.append_run_progress(
+                run_ref=run_ref,
+                stage="publish_audio",
+                percent=100,
+                detail="Converted audio to WAV",
             )
         except Exception as exc:
             self._mark_failed(repo, user_id, run_id, exc)
@@ -1412,6 +1494,10 @@ def _validate_agent_timeline_coverage(timeline, song: dict) -> None:
 
 def _download_youtube_wav(url: str, workdir: Path) -> YoutubeDownloadResult:
     return download_youtube_wav(url, workdir)
+
+
+def _convert_audio_to_wav(source_path: Path, wav_path: Path) -> Path:
+    return convert_audio_to_wav(source_path, wav_path)
 
 
 def _record_youtube_download_attempts(

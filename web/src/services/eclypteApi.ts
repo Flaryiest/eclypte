@@ -457,6 +457,14 @@ export class EclypteApiClient {
         })
     }
 
+    async createAudioConversion(audio: FileVersionInput, signal?: AbortSignal) {
+        return this.request<RunManifest>("/v1/music/conversions", {
+            method: "POST",
+            body: JSON.stringify({ audio }),
+            signal,
+        })
+    }
+
     async createVideoAnalysis(sourceVideo: FileVersionInput, signal?: AbortSignal) {
         return this.request<RunManifest>("/v1/video/analyses", {
             method: "POST",
@@ -686,7 +694,7 @@ export async function uploadAsset(
     }: {
         file: File
         kind: "song_audio" | "source_video"
-        contentType: "audio/wav" | "video/mp4"
+        contentType: string
         signal?: AbortSignal
         onStatus?: (status: string) => void
     },
