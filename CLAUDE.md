@@ -199,12 +199,12 @@ Subsystems:
 - `knowledge/`: seed pattern YAML and generated/reference guidance markdown.
 - `synthesis/timeline_schema.py`: Pydantic timeline schema.
 - `synthesis/validators.py`: contiguity, bounds, and pattern-id validation.
-- `synthesis/planner.py`: deterministic planner baseline.
+- `synthesis/planner.py`: deterministic planner baseline. Maps each shot's song-progress fraction to a source-position window so the edit spans the full source regardless of length.
 - `synthesis/agent.py`: OpenAI Responses API synthesis loop.
 - `synthesis/adapter.py`: converts agent output into renderable timelines, dedupes near-duplicate source timestamps, trims song-duration overshoot, and runs continuity post-processing.
 - `index/frames.py`: sequential frame extraction. Do not revert to per-frame `CAP_PROP_POS_MSEC` seeking on long videos.
 - `index/embed.py`: CLIP frame/text embeddings.
-- `index/query.py`: `query_ranges` motion-statistics ranking used by the deterministic planner.
+- `index/query.py`: `query_ranges` motion-statistics ranking used by the deterministic planner; an optional `time_window` biases candidates toward a source region.
 - `index/storage_modal.py`: R2-aware API CLIP app `eclypte-clip-index-r2`, with `build_index_r2` and `query_index_r2`.
 - `reference/`: reference AMV download, metrics, ingest, consolidation, and prompt-weight parsing.
 - `render/renderer.py`: MoviePy v2 renderer. Reads timeline JSON + media only (not planner internals); also saves an RGB JPEG poster frame and reports real frame-encode progress through proglog's `frame_index` bar.
@@ -216,6 +216,7 @@ Agent planning defaults:
 - `synthesis/agent.py` currently uses `MODEL = "gpt-5.5"`, `reasoning_effort="high"`, and `verbosity="low"`.
 - Responses API state is carried through `previous_response_id`; do not re-upload full message history each loop.
 - Tools are `query_clips(query, top_k)` and `finish_edit(timeline)`.
+- The agent receives the source duration and is instructed to span the full source start→end regardless of song length, so short/trimmed edits still cover the whole film. This guidance is injected into the per-run user content (so it applies regardless of the active prompt version); nothing enforces it (no validator/forced spread), preserving the agent's freedom to dwell on standout moments.
 - Agent mode may create/reuse `clip_index` assets and records `clip_index_file_id`, `clip_index_version_id`, and `synthesis_prompt_version_id`.
 - Agent failures should fail visibly; do not silently fall back to deterministic planning.
 
