@@ -31,7 +31,7 @@ Repo-wide architecture and backend guidance lives in `../AGENTS.md`; this file a
 - The current production API is `https://api-production-8fb8.up.railway.app`.
 - Temporary auth sends Clerk `user.id` as `X-User-Id`. Backend Clerk JWT verification is intentionally deferred.
 - V1 intentionally accepts only `audio/wav` and `video/mp4`; validate those before upload.
-- Uploads are browser-to-R2 using presigned PUT URLs from `POST /v1/uploads`, followed by `POST /v1/uploads/{upload_id}/complete` with a browser-computed SHA-256.
+- Uploads are browser-to-R2 using presigned PUT URLs from `POST /v1/uploads`, followed by `POST /v1/uploads/{upload_id}/complete` with a browser-computed SHA-256. `sha256File()` in `eclypteApi.ts` hashes the file in chunks via `hash-wasm` (not `crypto.subtle.digest`, which caps inputs at 2 GB), so large uploads work; the effective ceiling is R2's ~5 GiB single-PUT limit because multipart upload is not implemented.
 - Failed or aborted uploads should call `DELETE /v1/uploads/{upload_id}` so orphaned reservations/blob keys do not linger.
 - The dashboard library is persistent and R2-backed. `/v1/assets` hides archived records by default and excludes render outputs and render posters unless `kind=render_output` is requested. `/dashboard/assets` owns upload, archive/restore, and manual analysis; `/dashboard/new-edit` composes from saved assets and starts missing analyses only when needed.
 - `/dashboard/assets` can import songs from YouTube via `POST /v1/music/youtube-imports`; imports publish a `song_audio` asset and auto-run music analysis.

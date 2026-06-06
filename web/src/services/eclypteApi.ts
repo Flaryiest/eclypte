@@ -1,3 +1,5 @@
+import { createSHA256 } from "hash-wasm"
+
 export type ArtifactKind =
     | "source_video"
     | "song_audio"
@@ -902,11 +904,19 @@ export async function uploadToPresignedUrl(
     }
 }
 
+// 16 MB chunks keep peak memory tiny and, critically, avoid passing the whole
+// file to the hasher at once. crypto.subtle.digest rejects inputs over 2 GB, so
+// hashing incrementally is what lets large uploads (multi-GB MP4/WAV) work.
+const SHA256_CHUNK_BYTES = 16 * 1024 * 1024
+
 export async function sha256File(file: File): Promise<string> {
-    const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer())
-    return Array.from(new Uint8Array(digest))
-        .map((byte) => byte.toString(16).padStart(2, "0"))
-        .join("")
+    const hasher = await createSHA256()
+    hasher.init()
+    for (let offset = 0; offset < file.size; offset += SHA256_CHUNK_BYTES) {
+        const slice = file.slice(offset, offset + SHA256_CHUNK_BYTES)
+        hasher.update(new Uint8Array(await slice.arrayBuffer()))
+    }
+    return hasher.digest("hex")
 }
 
 async function readErrorMessage(response: Response): Promise<string> {
