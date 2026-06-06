@@ -18,11 +18,11 @@ Core invariants:
 
 - `web/`: Next.js 16.2.3, React 19.2, TypeScript, App Router. `web/AGENTS.md` has frontend-specific warnings.
 - `api/`: FastAPI app, workflow orchestration, storage substrate, YouTube downloader, and prototype media pipelines.
-- `api/publishing.py`: review-gated Buffer publishing helpers for Instagram Reels, OpenAI/fallback caption generation, public R2 media copies, Buffer GraphQL payloads, and channel diagnostics.
+- `api/publishing.py`: review-gated Buffer publishing for Instagram Reels — Gen-Z-voiced OpenAI/fallback caption generation, public R2 media copies, Buffer GraphQL payloads (declares the Instagram `reel` post type), channel diagnostics, and post-status refresh that back-fills the live permalink from Buffer's `externalLink`.
 - `api/storage/`: R2 object access, file manifests, file versions, upload reservations, run manifests/events/progress, prompt versions, references, publishing posts, Postgres run store, Redis broadcaster, staging helpers, and tests.
 - `api/prototyping/music/`: YouTube/audio ingestion, Modal allin1 analysis, lyrics lookup, optional R2 publish.
 - `api/prototyping/video/`: scene detection, optical-flow motion analysis, impact detection, local CPU and Modal GPU runtimes, R2-aware Modal wrapper.
-- `api/prototyping/edit/`: deterministic planner, CLIP index, OpenAI synthesis agent, reference consolidator, timeline schemas/validators, MoviePy renderer, Modal render/index wrappers.
+- `api/prototyping/edit/`: deterministic planner, CLIP index, OpenAI synthesis agent, reference consolidator, timeline schemas/validators, MoviePy renderer (MP4 + poster frame), Modal render/index wrappers.
 - `api/COMMANDS.md`: command runbook. Prefer updating it when operational instructions change.
 - `docs/`: older plans/specs and Superpowers design artifacts.
 - `.agent/`, `.superpowers/`: agent/process assets, not runtime app code.
@@ -70,7 +70,7 @@ Optional env vars:
 
 - `DATABASE_URL`: stores run manifests, events, and latest progress in Postgres.
 - `REDIS_URL`: publishes non-durable run-update stream messages for the dashboard.
-- `ECLYPTE_INTERNAL_PROGRESS_URL` and `ECLYPTE_INTERNAL_PROGRESS_TOKEN`: let Modal workers post progress to `/internal/progress`. The Worker's `ECLYPTE_INTERNAL_TOKEN` secret must match `ECLYPTE_INTERNAL_PROGRESS_TOKEN`; both stay server-side only.
+- `ECLYPTE_INTERNAL_PROGRESS_URL` and `ECLYPTE_INTERNAL_PROGRESS_TOKEN`: let Modal workers post live render/analysis progress to `/internal/progress` (workers send `X-Eclypte-Internal-Token` matching the token). Without them, progress falls back to slower R2 event JSON. Keep server-side only.
 - `ECLYPTE_YOUTUBE_COOKIES_B64` or `ECLYPTE_YOUTUBE_COOKIES`: cookies for the `yt-dlp` YouTube fallback.
 - `ECLYPTE_YOUTUBE_VISITOR_DATA` and `ECLYPTE_YOUTUBE_PO_TOKEN`: PO-token path for `pytubefix`.
 - `BUFFER_API_KEY`, `BUFFER_INSTAGRAM_CHANNEL_ID`, and `ECLYPTE_R2_PUBLIC_BASE_URL`: enable review-gated Buffer Instagram publishing from public R2 copies.
@@ -78,13 +78,13 @@ Optional env vars:
 
 Routes:
 
-- Health: `GET /healthz`.
+- Health: `GET /healthz` — also reports non-secret booleans for YouTube cookies, realtime streaming (`REDIS_URL`), and Modal worker-progress configuration.
 - Uploads/files/assets: `POST /v1/uploads`, `POST /v1/uploads/{upload_id}/complete`, `DELETE /v1/uploads/{upload_id}`, `GET /v1/files/{file_id}`, `GET /v1/files/{file_id}/versions/{version_id}`, `GET /v1/files/{file_id}/versions/{version_id}/download-url`, `GET /v1/assets`, `DELETE /v1/assets/{file_id}`, `POST /v1/assets/{file_id}/restore`.
 - Workflows: `POST /v1/music/analyses`, `POST /v1/music/youtube-imports`, `POST /v1/video/analyses`, `POST /v1/timelines`, `POST /v1/renders`.
 - Edit jobs: `POST /v1/edits`, `GET /v1/edits`, `GET /v1/edits/{run_id}`, `POST /v1/edits/{run_id}/cancel`, `DELETE /v1/edits/{run_id}`, `POST /v1/edits/{run_id}/redo`.
 - Runs: `GET /v1/runs`, `GET /v1/runs/{run_id}`, `GET /v1/runs/{run_id}/events`, `GET /v1/runs/stream`, `GET /v1/runs/{run_id}/stream`.
 - Synthesis: `POST /v1/synthesis/references`, `GET /v1/synthesis/references`, `POST /v1/synthesis/consolidations`, `GET /v1/synthesis/prompt`, `POST /v1/synthesis/prompt/versions`, `POST /v1/synthesis/prompt/versions/{version_id}/activate`.
-- Publishing: `GET /v1/publishing/config`, `GET /v1/publishing/posts`, `POST /v1/publishing/posts`, `PATCH /v1/publishing/posts/{post_id}`, `POST /v1/publishing/posts/{post_id}/regenerate-caption`, `POST /v1/publishing/posts/{post_id}/send-buffer`, `POST /v1/publishing/posts/{post_id}/cancel`.
+- Publishing: `GET /v1/publishing/config`, `GET /v1/publishing/posts`, `POST /v1/publishing/posts`, `PATCH /v1/publishing/posts/{post_id}`, `POST /v1/publishing/posts/{post_id}/regenerate-caption`, `POST /v1/publishing/posts/{post_id}/send-buffer`, `POST /v1/publishing/posts/{post_id}/refresh-status`, `POST /v1/publishing/posts/{post_id}/cancel`.
 - Internal: `POST /internal/progress`, requiring `X-Eclypte-Internal-Token`.
 
 ## Storage Substrate
@@ -112,10 +112,11 @@ Artifact kinds are:
 - `clip_index`
 - `timeline`
 - `render_output`
+- `render_poster`
 
 `StorageRepository` is the API-facing facade. It writes file/upload metadata to the object store, routes run state through Postgres when configured or R2 JSON otherwise, and publishes Redis updates after durable writes. Redis failures must not break persistence.
 
-Default asset lists hide archived assets and render outputs. Use `kind=render_output` to list render outputs. Archive/restore instead of hard deletion for normal dashboard lifecycle.
+Default asset lists hide archived assets, render outputs, and render posters. Use `kind=render_output` to list render outputs. Archive/restore instead of hard deletion for normal dashboard lifecycle.
 
 ## Workflow Orchestration
 
@@ -127,12 +128,12 @@ Important workflows:
 - `run_youtube_song_import`: downloads/transcodes audio through `api/youtube_download.py`, records `youtube_download_attempt` events, publishes `song_audio`, then runs music analysis.
 - `run_video_analysis`: calls `eclypte-video-r2::analyze_r2`, publishes `video_analysis`.
 - `run_timeline_plan`: uses agent planning by default, deterministic planning when requested, and publishes `timeline`.
-- `run_render`: calls `eclypte-render-r2::render_r2`, publishes `render_output`.
+- `run_render`: calls `eclypte-render-r2::render_r2`, publishes a `render_output` MP4 and a `render_poster` JPEG thumbnail.
 - `run_edit_pipeline`: parent workflow that selects saved assets, ensures missing analysis, plans, renders, and writes child run ids/output refs onto the parent run.
 - `run_synthesis_reference_ingest`: downloads/analyzes reference AMVs and records metrics.
 - `run_synthesis_consolidation`: consolidates queued/completed references into generated prompt guidance and prompt versions.
 
-Edit child run ids and render output ids are part of the dashboard contract. Preserve keys such as `music_run_id`, `video_run_id`, `timeline_run_id`, `render_run_id`, `render_output_file_id`, and `render_output_version_id`.
+Edit child run ids and render output ids are part of the dashboard contract. Preserve keys such as `music_run_id`, `video_run_id`, `timeline_run_id`, `render_run_id`, `render_output_file_id`, `render_output_version_id`, `render_poster_file_id`, and `render_poster_version_id`.
 
 ## Export Options
 
@@ -206,8 +207,8 @@ Subsystems:
 - `index/query.py`: `query_ranges` motion-statistics ranking used by the deterministic planner.
 - `index/storage_modal.py`: R2-aware API CLIP app `eclypte-clip-index-r2`, with `build_index_r2` and `query_index_r2`.
 - `reference/`: reference AMV download, metrics, ingest, consolidation, and prompt-weight parsing.
-- `render/renderer.py`: MoviePy v2 renderer. It should read timeline JSON and media only, not planner internals.
-- `render_storage_modal.py`: R2-aware API renderer `eclypte-render-r2`.
+- `render/renderer.py`: MoviePy v2 renderer. Reads timeline JSON + media only (not planner internals); also saves an RGB JPEG poster frame and reports real frame-encode progress through proglog's `frame_index` bar.
+- `render_storage_modal.py`: R2-aware API renderer `eclypte-render-r2` (uploads the rendered MP4 and the poster image).
 
 Agent planning defaults:
 
@@ -224,6 +225,7 @@ Rendering notes:
 - MoviePy v2 methods include `subclipped`, `with_duration`, `resized`, `concatenate_videoclips(method="compose")`, and `with_audio`.
 - Effects/transitions are still mostly stubs/deferred. Avoid promising finished flash/whip/freeze/speed-ramp behavior unless implemented.
 - CPU/vCPU count is the current render dial; GPU does not help without a CUDA ffmpeg/NVENC path.
+- Edit `progress_percent` is a weighted average by typical stage duration (`EDIT_STAGE_WEIGHTS` in `api/app.py`), and the render stage fills smoothly from the renderer's real encode progress. The dashboard shows the poster instantly and lazy-loads the heavy MP4 on play.
 
 ## Frontend
 
@@ -233,17 +235,17 @@ Frontend architecture:
 
 - `web/src/app/layout.tsx`: fonts and app shell providers.
 - `web/src/app/page.tsx`: marketing landing page.
-- `web/src/app/pricing/page.tsx`: lightweight pricing page.
-- `web/src/app/demo/page.tsx`: marketing demo-reel showcase page.
+- `web/src/app/pricing/page.tsx`: marketing pricing page — three tiers (Free/Creator/Studio) + FAQ.
+- `web/src/app/demo/page.tsx`: marketing "Screening Room" demo page. Poster-first lazy video via `web/src/components/demo/demoPlayer.tsx` (`DemoReel`/`DemoTile`); posters in `web/public/demo/posters/` and web-optimized 1080p sources in `web/public/demo/web/` (4K originals are unreferenced).
 - `web/src/app/dashboard/layout.tsx`: dashboard shell/sidebar.
 - `web/src/app/dashboard/page.tsx`: redirects to `/dashboard/new-edit`.
 - `web/src/app/dashboard/new-edit/page.tsx`: compose/edit pipeline UI.
 - `web/src/app/dashboard/assets/page.tsx`: upload/import/manage asset library.
 - `web/src/app/dashboard/synthesis/page.tsx`: references and prompt management.
-- `web/src/app/dashboard/publish/page.tsx`: Buffer publishing queue with setup diagnostics, render preview, caption editing/regeneration, queue/schedule actions, and posted/error metadata.
+- `web/src/app/dashboard/publish/page.tsx`: Buffer publishing queue with setup diagnostics, render preview, caption editing/regeneration, queue/schedule actions, posted/error metadata, and a post-status refresh that polls Buffer once for the live permalink.
 - `web/src/app/dashboard/renders/page.tsx`: render outputs and recent render runs.
-- `web/src/app/dashboard/settings/page.tsx`: API/user/prompt/YouTube-cookie health.
-- `web/src/app/dashboard/dashboardCommon.tsx`: shared dashboard page wrapper.
+- `web/src/app/dashboard/settings/page.tsx`: API/user/prompt/YouTube-cookie health plus realtime (Redis) and worker-progress status.
+- `web/src/app/dashboard/dashboardCommon.tsx`: shared dashboard page wrapper and skeleton placeholders (`Skeleton`/`SkeletonList`).
 - `web/src/components/dashboard/sidebar/`: dashboard navigation.
 - `web/src/services/eclypteApi.ts`: typed browser API client. Extend this before adding ad hoc fetch calls.
 
@@ -255,6 +257,7 @@ The frontend depends on these output keys:
 - `video_analysis_file_id`, `video_analysis_version_id`
 - `timeline_file_id`, `timeline_version_id`
 - `render_output_file_id`, `render_output_version_id`
+- `render_poster_file_id`, `render_poster_version_id`
 - `clip_index_file_id`, `clip_index_version_id`
 - `synthesis_prompt_version_id`
 

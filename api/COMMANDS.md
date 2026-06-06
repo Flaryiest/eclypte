@@ -141,9 +141,9 @@ Routes:
 - `POST /v1/uploads/{upload_id}/complete` validates the uploaded object and records metadata.
 - `GET /v1/files/{file_id}` and `GET /v1/files/{file_id}/versions/{version_id}` read manifests.
 - `GET /v1/files/{file_id}/versions/{version_id}/download-url` returns a presigned R2 GET URL.
-- `POST /v1/music/analyses`, `POST /v1/video/analyses`, `POST /v1/timelines`, and `POST /v1/renders` create run manifests and schedule background work.
+- `POST /v1/music/analyses`, `POST /v1/video/analyses`, `POST /v1/timelines`, and `POST /v1/renders` create run manifests and schedule background work. Renders publish a `render_output` MP4 and a `render_poster` JPEG thumbnail.
 - `GET /v1/publishing/config` reports non-secret Buffer/OpenAI/public-media setup.
-- `GET /v1/publishing/posts`, `POST /v1/publishing/posts`, `PATCH /v1/publishing/posts/{post_id}`, `POST /v1/publishing/posts/{post_id}/regenerate-caption`, `POST /v1/publishing/posts/{post_id}/send-buffer`, and `POST /v1/publishing/posts/{post_id}/cancel` manage review-gated Buffer publishing packages.
+- `GET /v1/publishing/posts`, `POST /v1/publishing/posts`, `PATCH /v1/publishing/posts/{post_id}`, `POST /v1/publishing/posts/{post_id}/regenerate-caption`, `POST /v1/publishing/posts/{post_id}/send-buffer`, `POST /v1/publishing/posts/{post_id}/refresh-status` (back-fills the live permalink from Buffer), and `POST /v1/publishing/posts/{post_id}/cancel` manage review-gated Buffer publishing packages (sent as Instagram Reels).
 - `GET /v1/runs/{run_id}` and `GET /v1/runs/{run_id}/events` inspect workflow status.
 - `GET /v1/runs/stream` and `GET /v1/runs/{run_id}/stream` stream Redis-backed run updates when `REDIS_URL` is configured.
 - `POST /internal/progress` records worker progress and requires `X-Eclypte-Internal-Token`.

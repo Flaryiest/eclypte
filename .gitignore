@@ -1,5 +1,6 @@
 .env
 .env.local
+.claude/
 .superpowers/
 .worktrees/
 .wrangler/

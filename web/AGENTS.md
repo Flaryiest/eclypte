@@ -10,20 +10,20 @@ Repo-wide architecture and backend guidance lives in `../AGENTS.md`; this file a
 
 - App Router lives in `src/app/`.
 - `src/app/page.tsx` is the main marketing landing page and composes most shared homepage components.
-- `src/app/pricing/page.tsx` is still lightweight.
-- `src/app/demo/page.tsx` is a marketing demo-reel showcase page with embedded sample videos.
+- `src/app/pricing/page.tsx` is a three-tier pricing page (Free/Creator/Studio) with a short FAQ.
+- `src/app/demo/page.tsx` is the "Screening Room" demo page. It uses poster-first lazy video (`src/components/demo/demoPlayer.tsx` — `DemoReel`/`DemoTile`): a small `webp` poster loads immediately and the `<video>` mounts only on click, one at a time. Posters live in `public/demo/posters/` and web-optimized 1080p sources in `public/demo/web/` (the 4K originals are unreferenced).
 - `src/app/dashboard/page.tsx` redirects to the creator console default route at `/dashboard/new-edit`.
 - The dashboard console uses real App Router pages:
   - `/dashboard/new-edit` selects existing song/video assets, previews the source crop, sets export format and audio trim, reuses completed analyses when available, auto-runs missing analysis, then chains AI-agent timeline planning by default, rendering, and final preview/download. It also exposes deterministic planning, optional creative brief, job cancel/delete, and redo for failed/canceled jobs.
   - `/dashboard/assets` uploads persistent WAV/MP4 assets to R2, cleans up failed upload reservations, lists the R2-backed library including hidden archived items, starts manual analysis, imports YouTube songs, opens preview/download URLs, and deletes/restores assets.
-  - `/dashboard/publish` reviews Buffer publishing packages for Instagram Reels, shows setup diagnostics, previews render outputs, edits/regenerates captions, queues/schedules posts, and records Buffer/public-media status.
+  - `/dashboard/publish` reviews Buffer publishing packages for Instagram Reels, shows setup diagnostics, previews render outputs, edits/regenerates captions, queues/schedules posts, records Buffer/public-media status, and polls Buffer once on load to back-fill the live post URL when it is missing.
   - `/dashboard/synthesis` queues Instagram Reel references, runs synthesis consolidation, exposes the effective system prompt, saves prompt versions, and reactivates older versions.
   - `/dashboard/renders` lists render runs and output MP4 assets with preview/download actions, refreshing active render runs from run streams with polling fallback.
-  - `/dashboard/settings` shows the API base URL, signed-in Clerk user id, API health, YouTube-cookie configuration, and active synthesis prompt version.
+  - `/dashboard/settings` shows the API base URL, signed-in Clerk user id, API health, YouTube-cookie configuration, realtime (Redis) and worker-progress status, and the active synthesis prompt version.
 - `src/proxy.ts` contains the Clerk middleware matcher for app and API routes.
 - `src/components/login/login.tsx` renders the Clerk `SignIn` modal; `src/components/navbar/navbar.tsx` controls opening it.
 - Fonts are configured in `src/app/layout.tsx` with both Google fonts and local font assets from `public/fonts/`.
-- `src/services/eclypteApi.ts` is the typed browser API client for FastAPI v1 endpoints, including uploads, assets, run streams, edit jobs, export options, downloads, and synthesis prompt/reference APIs.
+- `src/services/eclypteApi.ts` is the typed browser API client for FastAPI v1 endpoints, including uploads, assets, run streams, edit jobs, export options, downloads, synthesis prompt/reference, and publishing APIs.
 
 ## Dashboard Pipeline Notes
 
@@ -33,10 +33,10 @@ Repo-wide architecture and backend guidance lives in `../AGENTS.md`; this file a
 - V1 intentionally accepts only `audio/wav` and `video/mp4`; validate those before upload.
 - Uploads are browser-to-R2 using presigned PUT URLs from `POST /v1/uploads`, followed by `POST /v1/uploads/{upload_id}/complete` with a browser-computed SHA-256.
 - Failed or aborted uploads should call `DELETE /v1/uploads/{upload_id}` so orphaned reservations/blob keys do not linger.
-- The dashboard library is persistent and R2-backed. `/v1/assets` hides archived records by default and excludes render outputs unless `kind=render_output` is requested. `/dashboard/assets` owns upload, archive/restore, and manual analysis; `/dashboard/new-edit` composes from saved assets and starts missing analyses only when needed.
+- The dashboard library is persistent and R2-backed. `/v1/assets` hides archived records by default and excludes render outputs and render posters unless `kind=render_output` is requested. `/dashboard/assets` owns upload, archive/restore, and manual analysis; `/dashboard/new-edit` composes from saved assets and starts missing analyses only when needed.
 - `/dashboard/assets` can import songs from YouTube via `POST /v1/music/youtube-imports`; imports publish a `song_audio` asset and auto-run music analysis.
 - `/dashboard/publish` uses `/v1/publishing/*` endpoints through `src/services/eclypteApi.ts`. Buffer/OpenAI secrets stay server-side; the browser only receives non-secret config booleans, channel metadata, publishing records, and signed preview/download URLs.
-- Publish packages are review-gated. Public R2 publishing copies and Buffer posts are only created when the user queues or schedules a post.
+- Publish packages are review-gated and sent as Instagram Reels. Public R2 publishing copies and Buffer posts are only created when the user queues or schedules a post; the live post permalink is back-filled from Buffer (`externalLink`) on a later page load via `POST /v1/publishing/posts/{post_id}/refresh-status`.
 - YouTube media download stays backend-side in `api/youtube_download.py`. The frontend should poll the returned run manifest and surface `RunManifest.last_error` for failures rather than attempting browser-side media extraction.
 - Backend YouTube import runs record provider-level `youtube_download_attempt` events, but the current dashboard client does not expose run events as a first-class UI view.
 - New Edit uses `/v1/edits` durable edit jobs, subscribes to `/v1/runs/stream` while jobs are active, falls back to polling, and then requests the render download URL. The UI exposes cancel, delete/archive, and redo through the edit-job lifecycle endpoints.
@@ -49,13 +49,14 @@ Repo-wide architecture and backend guidance lives in `../AGENTS.md`; this file a
   - `video_analysis_file_id`, `video_analysis_version_id`
   - `timeline_file_id`, `timeline_version_id`
   - `render_output_file_id`, `render_output_version_id`
+  - `render_poster_file_id`, `render_poster_version_id`
 - Agent timeline runs may also return `clip_index_file_id`, `clip_index_version_id`, and `synthesis_prompt_version_id`.
 - R2 bucket CORS must allow browser `PUT` uploads and `GET`/range playback from local and deployed frontend origins. A missing bucket CORS config presents as a failed preflight on the presigned R2 URL, even when Railway API CORS is correct.
 
 ## Working Assumptions
 
 - Preserve the existing visual language on the landing page rather than replacing it with generic boilerplate.
-- Check whether a route is still placeholder-level before doing large refactors; `/pricing` is skeletal, but `/dashboard` now has real orchestration behavior and should be treated as product code.
+- Check whether a route is still placeholder-level before doing large refactors; `/pricing` and `/demo` are now built-out marketing pages and `/dashboard` has real orchestration behavior — treat all as product code.
 - Project history, a full timeline editor, refresh-resume for in-flight workflows, and backend Clerk JWT verification are still deferred.
 - Keep `/editor` out of scope unless the task explicitly asks for it.
 
