@@ -123,35 +123,43 @@ export default function PublishPage() {
         }
     }, [api, selected])
 
-    // A sent post has no live permalink until Buffer actually publishes it, and we
-    // never poll again afterward. So when the selected post has a Buffer id but no
-    // post URL yet, ask Buffer once (per post, on load/selection) to back-fill it.
+    // A sent post has no live permalink until Buffer actually publishes it, and nothing
+    // pushes it back. So whenever the page is opened, ask Buffer to back-fill the URL for
+    // every reel that has a Buffer id but no post URL yet. polledRef resets on mount, so
+    // this re-polls each open while deduping within a session (refreshed posts gain a URL
+    // and drop out of the filter; failed ones can be retried).
     useEffect(() => {
-        if (!api || !selected || !selected.buffer_post_id || selected.post_url) {
+        if (!api) {
             return
         }
-        if (polledRef.current.has(selected.post_id)) {
+        const pending = posts.filter(
+            (post) => post.buffer_post_id && !post.post_url && !polledRef.current.has(post.post_id),
+        )
+        if (pending.length === 0) {
             return
         }
-        polledRef.current.add(selected.post_id)
-        const postId = selected.post_id
         let ignore = false
-        void api
-            .refreshPublishingPostStatus(postId)
-            .then((next) => {
-                if (!ignore) {
-                    setPosts((current) =>
-                        current.map((post) => (post.post_id === next.post_id ? next : post)),
-                    )
-                }
-            })
-            .catch(() => {
-                polledRef.current.delete(postId)
-            })
+        for (const post of pending) {
+            polledRef.current.add(post.post_id)
+            void api
+                .refreshPublishingPostStatus(post.post_id)
+                .then((next) => {
+                    if (!ignore) {
+                        setPosts((current) =>
+                            current.map((existing) =>
+                                existing.post_id === next.post_id ? next : existing,
+                            ),
+                        )
+                    }
+                })
+                .catch(() => {
+                    polledRef.current.delete(post.post_id)
+                })
+        }
         return () => {
             ignore = true
         }
-    }, [api, selected])
+    }, [api, posts])
 
     const replacePost = (next: PublishingPost) => {
         setPosts((current) => current.map((post) => post.post_id === next.post_id ? next : post))
