@@ -248,6 +248,26 @@ export default function PublishPage() {
         }
     }
 
+    const handleRefreshFromBuffer = async () => {
+        if (!api || !selected) {
+            return
+        }
+        // Manual, on-demand re-check against Buffer. Unlike the automatic one-shot,
+        // this always asks (no polledRef guard) and surfaces any Buffer error instead
+        // of swallowing it, so we can see why a live post's URL isn't coming back.
+        polledRef.current.delete(selected.post_id)
+        setIsWorking(true)
+        setError(null)
+        try {
+            const next = await api.refreshPublishingPostStatus(selected.post_id)
+            replacePost(next)
+        } catch (caught) {
+            setError(errorMessage(caught))
+        } finally {
+            setIsWorking(false)
+        }
+    }
+
     if (!isLoaded) {
         return (
             <DashboardPage eyebrow="Publish" title="Loading publishing">
@@ -421,6 +441,11 @@ export default function PublishPage() {
                                 <button className={styles.secondaryButton} type="button" onClick={() => handleSend("schedule")} disabled={isWorking}>
                                     <CalendarClock size={16} /> Schedule
                                 </button>
+                                {selected.buffer_post_id && (
+                                    <button className={styles.secondaryButton} type="button" onClick={handleRefreshFromBuffer} disabled={isWorking}>
+                                        <RefreshCw size={16} /> Refresh from Buffer
+                                    </button>
+                                )}
                                 <button className={styles.dangerButton} type="button" onClick={handleCancel} disabled={isWorking}>
                                     <XCircle size={16} /> Cancel
                                 </button>
