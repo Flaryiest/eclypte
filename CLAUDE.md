@@ -243,7 +243,7 @@ Frontend architecture:
 - `web/src/app/dashboard/new-edit/page.tsx`: compose/edit pipeline UI.
 - `web/src/app/dashboard/assets/page.tsx`: upload/import/manage asset library.
 - `web/src/app/dashboard/synthesis/page.tsx`: references and prompt management.
-- `web/src/app/dashboard/publish/page.tsx`: Buffer publishing queue with setup diagnostics, render preview, caption editing/regeneration, queue/schedule actions, posted/error metadata, and a post-status refresh that polls Buffer once for the live permalink.
+- `web/src/app/dashboard/publish/page.tsx`: Buffer publishing queue with setup diagnostics, render preview, caption editing/regeneration, queue/schedule actions, posted/error metadata, an automatic one-shot Buffer status check for the selected post, and a manual "Refresh from Buffer" button that re-checks the selected post's status/permalink on demand (surfacing Buffer errors instead of swallowing them).
 - `web/src/app/dashboard/renders/page.tsx`: render outputs and recent render runs.
 - `web/src/app/dashboard/settings/page.tsx`: API/user/prompt/YouTube-cookie health plus realtime (Redis) and worker-progress status.
 - `web/src/app/dashboard/dashboardCommon.tsx`: shared dashboard page wrapper and skeleton placeholders (`Skeleton`/`SkeletonList`).
