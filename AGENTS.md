@@ -18,6 +18,7 @@ Eclypte is an AMV creator monorepo. The product path is a Next.js dashboard back
 - `api/prototyping/video/`: scene, motion, impact, local CPU analysis, Modal GPU analysis, and R2-aware Modal video analysis.
 - `api/prototyping/edit/`: deterministic and agentic timeline planning, CLIP index build/query, reference ingestion/consolidation, timeline schemas/validation, MoviePy rendering (MP4 + poster frame), and R2-aware Modal render/index wrappers.
 - `api/prototyping/progress_events.py`: progress emitter used inside Modal workers. Prefer internal API progress writes when configured; otherwise it can append events through R2 config.
+- `api/prototyping/modal_s3.py`: shared S3/R2 client and object-download helpers used inside the R2-aware Modal wrappers; mounted by bare module name like `progress_events`.
 - `api/COMMANDS.md`: command runbook for local API, Modal, R2, timeline planning, rendering, and tests.
 - `docs/`: older plans/specs and Superpowers design artifacts.
 - `.agent/` and `.superpowers/`: agent profile/process assets, not application runtime code.
@@ -86,6 +87,7 @@ Eclypte is an AMV creator monorepo. The product path is a Next.js dashboard back
 - Do not install the heavy ML stack locally unless the task explicitly asks for dependency work. Audio allin1, torch, natten, CLIP, OpenCV-CUDA, and related packages belong in Modal images.
 - `api/requirements.txt` is for local backend/prototype development; `api/requirements-modal.txt` is for the heavy Modal audio image; root `requirements.txt` is for Railway.
 - Keep pure analysis modules free of Modal imports. Modal wrappers should call pure functions through `add_local_python_source()` or explicit storage wrappers.
+- Shared wrapper helpers (`modal_s3.py`, `progress_events.py`) live at `api/prototyping/`; list them in each app's `add_local_python_source()` and run `modal deploy` from `api/prototyping/` so they resolve.
 - R2-aware Modal apps used by the API include `eclypte-video-r2` (`api/prototyping/video/storage_modal.py`), `eclypte-clip-index-r2` (`api/prototyping/edit/index/storage_modal.py`), and `eclypte-render-r2` (`api/prototyping/edit/render_storage_modal.py`).
 - `eclypte-analysis` (`api/prototyping/music/analysis_modal.py`) and `eclypte-video` (`api/prototyping/video/analysis_modal.py`) are non-R2 Modal apps used in production by music analysis and synthesis reference ingest, respectively.
 

@@ -24,6 +24,8 @@ Repo-wide architecture and backend guidance lives in `../AGENTS.md`; this file a
 - `src/components/login/login.tsx` renders the Clerk `SignIn` modal; `src/components/navbar/navbar.tsx` controls opening it.
 - Fonts are configured in `src/app/layout.tsx` with both Google fonts and local font assets from `public/fonts/`.
 - `src/services/eclypteApi.ts` is the typed browser API client for FastAPI v1 endpoints, including uploads, assets, run streams, edit jobs, export options, downloads, synthesis prompt/reference, and publishing APIs.
+- `src/app/dashboard/dashboardCommon.tsx` exports the shared dashboard page wrapper, skeletons, formatting helpers, and the `errorMessage`/`isAbortError` error helpers used by all dashboard pages.
+- `src/app/dashboard/useRunStream.ts` is the shared run-stream hook (debounced refresh callback plus 1s polling fallback) used by `/dashboard/new-edit` and `/dashboard/renders`.
 
 ## Dashboard Pipeline Notes
 

@@ -246,7 +246,8 @@ Frontend architecture:
 - `web/src/app/dashboard/publish/page.tsx`: Buffer publishing queue with setup diagnostics, render preview, caption editing/regeneration, queue/schedule actions, posted/error metadata, an automatic one-shot Buffer status check for the selected post, and a manual "Refresh from Buffer" button that re-checks the selected post's status/permalink on demand (surfacing Buffer errors instead of swallowing them).
 - `web/src/app/dashboard/renders/page.tsx`: render outputs and recent render runs.
 - `web/src/app/dashboard/settings/page.tsx`: API/user/prompt/YouTube-cookie health plus realtime (Redis) and worker-progress status.
-- `web/src/app/dashboard/dashboardCommon.tsx`: shared dashboard page wrapper and skeleton placeholders (`Skeleton`/`SkeletonList`).
+- `web/src/app/dashboard/dashboardCommon.tsx`: shared dashboard page wrapper, skeleton placeholders (`Skeleton`/`SkeletonList`), formatting helpers, and the `errorMessage`/`isAbortError` error helpers used by all dashboard pages.
+- `web/src/app/dashboard/useRunStream.ts`: shared hook that subscribes to `/v1/runs/stream` with a debounced refresh callback and 1s polling fallback; used by the new-edit and renders pages.
 - `web/src/components/dashboard/sidebar/`: dashboard navigation.
 - `web/src/services/eclypteApi.ts`: typed browser API client. Extend this before adding ad hoc fetch calls.
 
@@ -278,6 +279,8 @@ Prototype/volume apps:
 - `eclypte-video` (used in production by synthesis reference ingest via `analyze_remote_bytes`)
 
 Modal wrappers should use pure local modules through `add_local_python_source()` or explicit storage wrappers. Pure analysis modules should not import Modal.
+
+Shared wrapper helpers live at the `api/prototyping/` root: `modal_s3.py` (S3/R2 client + object download) and `progress_events.py` (progress emission). Import them by bare module name inside Modal function bodies, list them in each app's `add_local_python_source()`, and deploy from `api/prototyping/` so they resolve.
 
 ## Testing Guidance
 

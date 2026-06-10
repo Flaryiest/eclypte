@@ -183,21 +183,18 @@ curl -H "X-User-Id: local_dev" \
 and Buffer posts are created only when a user queues or schedules a package.
 
 Deploy the new R2-aware Modal wrappers before using video-analysis/render API
-jobs against live Modal:
+jobs against live Modal. Run deploys from `api/prototyping/` so the shared
+`modal_s3` and `progress_events` modules resolve:
 
 ```powershell
-cd api/prototyping/video
-modal deploy storage_modal.py
-
-cd ../
+cd api/prototyping
+modal deploy video/storage_modal.py
 modal deploy edit/render_storage_modal.py
 ```
 
 ```bash
-cd api/prototyping/video
-modal deploy storage_modal.py
-
-cd ../
+cd api/prototyping
+modal deploy video/storage_modal.py
 modal deploy edit/render_storage_modal.py
 ```
 
