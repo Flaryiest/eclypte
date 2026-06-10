@@ -184,6 +184,9 @@ and Buffer posts are created only when a user queues or schedules a package.
 
 Autopilot (review-gated content loop): set `ECLYPTE_AUTOPILOT=1` on the API to
 run the background tick loop (`ECLYPTE_AUTOPILOT_INTERVAL_SEC`, default 300).
+Current per-edit defaults: `reels_cinematic` format (native 1080x1920 with the
+widescreen picture letterboxed in), energy-ranked ~15–22s trim window, agent
+planning, daily target 3 (per-user, adjustable 1–10).
 Without it, advance the queue manually:
 
 ```bash
@@ -200,15 +203,23 @@ jobs against live Modal. Run deploys from `api/prototyping/` so the shared
 
 ```powershell
 cd api/prototyping
+$env:PYTHONIOENCODING="utf-8"
 modal deploy video/storage_modal.py
 modal deploy edit/render_storage_modal.py
 ```
 
 ```bash
 cd api/prototyping
-modal deploy video/storage_modal.py
-modal deploy edit/render_storage_modal.py
+PYTHONUTF8=1 modal deploy video/storage_modal.py
+PYTHONUTF8=1 modal deploy edit/render_storage_modal.py
 ```
+
+Modal snapshots local source at deploy time — pushing to Railway does not
+update deployed apps. Redeploy `eclypte-render-r2` whenever `edit/render/**`,
+`edit/synthesis/timeline_schema.py`, or `edit/synthesis/validators.py` change
+(encode settings, effects/transitions, schema values), or live renders keep
+the old behavior. On Windows the UTF-8 env var matters: without it the Modal
+CLI can die printing Unicode (`'charmap' codec can't encode character`).
 
 Music analysis API jobs reuse the existing `eclypte-analysis::analyze_remote`
 Modal function from `api/prototyping/music/analysis_modal.py`.

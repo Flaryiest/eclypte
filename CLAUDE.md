@@ -24,8 +24,7 @@ Core invariants:
 - `api/prototyping/video/`: scene detection, optical-flow motion analysis, impact detection, local CPU and Modal GPU runtimes, R2-aware Modal wrapper.
 - `api/prototyping/edit/`: deterministic planner, CLIP index, OpenAI synthesis agent, reference consolidator, timeline schemas/validators, MoviePy renderer (MP4 + poster frame), Modal render/index wrappers.
 - `api/COMMANDS.md`: command runbook. Prefer updating it when operational instructions change.
-- `docs/`: older plans/specs and Superpowers design artifacts.
-- `.agent/`, `.superpowers/`: agent/process assets, not runtime app code.
+- `.agent/`, `.superpowers/`: agent/process assets, not runtime app code. (The old `docs/` plans/specs directory has been removed.)
 - `content/` and `api/prototyping/**/content/`: local scratch/generated media.
 
 ## Development Commands
@@ -288,6 +287,8 @@ Modal wrappers should use pure local modules through `add_local_python_source()`
 
 Shared wrapper helpers live at the `api/prototyping/` root: `modal_s3.py` (S3/R2 client + object download) and `progress_events.py` (progress emission). Import them by bare module name inside Modal function bodies, list them in each app's `add_local_python_source()`, and deploy from `api/prototyping/` so they resolve.
 
+`add_local_python_source()` snapshots local code at `modal deploy` time. Pushing to Railway does NOT update Modal: after changing anything inside the bundled `edit` package that the renderer uses (`edit/render/**`, `edit/synthesis/timeline_schema.py`, `edit/synthesis/validators.py`), redeploy `eclypte-render-r2` or live renders keep running the old code (and may reject timelines that use newer schema values). `eclypte-clip-index-r2` also bundles `edit` but only needs a redeploy when index code changes. On Windows, prefix `modal` commands with `PYTHONUTF8=1` (or `$env:PYTHONIOENCODING="utf-8"`) — the CLI prints Unicode glyphs that crash the default charmap console.
+
 ## Testing Guidance
 
 - Backend behavior changes: run focused tests near the changed module, then `python -m pytest api -v` when feasible.
@@ -299,6 +300,24 @@ Shared wrapper helpers live at the `api/prototyping/` root: `modal_s3.py` (S3/R2
 - Frontend changes: from `web/`, run `npm run lint` and `npm run build`.
 
 `pytest.ini` disables pytest's cache provider and sets temp-path retention to zero to reduce `.pytest*` artifacts.
+
+## Current Focus & Next Steps (June 2026)
+
+The active push is Instagram Reels growth via autopilot: review-gated packages rendered as `reels_cinematic` (native 1080x1920, baked-in bars) from 15–22s energy-ranked windows, agent-planned with beat-snapped cuts, real flash/crossfade/freeze/punch_in effects, and a CRF 18 encode.
+
+Operational checklist:
+
+- Confirm `ECLYPTE_AUTOPILOT=1` (and optionally `ECLYPTE_AUTOPILOT_INTERVAL_SEC`) is set on Railway; `/healthz` reports `autopilot_loop_configured`. Without it, ticks are manual.
+- QA the first post-deploy package before approving to Buffer: native vertical canvas (no platform-added letterbox), cuts audibly on beats, hook lands inside ~1.5s, effects visible.
+- Existing autopilot users keep their stored `daily_target`; the new default of 3 applies only to fresh state.
+
+Deferred, in rough priority order:
+
+- Impact-aligned shot selection: line up video-analysis impact moments with musical downbeats during planning.
+- `whip` transition and `speed_ramp`/`hold` effects (still no-op stubs).
+- YouTube publishing path (16:9 renders already exist; no upload integration).
+- Retention experiment: the "span the full source" prompt rule turns a 15–22s reel into a whole-film montage — once IG insights accumulate, test single-scene reels against it and revisit the rule.
+- Per-shot crop focus for fill-mode reels; posting-time optimization stays in Buffer.
 
 ## Working Rules
 

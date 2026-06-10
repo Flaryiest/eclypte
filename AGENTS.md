@@ -20,9 +20,9 @@ Eclypte is an AMV creator monorepo. The product path is a Next.js dashboard back
 - `api/prototyping/edit/`: deterministic and agentic timeline planning, CLIP index build/query, reference ingestion/consolidation, timeline schemas/validation, MoviePy rendering (MP4 + poster frame), and R2-aware Modal render/index wrappers.
 - `api/prototyping/progress_events.py`: progress emitter used inside Modal workers. Prefer internal API progress writes when configured; otherwise it can append events through R2 config.
 - `api/prototyping/modal_s3.py`: shared S3/R2 client and object-download helpers used inside the R2-aware Modal wrappers; mounted by bare module name like `progress_events`.
+- Modal apps snapshot local code at `modal deploy` time (`add_local_python_source`); a Railway push does not update them. After changing `edit/render/**` or the timeline schema/validators, redeploy `eclypte-render-r2` from `api/prototyping/` (`modal deploy edit/render_storage_modal.py`).
 - `api/COMMANDS.md`: command runbook for local API, Modal, R2, timeline planning, rendering, and tests.
-- `docs/`: older plans/specs and Superpowers design artifacts.
-- `.agent/` and `.superpowers/`: agent profile/process assets, not application runtime code.
+- `.agent/` and `.superpowers/`: agent profile/process assets, not application runtime code. (The old `docs/` plans/specs directory has been removed.)
 - `content/`, `api/prototyping/**/content/`, `youtube-worker-tmp/`, and pytest temp dirs: local scratch/generated media areas.
 
 ## Product Flow
