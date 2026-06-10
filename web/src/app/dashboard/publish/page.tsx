@@ -15,6 +15,7 @@ import {
     DashboardPage,
     SkeletonList,
     StatusBadge,
+    errorMessage,
     formatDate,
 } from "../dashboardCommon"
 import styles from "../studio.module.css"
@@ -563,8 +564,4 @@ function toLocalDateTimeInput(value: string | null) {
     }
     const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
     return local.toISOString().slice(0, 16)
-}
-
-function errorMessage(error: unknown) {
-    return error instanceof Error ? error.message : "Something went wrong"
 }

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { RefreshCw } from "lucide-react"
-import { DashboardPage, StatusBadge, formatDate } from "../dashboardCommon"
+import { DashboardPage, StatusBadge, errorMessage, formatDate } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import {
     ECLYPTE_API_BASE_URL,
@@ -130,8 +130,4 @@ export default function SettingsPage() {
             </div>
         </DashboardPage>
     )
-}
-
-function errorMessage(error: unknown) {
-    return error instanceof Error ? error.message : "Something went wrong"
 }

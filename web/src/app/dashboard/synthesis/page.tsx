@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Link, RefreshCw, RotateCcw, Save, Sparkles } from "lucide-react"
-import { DashboardPage, StatusBadge, formatDate } from "../dashboardCommon"
+import { DashboardPage, StatusBadge, errorMessage, formatDate } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import {
     EclypteApiClient,
@@ -351,8 +351,4 @@ function uniqueLines(value: string) {
 
 function runDetail(run: RunManifest) {
     return run.current_step ? `${run.status} - ${run.current_step}` : run.status
-}
-
-function errorMessage(error: unknown) {
-    return error instanceof Error ? error.message : "Something went wrong"
 }

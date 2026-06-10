@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Download, Eye, Play, RefreshCw, RotateCcw, Trash2, WandSparkles, XCircle } from "lucide-react"
-import { DashboardPage, SkeletonList, StatusBadge, formatBytes, formatDate, kindLabel, versionRef } from "../dashboardCommon"
+import { DashboardPage, SkeletonList, StatusBadge, errorMessage, formatBytes, formatDate, isAbortError, kindLabel, versionRef } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import { downloadSignedUrl, safeDownloadFilename } from "@/services/downloadFile"
 import {
@@ -13,9 +13,10 @@ import {
     EditJobStatus,
     ExportFormat,
     PlanningMode,
+    RunStreamMessage,
 } from "@/services/eclypteApi"
+import { useRunStream } from "../useRunStream"
 
-const POLL_INTERVAL_MS = 1000
 const MIN_TRIM_DURATION_SEC = 1
 
 // Mirror of EDIT_STAGE_WEIGHTS in api/app.py — keep in sync. Approximate share of
@@ -205,53 +206,16 @@ export default function NewEditPage() {
         return () => controller.abort()
     }, [api, selectedVideo])
 
-    useEffect(() => {
-        if (!api || !hasActiveJobs) {
-            return
-        }
-        const controller = new AbortController()
-        let stopped = false
-        let fallbackInterval: number | undefined
-        let refreshTimeout: number | undefined
-        const refresh = () => {
-            void loadJobs().catch((caught) => setError(errorMessage(caught)))
-        }
-        const scheduleRefresh = () => {
-            if (refreshTimeout !== undefined) {
-                return
-            }
-            refreshTimeout = window.setTimeout(() => {
-                refreshTimeout = undefined
-                refresh()
-            }, 150)
-        }
-        void api.streamRunUpdates({
-            signal: controller.signal,
-            onMessage: (message) => {
-                if (message.type === "run_manifest" && message.run.workflow_type === "edit_pipeline") {
-                    scheduleRefresh()
-                }
-                if (message.type === "run_event" && message.event.event_type === "progress") {
-                    scheduleRefresh()
-                }
-            },
-        }).catch((caught) => {
-            if (stopped || isAbortError(caught)) {
-                return
-            }
-            fallbackInterval = window.setInterval(refresh, POLL_INTERVAL_MS)
-        })
-        return () => {
-            stopped = true
-            controller.abort()
-            if (fallbackInterval !== undefined) {
-                window.clearInterval(fallbackInterval)
-            }
-            if (refreshTimeout !== undefined) {
-                window.clearTimeout(refreshTimeout)
-            }
-        }
-    }, [api, hasActiveJobs, loadJobs])
+    const refreshJobs = useCallback(() => {
+        void loadJobs().catch((caught) => setError(errorMessage(caught)))
+    }, [loadJobs])
+
+    useRunStream({
+        api,
+        enabled: hasActiveJobs,
+        shouldRefresh: isEditPipelineUpdate,
+        refresh: refreshJobs,
+    })
 
     const startEdit = async () => {
         if (!api || !selectedSong || !selectedVideo || !canStart) {
@@ -994,10 +958,9 @@ function formatSeconds(value: number) {
     return `${roundTime(value).toFixed(1)}s`
 }
 
-function errorMessage(error: unknown) {
-    return error instanceof Error ? error.message : "Something went wrong"
-}
-
-function isAbortError(error: unknown) {
-    return error instanceof DOMException && error.name === "AbortError"
+function isEditPipelineUpdate(message: RunStreamMessage) {
+    if (message.type === "run_manifest") {
+        return message.run.workflow_type === "edit_pipeline"
+    }
+    return message.type === "run_event" && message.event.event_type === "progress"
 }

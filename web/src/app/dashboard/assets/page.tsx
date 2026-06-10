@@ -7,8 +7,10 @@ import {
     DashboardPage,
     SkeletonList,
     StatusBadge,
+    errorMessage,
     formatBytes,
     formatDate,
+    isAbortError,
     kindLabel,
     versionRef,
 } from "../dashboardCommon"
@@ -651,12 +653,4 @@ function formatYouTubeImportStatus(status: string) {
         return "YouTube import failed"
     }
     return `YouTube import ${status}`
-}
-
-function isAbortError(error: unknown) {
-    return error instanceof DOMException && error.name === "AbortError"
-}
-
-function errorMessage(error: unknown) {
-    return error instanceof Error ? error.message : "Something went wrong"
 }

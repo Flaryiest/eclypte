@@ -112,3 +112,11 @@ export function versionRef(asset: AssetSummary) {
 export function kindLabel(kind: string) {
     return kind.replaceAll("_", " ")
 }
+
+export function errorMessage(error: unknown) {
+    return error instanceof Error ? error.message : "Something went wrong"
+}
+
+export function isAbortError(error: unknown) {
+    return error instanceof DOMException && error.name === "AbortError"
+}
