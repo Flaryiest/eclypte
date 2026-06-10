@@ -253,7 +253,7 @@ def _run_tick_locked(
                     count_failure=False,
                 )
 
-        export_options: dict[str, object] = {"format": "reels_9_16"}
+        export_options: dict[str, object] = {"format": "youtube_16_9"}
         if window is not None:
             export_options["audio_start_sec"] = window[0]
             export_options["audio_end_sec"] = window[1]

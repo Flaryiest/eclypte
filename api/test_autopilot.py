@@ -173,7 +173,7 @@ def test_tick_starts_edit_for_pending_item_with_song():
     assert len(starts.edit_calls) == 1
     _, kwargs = starts.edit_calls[0]
     assert kwargs["audio"] == {"file_id": "file_song", "version_id": "v_song"}
-    assert kwargs["export_options"]["format"] == "reels_9_16"
+    assert kwargs["export_options"]["format"] == "youtube_16_9"
     assert "audio_start_sec" not in kwargs["export_options"]
     item = state.items[0]
     assert item.status == "editing"
@@ -430,7 +430,7 @@ def test_autopilot_endpoints_flow(monkeypatch):
     runs = client.get("/v1/runs", params={"workflow_type": "edit_pipeline"}).json()
     assert len(runs) == 1
     assert runs[0]["inputs"]["creative_brief"] == "go hard"
-    assert runs[0]["inputs"]["export_format"] == "reels_9_16"
+    assert runs[0]["inputs"]["export_format"] == "youtube_16_9"
 
     in_flight_delete = client.delete(f"/v1/autopilot/queue/{item_id}")
     assert in_flight_delete.status_code == 400
