@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 SCHEMA_VERSION = 1
 
 TransitionType = Literal["cut", "crossfade", "whip", "flash"]
-EffectType = Literal["freeze", "speed_ramp", "hold"]
+EffectType = Literal["freeze", "speed_ramp", "hold", "punch_in"]
 CropMode = Literal["letterbox", "center", "fill", "per_shot"]
 
 

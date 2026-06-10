@@ -1,0 +1,95 @@
+import numpy as np
+import pytest
+
+moviepy = pytest.importorskip("moviepy")
+from moviepy import ColorClip  # noqa: E402
+
+from api.prototyping.edit.render.effects import apply_effects  # noqa: E402
+from api.prototyping.edit.render.transitions import apply_transition  # noqa: E402
+from api.prototyping.edit.synthesis.timeline_schema import (  # noqa: E402
+    Effect,
+    Shot,
+    ShotSource,
+    Transition,
+)
+
+SIZE = (64, 36)
+DURATION = 1.0
+
+
+def _clip(color):
+    return ColorClip(size=SIZE, color=color).with_duration(DURATION)
+
+
+def _shot(*, effects=None, transition="cut"):
+    return Shot(
+        index=0,
+        timeline_start_sec=0.0,
+        timeline_end_sec=DURATION,
+        source=ShotSource(start_sec=10.0, end_sec=10.0 + DURATION),
+        effects=effects or [],
+        transition_in=Transition(type=transition),
+    )
+
+
+def test_plain_cut_returns_clip_unchanged():
+    clip = _clip((50, 50, 50))
+    assert apply_transition(None, clip, _shot()) is clip
+
+
+def test_flash_brightens_start_then_decays():
+    clip = apply_transition(None, _clip((10, 10, 10)), _shot(transition="flash"))
+
+    assert clip.duration == pytest.approx(DURATION)
+    assert tuple(clip.size) == SIZE
+    first = clip.get_frame(0.0)
+    late = clip.get_frame(0.5)
+    assert first.mean() > 150  # blended hard toward white
+    assert late.mean() == pytest.approx(10.0, abs=1.0)  # untouched after the blink
+
+
+def test_crossfade_dissolves_from_previous_frame():
+    prev = _clip((255, 0, 0))
+    cur = apply_transition(prev, _clip((0, 0, 255)), _shot(transition="crossfade"))
+
+    assert cur.duration == pytest.approx(DURATION)
+    start = cur.get_frame(0.0)
+    late = cur.get_frame(0.6)
+    assert start[0, 0, 0] > 200  # starts nearly all previous-shot red
+    assert start[0, 0, 2] < 60
+    assert late[0, 0, 2] > 200  # settles on the incoming shot's blue
+    assert late[0, 0, 0] < 10
+
+
+def test_whip_falls_back_to_cut():
+    clip = _clip((50, 50, 50))
+    assert apply_transition(None, clip, _shot(transition="whip")) is clip
+
+
+def test_freeze_holds_first_frame():
+    moving = _clip((10, 10, 10)).transform(
+        lambda gf, t: (gf(t) + int(t * 200)).clip(0, 255).astype("uint8")
+    )
+    frozen = apply_effects(moving, _shot(effects=[Effect(type="freeze")]))
+
+    assert frozen.duration == pytest.approx(DURATION)
+    np.testing.assert_array_equal(frozen.get_frame(0.9), frozen.get_frame(0.0))
+
+
+def test_punch_in_preserves_size_and_zooms():
+    base = np.zeros((SIZE[1], SIZE[0], 3), dtype="uint8")
+    base[0:2, :, :] = 255  # bright strip on the top edge
+    clip = _clip((0, 0, 0)).transform(lambda gf, t: base)
+    zoomed = apply_effects(clip, _shot(effects=[Effect(type="punch_in")]))
+
+    first = zoomed.get_frame(0.0)
+    last = zoomed.get_frame(DURATION - 1e-3)
+    assert first.shape == last.shape == (SIZE[1], SIZE[0], 3)
+    # zooming in pushes the edge strip out of frame, dimming the top rows
+    assert last[0:2].mean() < first[0:2].mean()
+
+
+def test_unknown_effect_is_skipped():
+    clip = _clip((50, 50, 50))
+    out = apply_effects(clip, _shot(effects=[Effect(type="speed_ramp")]))
+    assert out is clip

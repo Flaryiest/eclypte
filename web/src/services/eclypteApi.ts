@@ -46,7 +46,7 @@ export type FileVersionMeta = {
 
 export type RunStatus = "created" | "running" | "blocked" | "failed" | "completed" | "canceled"
 export type PlanningMode = "agent" | "deterministic"
-export type ExportFormat = "reels_9_16" | "youtube_16_9"
+export type ExportFormat = "reels_9_16" | "reels_cinematic" | "youtube_16_9"
 
 export type ExportOptions = {
     format: ExportFormat

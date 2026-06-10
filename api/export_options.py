@@ -6,7 +6,7 @@ from math import ceil, floor
 from typing import Any, Literal
 
 
-ExportFormat = Literal["reels_9_16", "youtube_16_9"]
+ExportFormat = Literal["reels_9_16", "reels_cinematic", "youtube_16_9"]
 OutputCrop = Literal["fill", "letterbox"]
 
 
@@ -49,8 +49,10 @@ def resolve_export_options(
     raw = raw or {}
 
     format_value = str(raw.get("format") or "youtube_16_9")
-    if format_value not in {"reels_9_16", "youtube_16_9"}:
-        raise ValueError("export format must be reels_9_16 or youtube_16_9")
+    if format_value not in {"reels_9_16", "reels_cinematic", "youtube_16_9"}:
+        raise ValueError(
+            "export format must be reels_9_16, reels_cinematic, or youtube_16_9"
+        )
 
     audio_start_sec = float(raw.get("audio_start_sec") or 0.0)
     if audio_start_sec < 0:
@@ -70,6 +72,11 @@ def resolve_export_options(
     if format_value == "reels_9_16":
         output_size = (1080, 1920)
         crop = "fill"
+    elif format_value == "reels_cinematic":
+        # Native vertical canvas with the full widescreen picture centered and
+        # black bars baked in: cinematic look, no platform-side letterboxing.
+        output_size = (1080, 1920)
+        crop = "letterbox"
     else:
         output_size = (1920, 1080)
         crop = "letterbox"

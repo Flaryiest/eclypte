@@ -105,9 +105,18 @@ def render_timeline(
             fps=target_fps,
             codec=CODEC_VIDEO,
             audio_codec=CODEC_AUDIO,
+            audio_bitrate="192k",
             preset=encode_preset,
             threads=threads,
-            ffmpeg_params=["-movflags", "+faststart"],
+            # High-quality source so Instagram/YouTube re-encodes degrade less:
+            # CRF 18 (visually lossless-ish), animation tune for flat shading,
+            # yuv420p for universal playback, faststart for instant web playback.
+            ffmpeg_params=[
+                "-movflags", "+faststart",
+                "-crf", "18",
+                "-tune", "animation",
+                "-pix_fmt", "yuv420p",
+            ],
             logger=_make_encode_logger(progress_callback),
         )
         _log_timing("write_videofile", write_started)

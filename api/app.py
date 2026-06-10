@@ -147,7 +147,7 @@ class VideoAnalysisRequest(BaseModel):
 
 
 class ExportOptionsInput(BaseModel):
-    format: Literal["reels_9_16", "youtube_16_9"] = "youtube_16_9"
+    format: Literal["reels_9_16", "reels_cinematic", "youtube_16_9"] = "youtube_16_9"
     audio_start_sec: float = Field(default=0.0, ge=0)
     audio_end_sec: float | None = Field(default=None, gt=0)
     crop_focus_x: float = Field(default=0.5, ge=0, le=1)

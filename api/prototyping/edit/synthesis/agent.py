@@ -28,7 +28,8 @@ Steps:
 Editorial guidelines (baseline — follow unless the user's instructions override):
 - Fit the full song. The final shot's end_time MUST equal the song duration (within ~0.5s). Do not stop early.
 - Pace shots against the sections. Denser cuts in high-energy sections (chorus, drop); longer holds in low-energy sections (intro, verse, bridge).
-- The opening is the most important section. Invest the most creativity and pattern variety at the start: tight cuts on impacts, held beats, motion-driven transitions. This is what hooks the viewer.
+- The opening is the most important section. The first 1.5 seconds decide whether a viewer stays: open on the single most visually striking moment you can find (an impact frame, a burst of motion, an iconic character moment) — never a slow establishing shot — and land the first cut within ~1.5s. Invest the most creativity at the start; this is what hooks the viewer.
+- Each timeline item may optionally set "transition_in" ("cut" | "flash" | "crossfade") and "effect" ("freeze" | "punch_in"). Use flash on hard musical impacts (a drop or a downbeat slam), punch_in to add life to a longer held shot, and freeze for a dramatic stop on a final hit. Use them sparingly — a few per edit, at musical moments.
 - After the opening, plain cut transitions are fine. You do not need to apply creative patterns to every shot — the rest of the edit should carry the story, not show off.
 - Span the full source from beginning to end regardless of song length: the edit must reach the ending of the source, not just a cluster of early or high-energy moments. A shorter song means fewer, more spread-out shots — not a smaller slice of the film. You may still dwell on or revisit a standout moment.
 - Pick shots mostly in chronological order from the source video. Small re-orderings for pacing are OK, but the overall progression should move forward through the source.
@@ -79,6 +80,16 @@ TOOLS = [
                             "start_time": {"type": "number", "description": "Start time in seconds"},
                             "end_time": {"type": "number", "description": "End time in seconds"},
                             "source_timestamp": {"type": "number", "description": "Timestamp from query_clips"},
+                            "transition_in": {
+                                "type": "string",
+                                "enum": ["cut", "flash", "crossfade"],
+                                "description": "Optional transition into this shot (default cut). Use flash on hard musical impacts.",
+                            },
+                            "effect": {
+                                "type": "string",
+                                "enum": ["freeze", "punch_in"],
+                                "description": "Optional effect on this shot: freeze (hold the first frame) or punch_in (slow zoom over the shot).",
+                            },
                         },
                         "required": ["start_time", "end_time", "source_timestamp"],
                     },
@@ -109,6 +120,18 @@ def _format_song_context(song: dict) -> str:
             label = seg.get("label", "?")
             lines.append(f"  {i}. {label}: {start:.2f}s – {end:.2f}s ({end - start:.2f}s)")
     return "\n".join(lines)
+
+
+SHORT_EDIT_MAX_SEC = 40.0
+
+
+def _format_short_edit_context(song_duration_sec: float) -> str:
+    return (
+        f"This is a short-form reel ({song_duration_sec:.0f}s). Completion and rewatch "
+        f"rate decide its reach: hook instantly (strongest moment first, first cut "
+        f"within ~1.5s, no slow intro), keep every shot earning its place, and aim "
+        f"for an ending that loops cleanly back into the opening."
+    )
 
 
 def _format_source_context(source_duration_sec: float) -> str:
@@ -178,6 +201,9 @@ def run_synthesis_loop(
         context_blocks.append(_format_song_context(song))
     if source_duration_sec is not None and float(source_duration_sec) > 0:
         context_blocks.append(_format_source_context(source_duration_sec))
+    song_duration = float((song or {}).get("source", {}).get("duration_sec", 0.0) or 0.0)
+    if 0.0 < song_duration <= SHORT_EDIT_MAX_SEC:
+        context_blocks.append(_format_short_edit_context(song_duration))
     if context_blocks:
         user_content = "\n\n".join(context_blocks) + "\n\nUser brief:\n" + instructions
     else:

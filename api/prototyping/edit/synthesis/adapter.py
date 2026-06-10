@@ -1,15 +1,23 @@
+from bisect import bisect_left
+
 from .timeline_schema import (
     AudioSpec,
+    Effect,
     Markers,
     OutputSpec,
     Shot,
     ShotSource,
     SourceRef,
     Timeline,
+    Transition,
 )
 from .validators import validate_timeline
 
 SOURCE_TIMESTAMP_UNIQUENESS_SEC = 1.0
+BEAT_SNAP_TOLERANCE_SEC = 0.15
+MIN_SNAPPED_SHOT_SEC = 0.4
+AGENT_TRANSITIONS = {"cut", "flash", "crossfade"}
+AGENT_EFFECTS = {"freeze", "punch_in"}
 
 
 def adapt(
@@ -61,12 +69,22 @@ def adapt(
         src_start = max(0.0, min(src_ts, source_duration_sec - duration))
         src_end = src_start + duration
 
+        # Optional agent-chosen styling; unknown values fall back to plain cuts.
+        transition_raw = str(raw.get("transition_in") or "cut")
+        effect_raw = str(raw.get("effect") or "")
+
         shots.append(
             Shot(
                 index=i,
                 timeline_start_sec=start_time,
                 timeline_end_sec=end_time,
                 source=ShotSource(start_sec=src_start, end_sec=src_end),
+                transition_in=Transition(
+                    type=transition_raw if transition_raw in AGENT_TRANSITIONS else "cut"
+                ),
+                effects=(
+                    [Effect(type=effect_raw)] if effect_raw in AGENT_EFFECTS else []
+                ),
             )
         )
 
@@ -116,6 +134,12 @@ def adapt(
         })
         last_end = round(new_end, 3)
 
+    shots, beats_used = snap_shots_to_beats(
+        shots,
+        [float(b) for b in song.get("beats_sec") or []],
+        source_duration_sec=source_duration_sec,
+    )
+
     sections = [
         {
             "start_sec": float(s["start_sec"]),
@@ -137,8 +161,75 @@ def adapt(
         ),
         audio=AudioSpec(path=audio_path, start_sec=round(audio_start_sec, 3)),
         shots=shots,
-        markers=Markers(beats_used_sec=[], sections=sections),
+        markers=Markers(beats_used_sec=beats_used, sections=sections),
     )
 
     validate_timeline(timeline, source_duration_sec=source_duration_sec)
     return timeline
+
+
+def snap_shots_to_beats(
+    shots: list[Shot],
+    beats_sec: list[float],
+    *,
+    source_duration_sec: float,
+    tolerance_sec: float = BEAT_SNAP_TOLERANCE_SEC,
+) -> tuple[list[Shot], list[float]]:
+    """Snap interior shot boundaries to the nearest beat within `tolerance_sec`.
+
+    Cuts that land exactly on beats are what make an edit read as "on beat";
+    the agent aims for this but its timestamps drift. The first boundary (0.0)
+    and the final boundary (song end) stay fixed. Each snapped boundary moves
+    the outgoing shot's timeline/source end and the incoming shot's timeline
+    start + source end together, so contiguity and source-range/duration
+    parity are preserved. A snap is skipped when it would push either shot
+    below MIN_SNAPPED_SHOT_SEC or run the outgoing source range past the end
+    of the source video. Returns the adjusted shots and the beat times used.
+    """
+    beats = sorted(b for b in beats_sec if b > 0)
+    if not beats or len(shots) < 2:
+        return shots, []
+
+    def nearest_beat(t: float) -> float:
+        i = bisect_left(beats, t)
+        candidates = beats[max(0, i - 1):i + 1]
+        return min(candidates, key=lambda b: abs(b - t))
+
+    snapped = list(shots)
+    beats_used: list[float] = []
+    for i in range(len(snapped) - 1):
+        out_shot = snapped[i]
+        in_shot = snapped[i + 1]
+        boundary = out_shot.timeline_end_sec
+        beat = nearest_beat(boundary)
+        delta = round(beat - boundary, 3)
+        if abs(beat - boundary) > tolerance_sec:
+            continue
+        if delta == 0.0:
+            beats_used.append(round(beat, 3))
+            continue
+        new_out_dur = (boundary + delta) - out_shot.timeline_start_sec
+        new_in_dur = in_shot.timeline_end_sec - (boundary + delta)
+        new_out_src_end = round(out_shot.source.end_sec + delta, 3)
+        new_in_src_end = round(in_shot.source.end_sec - delta, 3)
+        if new_out_dur < MIN_SNAPPED_SHOT_SEC or new_in_dur < MIN_SNAPPED_SHOT_SEC:
+            continue
+        if new_out_src_end > source_duration_sec or new_in_src_end > source_duration_sec:
+            continue
+        snapped[i] = out_shot.model_copy(update={
+            "timeline_end_sec": round(boundary + delta, 3),
+            "source": ShotSource(
+                start_sec=out_shot.source.start_sec,
+                end_sec=new_out_src_end,
+            ),
+        })
+        snapped[i + 1] = in_shot.model_copy(update={
+            "timeline_start_sec": round(boundary + delta, 3),
+            "source": ShotSource(
+                start_sec=in_shot.source.start_sec,
+                end_sec=new_in_src_end,
+            ),
+        })
+        beats_used.append(round(beat, 3))
+
+    return snapped, sorted(set(beats_used))

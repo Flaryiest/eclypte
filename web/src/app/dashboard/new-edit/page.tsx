@@ -466,7 +466,7 @@ export default function NewEditPage() {
                         <div className={styles.exportSection}>
                             <div className={styles.exportHeader}>
                                 <span>Export</span>
-                                <span>{exportFormat === "reels_9_16" ? "1080 x 1920" : "1920 x 1080"}</span>
+                                <span>{exportFormat === "youtube_16_9" ? "1920 x 1080" : "1080 x 1920"}</span>
                             </div>
                             <div className={styles.segmentedControl} role="group" aria-label="Export format">
                                 <button
@@ -476,6 +476,14 @@ export default function NewEditPage() {
                                     disabled={isCreating}
                                 >
                                     Reels 9:16
+                                </button>
+                                <button
+                                    className={exportFormat === "reels_cinematic" ? styles.segmentActive : styles.segmentButton}
+                                    type="button"
+                                    onClick={() => setExportFormat("reels_cinematic")}
+                                    disabled={isCreating}
+                                >
+                                    Reels Cinematic
                                 </button>
                                 <button
                                     className={exportFormat === "youtube_16_9" ? styles.segmentActive : styles.segmentButton}
@@ -575,7 +583,7 @@ export default function NewEditPage() {
                                     />
                                 </label>
                             )}
-                            <div className={`${styles.cropPreview} ${exportFormat === "reels_9_16" ? styles.cropPreviewVertical : styles.cropPreviewWide}`}>
+                            <div className={`${styles.cropPreview} ${exportFormat === "youtube_16_9" ? styles.cropPreviewWide : styles.cropPreviewVertical}`}>
                                 {sourcePreviewUrl ? (
                                     <video
                                         className={styles.cropPreviewMedia}

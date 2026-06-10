@@ -54,6 +54,27 @@ def test_resolve_export_options_maps_reels_to_vertical_fill_crop():
     assert options.crop_focus_x == 0.25
 
 
+def test_resolve_export_options_maps_cinematic_reels_to_vertical_letterbox():
+    options = resolve_export_options(
+        {
+            "format": "reels_cinematic",
+            "audio_start_sec": 1.0,
+            "audio_end_sec": 19.0,
+        },
+        max_duration_sec=None,
+    )
+
+    assert options.format == "reels_cinematic"
+    assert options.output_size == (1080, 1920)
+    assert options.crop == "letterbox"
+    assert options.as_run_inputs()["export_format"] == "reels_cinematic"
+
+
+def test_resolve_export_options_rejects_unknown_format():
+    with pytest.raises(ValueError, match="export format must be"):
+        resolve_export_options({"format": "imax_70mm"}, max_duration_sec=None)
+
+
 def test_resolve_export_options_treats_legacy_max_duration_as_end_time():
     options = resolve_export_options(
         {"audio_start_sec": 5.0},

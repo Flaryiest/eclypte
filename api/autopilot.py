@@ -19,9 +19,9 @@ from api.storage.models import AutopilotItem, AutopilotState, RunManifest
 from api.storage.refs import FileVersionRef, RunRef
 from api.storage.repository import StorageRepository
 
-TRIM_TARGET_SEC = 30.0
-TRIM_MIN_SEC = 25.0
-TRIM_MAX_SEC = 35.0
+TRIM_TARGET_SEC = 18.0
+TRIM_MIN_SEC = 15.0
+TRIM_MAX_SEC = 22.0
 COMBO_WINDOW_BUCKET_SEC = 5
 MAX_CONSECUTIVE_FAILURES = 3
 MAX_FINISHED_ITEMS = 50
@@ -253,7 +253,7 @@ def _run_tick_locked(
                     count_failure=False,
                 )
 
-        export_options: dict[str, object] = {"format": "youtube_16_9"}
+        export_options: dict[str, object] = {"format": "reels_cinematic"}
         if window is not None:
             export_options["audio_start_sec"] = window[0]
             export_options["audio_end_sec"] = window[1]

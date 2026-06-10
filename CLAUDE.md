@@ -86,7 +86,7 @@ Routes:
 - Runs: `GET /v1/runs`, `GET /v1/runs/{run_id}`, `GET /v1/runs/{run_id}/events`, `GET /v1/runs/stream`, `GET /v1/runs/{run_id}/stream`.
 - Synthesis: `POST /v1/synthesis/references`, `GET /v1/synthesis/references`, `POST /v1/synthesis/consolidations`, `GET /v1/synthesis/prompt`, `POST /v1/synthesis/prompt/versions`, `POST /v1/synthesis/prompt/versions/{version_id}/activate`.
 - Publishing: `GET /v1/publishing/config`, `GET /v1/publishing/posts`, `POST /v1/publishing/posts`, `PATCH /v1/publishing/posts/{post_id}`, `POST /v1/publishing/posts/{post_id}/regenerate-caption`, `POST /v1/publishing/posts/{post_id}/send-buffer`, `POST /v1/publishing/posts/{post_id}/refresh-status`, `POST /v1/publishing/posts/{post_id}/cancel`.
-- Autopilot: `GET /v1/autopilot`, `PATCH /v1/autopilot` (enable/disable, daily target, clear halt), `POST /v1/autopilot/queue`, `DELETE /v1/autopilot/queue/{item_id}`, `POST /v1/autopilot/tick` (manual tick). `api/autopilot.py` owns the review-gated tick state machine: it imports YouTube songs, starts YouTube 16:9 edit jobs with an energy-ranked ~25–35s trim window from the song's music analysis, dedupes (video, song, window) combos, halts after 3 consecutive failures, and auto-creates `ready` publishing packages (`auto_created=true`) that wait for human approval on the publish page. State lives in R2 at `users/{user_id}/autopilot/state.json` with enabled-user markers under `autopilot/enabled/`.
+- Autopilot: `GET /v1/autopilot`, `PATCH /v1/autopilot` (enable/disable, daily target, clear halt), `POST /v1/autopilot/queue`, `DELETE /v1/autopilot/queue/{item_id}`, `POST /v1/autopilot/tick` (manual tick). `api/autopilot.py` owns the review-gated tick state machine: it imports YouTube songs, starts cinematic 9:16 Reels edit jobs (`reels_cinematic`) with an energy-ranked ~15–22s trim window from the song's music analysis, dedupes (video, song, window) combos, halts after 3 consecutive failures, and auto-creates `ready` publishing packages (`auto_created=true`) that wait for human approval on the publish page. State lives in R2 at `users/{user_id}/autopilot/state.json` with enabled-user markers under `autopilot/enabled/`.
 - Internal: `POST /internal/progress`, requiring `X-Eclypte-Internal-Token`.
 
 ## Storage Substrate
@@ -142,6 +142,7 @@ Edit child run ids and render output ids are part of the dashboard contract. Pre
 `api/export_options.py` owns:
 
 - `reels_9_16`: 1080x1920, fill crop, `crop_focus_x`.
+- `reels_cinematic`: 1080x1920, letterbox — the full widescreen picture centered on a native vertical canvas with black bars baked in (autopilot's default).
 - `youtube_16_9`: 1920x1080, letterbox.
 - `audio_start_sec` and `audio_end_sec`.
 - `trim_song_analysis()`, which rewrites beats, downbeats, segments, energy, and source duration for the selected audio window.
@@ -203,7 +204,7 @@ Subsystems:
 - `synthesis/validators.py`: contiguity, bounds, and pattern-id validation.
 - `synthesis/planner.py`: deterministic planner baseline. Maps each shot's song-progress fraction to a source-position window so the edit spans the full source regardless of length.
 - `synthesis/agent.py`: OpenAI Responses API synthesis loop.
-- `synthesis/adapter.py`: converts agent output into renderable timelines, dedupes near-duplicate source timestamps, trims song-duration overshoot, and runs continuity post-processing.
+- `synthesis/adapter.py`: converts agent output into renderable timelines, dedupes near-duplicate source timestamps, trims song-duration overshoot, runs continuity post-processing, beat-snaps interior cut boundaries (±0.15s) onto `markers.beats_used_sec`, and maps optional per-shot `transition_in`/`effect` choices.
 - `index/frames.py`: sequential frame extraction. Do not revert to per-frame `CAP_PROP_POS_MSEC` seeking on long videos.
 - `index/embed.py`: CLIP frame/text embeddings.
 - `index/query.py`: `query_ranges` motion-statistics ranking used by the deterministic planner; an optional `time_window` biases candidates toward a source region.
@@ -217,7 +218,7 @@ Agent planning defaults:
 - `PlanningMode` is `"agent"` unless explicitly set to `"deterministic"`.
 - `synthesis/agent.py` currently uses `MODEL = "gpt-5.5"`, `reasoning_effort="high"`, and `verbosity="low"`.
 - Responses API state is carried through `previous_response_id`; do not re-upload full message history each loop.
-- Tools are `query_clips(query, top_k)` and `finish_edit(timeline)`.
+- Tools are `query_clips(query, top_k)` and `finish_edit(timeline)`; timeline items optionally carry `transition_in` (`cut`/`flash`/`crossfade`) and `effect` (`freeze`/`punch_in`).
 - The agent receives the source duration and is instructed to span the full source start→end regardless of song length, so short/trimmed edits still cover the whole film. This guidance is injected into the per-run user content (so it applies regardless of the active prompt version); nothing enforces it (no validator/forced spread), preserving the agent's freedom to dwell on standout moments.
 - Agent mode may create/reuse `clip_index` assets and records `clip_index_file_id`, `clip_index_version_id`, and `synthesis_prompt_version_id`.
 - Agent failures should fail visibly; do not silently fall back to deterministic planning.
@@ -226,7 +227,9 @@ Rendering notes:
 
 - `render_timeline` depends on timeline JSON, source video, and song audio.
 - MoviePy v2 methods include `subclipped`, `with_duration`, `resized`, `concatenate_videoclips(method="compose")`, and `with_audio`.
-- Effects/transitions are still mostly stubs/deferred. Avoid promising finished flash/whip/freeze/speed-ramp behavior unless implemented.
+- Implemented effects/transitions: `flash` and `crossfade` transitions, `freeze` and `punch_in` effects (frame transforms that preserve duration/size). `whip`, `speed_ramp`, and `hold` are still no-op stubs. The agent opts in per shot via optional `transition_in`/`effect` fields on `finish_edit` items, mapped in `synthesis/adapter.py`.
+- The adapter beat-snaps interior shot boundaries to the nearest beat within ±0.15s (`snap_shots_to_beats`), records them in `markers.beats_used_sec`, and never collapses a shot below 0.4s.
+- The encoder writes CRF 18 / `-tune animation` / yuv420p with 192k AAC so Instagram/YouTube re-encodes start from a high-quality source.
 - CPU/vCPU count is the current render dial; GPU does not help without a CUDA ffmpeg/NVENC path.
 - Edit `progress_percent` is a weighted average by typical stage duration (`EDIT_STAGE_WEIGHTS` in `api/app.py`), and the render stage fills smoothly from the renderer's real encode progress. The dashboard shows the poster instantly and lazy-loads the heavy MP4 on play.
 
