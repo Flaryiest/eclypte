@@ -1,7 +1,13 @@
 from pathlib import Path
 import os
 
+import pytest
 
+
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="patches os.name to 'nt'; POSIX pathlib cannot instantiate WindowsPath",
+)
 def test_main_redirects_syncedlyrics_cache_to_local_content_on_windows(
     tmp_path, monkeypatch
 ):
