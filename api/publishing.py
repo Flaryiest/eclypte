@@ -108,12 +108,12 @@ class BufferClient:
             raise BufferClientError("Buffer did not return a channel")
         return BufferChannelStatus(
             id=str(channel.get("id") or channel_id),
-            name=_optional_str(channel.get("name")),
-            service=_optional_str(channel.get("service")),
-            display_name=_optional_str(channel.get("displayName")),
-            is_disconnected=_optional_bool(channel.get("isDisconnected")),
-            is_locked=_optional_bool(channel.get("isLocked")),
-            external_link=_optional_str(channel.get("externalLink")),
+            name=optional_str(channel.get("name")),
+            service=optional_str(channel.get("service")),
+            display_name=optional_str(channel.get("displayName")),
+            is_disconnected=optional_bool(channel.get("isDisconnected")),
+            is_locked=optional_bool(channel.get("isLocked")),
+            external_link=optional_str(channel.get("externalLink")),
         )
 
     def _graphql(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -475,13 +475,13 @@ def _first_error_message(errors: Any) -> str:
     return "Buffer returned an error"
 
 
-def _optional_str(value: Any) -> str | None:
+def optional_str(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
 
 
-def _optional_bool(value: Any) -> bool | None:
+def optional_bool(value: Any) -> bool | None:
     if value is None:
         return None
     return bool(value)

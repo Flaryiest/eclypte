@@ -28,6 +28,8 @@ from api.publishing import (
     create_publish_post_for_render,
     format_post_text,
     generate_caption_draft,
+    optional_bool,
+    optional_str,
     prepare_public_media_copy,
     queue_status_for_mode,
 )
@@ -282,18 +284,6 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _optional_string(value: object) -> str | None:
-    if value is None:
-        return None
-    return str(value)
-
-
-def _optional_bool(value: object) -> bool | None:
-    if value is None:
-        return None
-    return bool(value)
-
-
 def create_app(
     *,
     store: ObjectStore | None = None,
@@ -391,13 +381,13 @@ def create_app(
         if isinstance(channel, dict):
             return PublishingBufferChannelStatus(
                 id=str(channel.get("id") or fallback_id),
-                name=_optional_string(channel.get("name")),
-                service=_optional_string(channel.get("service")),
-                display_name=_optional_string(channel.get("display_name") or channel.get("displayName")),
-                is_disconnected=_optional_bool(channel.get("is_disconnected") if "is_disconnected" in channel else channel.get("isDisconnected")),
-                is_locked=_optional_bool(channel.get("is_locked") if "is_locked" in channel else channel.get("isLocked")),
-                external_link=_optional_string(channel.get("external_link") or channel.get("externalLink")),
-                last_error=last_error or _optional_string(channel.get("last_error")),
+                name=optional_str(channel.get("name")),
+                service=optional_str(channel.get("service")),
+                display_name=optional_str(channel.get("display_name") or channel.get("displayName")),
+                is_disconnected=optional_bool(channel.get("is_disconnected") if "is_disconnected" in channel else channel.get("isDisconnected")),
+                is_locked=optional_bool(channel.get("is_locked") if "is_locked" in channel else channel.get("isLocked")),
+                external_link=optional_str(channel.get("external_link") or channel.get("externalLink")),
+                last_error=last_error or optional_str(channel.get("last_error")),
             )
         return PublishingBufferChannelStatus(id=fallback_id, last_error=last_error)
 

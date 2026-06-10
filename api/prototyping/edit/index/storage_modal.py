@@ -19,31 +19,13 @@ image = (
         "pillow",
         "boto3",
     )
-    .add_local_python_source("edit", "progress_events")
+    .add_local_python_source("edit", "modal_s3", "progress_events")
 )
 
 app = modal.App("eclypte-clip-index-r2")
 storage_image = image
 
 _INDEX_CACHE = {}
-
-
-def _s3_client(config: dict):
-    import boto3
-
-    return boto3.client(
-        "s3",
-        endpoint_url=config["endpoint_url"],
-        aws_access_key_id=config["access_key_id"],
-        aws_secret_access_key=config["secret_access_key"],
-        region_name=config.get("region_name", "auto"),
-    )
-
-
-def _download(client, bucket: str, key: str, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("wb") as f:
-        client.download_fileobj(bucket, key, f)
 
 
 @app.function(image=storage_image, gpu="T4", timeout=1800)
@@ -56,10 +38,11 @@ def build_index_r2(
 ) -> dict:
     from edit.index.embed import embed_frames
     from edit.index.frames import extract_frames
+    from modal_s3 import download, s3_client
     from progress_events import emit_progress
     import numpy as np
 
-    client = _s3_client(r2_config)
+    client = s3_client(r2_config)
     bucket = r2_config["bucket"]
     suffix = Path(filename).suffix or ".mp4"
     with tempfile.TemporaryDirectory() as td:
@@ -68,7 +51,7 @@ def build_index_r2(
         index_path = workdir / "clip_index.npz"
 
         emit_progress(progress_context, 5, "Downloading source video")
-        _download(client, bucket, source_key, source_path)
+        download(client, bucket, source_key, source_path)
         frames_data = extract_frames(source_path, fps=1)
         if not frames_data:
             raise ValueError(f"No frames extracted from {filename}")
@@ -103,16 +86,17 @@ def build_index_r2(
 
 
 def _load_index_from_r2(r2_config: dict, index_key: str):
+    from modal_s3 import download, s3_client
     import numpy as np
 
     cached = _INDEX_CACHE.get(index_key)
     if cached is not None:
         return cached
 
-    client = _s3_client(r2_config)
+    client = s3_client(r2_config)
     with tempfile.TemporaryDirectory() as td:
         index_path = Path(td) / "clip_index.npz"
-        _download(client, r2_config["bucket"], index_key, index_path)
+        download(client, r2_config["bucket"], index_key, index_path)
         with np.load(index_path) as data:
             timestamps = data["timestamps"]
             embeddings = data["embeddings"]

@@ -32,23 +32,11 @@ image = (
         "rm -rf /opt/opencv /opt/opencv_contrib",
     )
     .pip_install("scenedetect", "boto3")
-    .add_local_python_source("analysis_cuda", "scenes", "motion", "impact", "progress_events")
+    .add_local_python_source("analysis_cuda", "scenes", "motion", "impact", "modal_s3", "progress_events")
 )
 
 app = modal.App("eclypte-video-r2")
 storage_image = image
-
-
-def _s3_client(config: dict):
-    import boto3
-
-    return boto3.client(
-        "s3",
-        endpoint_url=config["endpoint_url"],
-        aws_access_key_id=config["access_key_id"],
-        aws_secret_access_key=config["secret_access_key"],
-        region_name=config.get("region_name", "auto"),
-    )
 
 
 @app.function(image=storage_image, gpu="T4", timeout=14400)
@@ -59,10 +47,11 @@ def analyze_r2(
     progress_context: dict | None = None,
 ) -> dict:
     from analysis_cuda import analyze_cuda
+    from modal_s3 import s3_client
     from progress_events import emit_progress
 
     suffix = Path(filename).suffix or ".mp4"
-    client = _s3_client(r2_config)
+    client = s3_client(r2_config)
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         emit_progress(progress_context, 2, "Downloading source video")
         client.download_fileobj(r2_config["bucket"], source_key, tmp)

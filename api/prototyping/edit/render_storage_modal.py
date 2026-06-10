@@ -14,29 +14,11 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("ffmpeg")
     .pip_install("moviepy>=2", "pydantic>=2", "pyyaml", "numpy", "imageio-ffmpeg", "boto3")
-    .add_local_python_source("edit", "progress_events")
+    .add_local_python_source("edit", "modal_s3", "progress_events")
 )
 
 app = modal.App("eclypte-render-r2")
 storage_image = image
-
-
-def _s3_client(config: dict):
-    import boto3
-
-    return boto3.client(
-        "s3",
-        endpoint_url=config["endpoint_url"],
-        aws_access_key_id=config["access_key_id"],
-        aws_secret_access_key=config["secret_access_key"],
-        region_name=config.get("region_name", "auto"),
-    )
-
-
-def _download(client, bucket: str, key: str, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("wb") as f:
-        client.download_fileobj(bucket, key, f)
 
 
 def _patch_timeline_paths(timeline: dict, *, video_path: Path, audio_path: Path) -> dict:
@@ -70,9 +52,10 @@ def render_r2(
     poster_output_key: str | None = None,
 ) -> dict:
     from edit.render.renderer import render_timeline
+    from modal_s3 import download, s3_client
     from progress_events import emit_progress
 
-    client = _s3_client(r2_config)
+    client = s3_client(r2_config)
     bucket = r2_config["bucket"]
     with tempfile.TemporaryDirectory() as td:
         workdir = Path(td)
@@ -83,11 +66,11 @@ def render_r2(
         poster_path = workdir / "poster.jpg"
 
         emit_progress(progress_context, 5, "Downloading timeline")
-        _download(client, bucket, timeline_key, timeline_path)
+        download(client, bucket, timeline_key, timeline_path)
         emit_progress(progress_context, 12, "Downloading source video")
-        _download(client, bucket, source_video_key, source_path)
+        download(client, bucket, source_video_key, source_path)
         emit_progress(progress_context, 18, "Downloading audio")
-        _download(client, bucket, audio_key, audio_path)
+        download(client, bucket, audio_key, audio_path)
 
         emit_progress(progress_context, 25, "Preparing timeline")
         timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
