@@ -21,10 +21,11 @@ type SidebarItem = {
 const sidebarItems: SidebarItem[] = [
     { id: "new-edit", letter: "A", label: "New edit", href: "/dashboard/new-edit" },
     { id: "assets", letter: "B", label: "Assets", href: "/dashboard/assets" },
-    { id: "publish", letter: "C", label: "Publish", href: "/dashboard/publish" },
-    { id: "synthesis", letter: "D", label: "Synthesis", href: "/dashboard/synthesis" },
-    { id: "renders", letter: "E", label: "Renders", href: "/dashboard/renders" },
-    { id: "settings", letter: "F", label: "Settings", href: "/dashboard/settings" },
+    { id: "autopilot", letter: "C", label: "Autopilot", href: "/dashboard/autopilot" },
+    { id: "publish", letter: "D", label: "Publish", href: "/dashboard/publish" },
+    { id: "synthesis", letter: "E", label: "Synthesis", href: "/dashboard/synthesis" },
+    { id: "renders", letter: "F", label: "Renders", href: "/dashboard/renders" },
+    { id: "settings", letter: "G", label: "Settings", href: "/dashboard/settings" },
 ]
 
 export default function Sidebar({ isOpen, onToggle }: SidebarProps) {

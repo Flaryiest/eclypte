@@ -151,6 +151,46 @@ export type PublishingConfig = {
     buffer_channel: PublishingBufferChannel | null
 }
 
+export type AutopilotItemStatus = "pending" | "importing" | "editing" | "packaged" | "failed"
+
+export type AutopilotItem = {
+    item_id: string
+    source_video_file_id: string
+    source_video_version_id: string
+    song_file_id: string | null
+    song_version_id: string | null
+    song_youtube_url: string | null
+    creative_brief: string
+    status: AutopilotItemStatus
+    import_run_id: string | null
+    edit_run_id: string | null
+    post_id: string | null
+    audio_start_sec: number | null
+    audio_end_sec: number | null
+    last_error: string | null
+    created_at: string
+    updated_at: string
+}
+
+export type AutopilotStatus = {
+    enabled: boolean
+    daily_target: number
+    halted_reason: string | null
+    last_tick_at: string | null
+    packaged_today: number
+    in_flight: number
+    pending: number
+    items: AutopilotItem[]
+    loop_configured: boolean
+}
+
+export type AutopilotQueueItemInput = {
+    source_video: FileVersionInput
+    song?: FileVersionInput | null
+    song_youtube_url?: string | null
+    creative_brief?: string
+}
+
 export type SynthesisReference = {
     reference_id: string
     owner_user_id: string
@@ -402,6 +442,44 @@ export class EclypteApiClient {
             `/v1/publishing/posts/${encodeURIComponent(postId)}/refresh-status`,
             { method: "POST", signal },
         )
+    }
+
+    async getAutopilot(signal?: AbortSignal) {
+        return this.request<AutopilotStatus>("/v1/autopilot", { signal })
+    }
+
+    async updateAutopilot(
+        input: { enabled?: boolean; dailyTarget?: number; clearHalt?: boolean },
+        signal?: AbortSignal,
+    ) {
+        return this.request<AutopilotStatus>("/v1/autopilot", {
+            method: "PATCH",
+            body: JSON.stringify({
+                enabled: input.enabled,
+                daily_target: input.dailyTarget,
+                clear_halt: input.clearHalt ?? false,
+            }),
+            signal,
+        })
+    }
+
+    async addAutopilotItems(items: AutopilotQueueItemInput[], signal?: AbortSignal) {
+        return this.request<AutopilotStatus>("/v1/autopilot/queue", {
+            method: "POST",
+            body: JSON.stringify({ items }),
+            signal,
+        })
+    }
+
+    async removeAutopilotItem(itemId: string, signal?: AbortSignal) {
+        return this.request<AutopilotStatus>(
+            `/v1/autopilot/queue/${encodeURIComponent(itemId)}`,
+            { method: "DELETE", signal },
+        )
+    }
+
+    async triggerAutopilotTick(signal?: AbortSignal) {
+        return this.request<AutopilotStatus>("/v1/autopilot/tick", { method: "POST", signal })
     }
 
     async createUpload(request: UploadCreateRequest, signal?: AbortSignal) {

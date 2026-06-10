@@ -75,6 +75,7 @@ Optional env vars:
 - `ECLYPTE_YOUTUBE_VISITOR_DATA` and `ECLYPTE_YOUTUBE_PO_TOKEN`: PO-token path for `pytubefix`.
 - `BUFFER_API_KEY`, `BUFFER_INSTAGRAM_CHANNEL_ID`, and `ECLYPTE_R2_PUBLIC_BASE_URL`: enable review-gated Buffer Instagram publishing from public R2 copies.
 - `OPENAI_API_KEY`: enables AI caption generation for publishing packages. `ECLYPTE_CAPTION_MODEL` is optional and defaults to a small GPT-5.4-class model; deterministic fallback captions are used when OpenAI is unavailable.
+- `ECLYPTE_AUTOPILOT=1`: starts the in-process autopilot loop (FastAPI lifespan task) that ticks every `ECLYPTE_AUTOPILOT_INTERVAL_SEC` (default 300) for every user with autopilot enabled. Without it, ticks only run via `POST /v1/autopilot/tick`.
 
 Routes:
 
@@ -85,6 +86,7 @@ Routes:
 - Runs: `GET /v1/runs`, `GET /v1/runs/{run_id}`, `GET /v1/runs/{run_id}/events`, `GET /v1/runs/stream`, `GET /v1/runs/{run_id}/stream`.
 - Synthesis: `POST /v1/synthesis/references`, `GET /v1/synthesis/references`, `POST /v1/synthesis/consolidations`, `GET /v1/synthesis/prompt`, `POST /v1/synthesis/prompt/versions`, `POST /v1/synthesis/prompt/versions/{version_id}/activate`.
 - Publishing: `GET /v1/publishing/config`, `GET /v1/publishing/posts`, `POST /v1/publishing/posts`, `PATCH /v1/publishing/posts/{post_id}`, `POST /v1/publishing/posts/{post_id}/regenerate-caption`, `POST /v1/publishing/posts/{post_id}/send-buffer`, `POST /v1/publishing/posts/{post_id}/refresh-status`, `POST /v1/publishing/posts/{post_id}/cancel`.
+- Autopilot: `GET /v1/autopilot`, `PATCH /v1/autopilot` (enable/disable, daily target, clear halt), `POST /v1/autopilot/queue`, `DELETE /v1/autopilot/queue/{item_id}`, `POST /v1/autopilot/tick` (manual tick). `api/autopilot.py` owns the review-gated tick state machine: it imports YouTube songs, starts Reels edit jobs with an energy-ranked ~25–35s trim window from the song's music analysis, dedupes (video, song, window) combos, halts after 3 consecutive failures, and auto-creates `ready` publishing packages (`auto_created=true`) that wait for human approval on the publish page. State lives in R2 at `users/{user_id}/autopilot/state.json` with enabled-user markers under `autopilot/enabled/`.
 - Internal: `POST /internal/progress`, requiring `X-Eclypte-Internal-Token`.
 
 ## Storage Substrate
@@ -244,6 +246,7 @@ Frontend architecture:
 - `web/src/app/dashboard/assets/page.tsx`: upload/import/manage asset library.
 - `web/src/app/dashboard/synthesis/page.tsx`: references and prompt management.
 - `web/src/app/dashboard/publish/page.tsx`: Buffer publishing queue with setup diagnostics, render preview, caption editing/regeneration, queue/schedule actions, posted/error metadata, an automatic one-shot Buffer status check for the selected post, and a manual "Refresh from Buffer" button that re-checks the selected post's status/permalink on demand (surfacing Buffer errors instead of swallowing them).
+- `web/src/app/dashboard/autopilot/page.tsx`: autopilot status (enable/pause, daily target, halt banner), backlog form (video asset + song asset or YouTube link + optional brief), queue/activity list, and a manual "Run tick now" action.
 - `web/src/app/dashboard/renders/page.tsx`: render outputs and recent render runs.
 - `web/src/app/dashboard/settings/page.tsx`: API/user/prompt/YouTube-cookie health plus realtime (Redis) and worker-progress status.
 - `web/src/app/dashboard/dashboardCommon.tsx`: shared dashboard page wrapper, skeleton placeholders (`Skeleton`/`SkeletonList`), formatting helpers, and the `errorMessage`/`isAbortError` error helpers used by all dashboard pages.

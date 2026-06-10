@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 import secrets
+import threading
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from typing import Literal
 from urllib.parse import urlparse
@@ -11,6 +15,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from api.autopilot import (
+    STATE_LOCK as AUTOPILOT_STATE_LOCK,
+    run_autopilot_tick,
+)
 from api.export_options import resolve_export_options
 from api.storage.factory import (
     get_default_user_id,
@@ -35,6 +43,7 @@ from api.publishing import (
 )
 from api.storage.models import (
     ArtifactKind,
+    AutopilotItem,
     FileManifest,
     FileVersionMeta,
     PublishingPostRecord,
@@ -81,6 +90,14 @@ EDIT_STAGE_WEIGHTS = {
     "render": 0.39,
     "result": 0.02,
 }
+YOUTUBE_IMPORT_STEPS = [
+    "download_youtube_audio",
+    "publish_audio",
+    "analyze_music",
+    "publish_analysis",
+]
+
+logger = logging.getLogger("eclypte.autopilot")
 
 
 class FileVersionInput(BaseModel):
@@ -260,6 +277,35 @@ class SynthesisPromptVersionRequest(BaseModel):
     activate: bool = True
 
 
+class AutopilotQueueItemInput(BaseModel):
+    source_video: FileVersionInput
+    song: FileVersionInput | None = None
+    song_youtube_url: str | None = None
+    creative_brief: str = Field(default="", max_length=2000)
+
+
+class AutopilotQueueRequest(BaseModel):
+    items: list[AutopilotQueueItemInput] = Field(min_length=1, max_length=20)
+
+
+class AutopilotUpdateRequest(BaseModel):
+    enabled: bool | None = None
+    daily_target: int | None = Field(default=None, ge=1, le=10)
+    clear_halt: bool = False
+
+
+class AutopilotStatusResponse(BaseModel):
+    enabled: bool
+    daily_target: int
+    halted_reason: str | None
+    last_tick_at: str | None
+    packaged_today: int
+    in_flight: int
+    pending: int
+    items: list[AutopilotItem]
+    loop_configured: bool
+
+
 def parse_cors_origins(value: str | None = None) -> list[str]:
     raw = value if value is not None else os.environ.get("ECLYPTE_CORS_ORIGINS")
     if not raw:
@@ -293,7 +339,18 @@ def create_app(
     buffer_client: BufferClient | None = None,
     cors_origins: list[str] | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="Eclypte API", version="1.0.0")
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        loop_task: asyncio.Task | None = None
+        if autopilot_loop_configured():
+            loop_task = asyncio.create_task(_autopilot_loop())
+        yield
+        if loop_task is not None:
+            loop_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await loop_task
+
+    app = FastAPI(title="Eclypte API", version="1.0.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins or parse_cors_origins(),
@@ -632,7 +689,7 @@ def create_app(
     def start_edit_job(
         *,
         request: EditJobRequest,
-        background_tasks: BackgroundTasks,
+        schedule,
         repo: StorageRepository,
         uid: str,
     ) -> EditJobStatus:
@@ -659,7 +716,7 @@ def create_app(
             },
             EDIT_STAGE_ORDER,
         )
-        background_tasks.add_task(
+        schedule(
             runner.run_edit_pipeline,
             user_id=uid,
             run_id=run.run_id,
@@ -671,6 +728,113 @@ def create_app(
             export_options=export_options.as_payload(),
         )
         return edit_status_from_run(repo, uid, run)
+
+    def build_background_repository() -> StorageRepository | None:
+        resolved = store or get_object_store(required=False)
+        if resolved is None:
+            return None
+        selected_run_store = run_store
+        if selected_run_store is None and store is None:
+            selected_run_store = get_run_store(object_store=resolved)
+        selected_broadcaster = run_broadcaster or get_run_broadcaster()
+        return StorageRepository(
+            resolved,
+            run_store=selected_run_store,
+            run_broadcaster=selected_broadcaster,
+        )
+
+    def autopilot_loop_configured() -> bool:
+        return os.environ.get("ECLYPTE_AUTOPILOT") == "1"
+
+    def autopilot_callables(repo: StorageRepository, schedule):
+        def start_song_import(uid: str, url: str) -> str:
+            if not is_youtube_url(url):
+                raise ValueError("expected a YouTube URL")
+            run = create_workflow_run(
+                repo,
+                uid,
+                "youtube_song_import",
+                {"youtube_url": url},
+                YOUTUBE_IMPORT_STEPS,
+            )
+            schedule(
+                runner.run_youtube_song_import,
+                user_id=uid,
+                run_id=run.run_id,
+                url=url,
+            )
+            return run.run_id
+
+        def start_edit(
+            uid: str,
+            *,
+            audio: dict[str, str],
+            source_video: dict[str, str],
+            creative_brief: str,
+            title: str,
+            export_options: dict[str, object] | None,
+        ) -> str:
+            request = EditJobRequest(
+                audio=FileVersionInput(**audio),
+                source_video=FileVersionInput(**source_video),
+                planning_mode="agent",
+                creative_brief=creative_brief,
+                title=title,
+                export_options=(
+                    ExportOptionsInput(**export_options) if export_options else None
+                ),
+            )
+            job = start_edit_job(request=request, schedule=schedule, repo=repo, uid=uid)
+            return job.run_id
+
+        return start_song_import, start_edit
+
+    def autopilot_status_response(state) -> AutopilotStatusResponse:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        return AutopilotStatusResponse(
+            enabled=state.enabled,
+            daily_target=state.daily_target,
+            halted_reason=state.halted_reason,
+            last_tick_at=state.last_tick_at,
+            packaged_today=state.packaged_counts.get(today, 0),
+            in_flight=sum(1 for item in state.items if item.status in {"importing", "editing"}),
+            pending=sum(1 for item in state.items if item.status == "pending"),
+            items=sorted(state.items, key=lambda item: item.created_at, reverse=True),
+            loop_configured=autopilot_loop_configured(),
+        )
+
+    def _spawn_workflow(fn, *args, **kwargs) -> None:
+        threading.Thread(target=fn, args=args, kwargs=kwargs, daemon=True).start()
+
+    def _autopilot_tick_all_users() -> None:
+        repo = build_background_repository()
+        if repo is None:
+            return
+        start_song_import, start_edit = autopilot_callables(repo, _spawn_workflow)
+        for uid in repo.list_autopilot_user_ids():
+            try:
+                run_autopilot_tick(
+                    repo,
+                    user_id=uid,
+                    start_song_import=start_song_import,
+                    start_edit=start_edit,
+                )
+            except Exception:
+                logger.exception("autopilot tick failed for user %s", uid)
+
+    async def _autopilot_loop() -> None:
+        try:
+            interval = int(os.environ.get("ECLYPTE_AUTOPILOT_INTERVAL_SEC") or 300)
+        except ValueError:
+            interval = 300
+        interval = max(60, interval)
+        logger.info("autopilot loop started (interval %ss)", interval)
+        while True:
+            try:
+                await asyncio.to_thread(_autopilot_tick_all_users)
+            except Exception:
+                logger.exception("autopilot tick pass crashed")
+            await asyncio.sleep(interval)
 
     @app.get("/healthz")
     def healthz() -> dict[str, bool]:
@@ -688,6 +852,7 @@ def create_app(
                 os.environ.get("ECLYPTE_INTERNAL_PROGRESS_URL")
                 and os.environ.get("ECLYPTE_INTERNAL_PROGRESS_TOKEN")
             ),
+            "autopilot_loop_configured": autopilot_loop_configured(),
         }
 
     @app.post("/internal/progress")
@@ -1098,6 +1263,115 @@ def create_app(
             )
         )
 
+    @app.get("/v1/autopilot", response_model=AutopilotStatusResponse)
+    def get_autopilot(
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> AutopilotStatusResponse:
+        return autopilot_status_response(repo.get_autopilot_state(user_id=uid))
+
+    @app.patch("/v1/autopilot", response_model=AutopilotStatusResponse)
+    def update_autopilot(
+        request: AutopilotUpdateRequest,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> AutopilotStatusResponse:
+        with AUTOPILOT_STATE_LOCK:
+            state = repo.get_autopilot_state(user_id=uid)
+            update: dict[str, object] = {}
+            if request.enabled is not None:
+                update["enabled"] = request.enabled
+            if request.daily_target is not None:
+                update["daily_target"] = request.daily_target
+            if request.clear_halt:
+                update["halted_reason"] = None
+                update["consecutive_failures"] = 0
+            state = repo.save_autopilot_state(state.model_copy(update=update))
+        return autopilot_status_response(state)
+
+    @app.post(
+        "/v1/autopilot/queue",
+        response_model=AutopilotStatusResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def add_autopilot_items(
+        request: AutopilotQueueRequest,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> AutopilotStatusResponse:
+        new_items: list[AutopilotItem] = []
+        now = utc_now()
+        for entry in request.items:
+            if (entry.song is None) == (not entry.song_youtube_url):
+                raise HTTPException(
+                    status_code=400,
+                    detail="each item needs exactly one of song or song_youtube_url",
+                )
+            if entry.song_youtube_url and not is_youtube_url(entry.song_youtube_url):
+                raise HTTPException(status_code=400, detail="expected a YouTube URL")
+            load_version(repo, uid, entry.source_video, "source_video")
+            if entry.song is not None:
+                load_version(repo, uid, entry.song, "song_audio")
+            new_items.append(
+                AutopilotItem(
+                    item_id=f"ap_{secrets.token_hex(6)}",
+                    source_video_file_id=entry.source_video.file_id,
+                    source_video_version_id=entry.source_video.version_id,
+                    song_file_id=entry.song.file_id if entry.song else None,
+                    song_version_id=entry.song.version_id if entry.song else None,
+                    song_youtube_url=entry.song_youtube_url or None,
+                    creative_brief=entry.creative_brief.strip(),
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        with AUTOPILOT_STATE_LOCK:
+            state = repo.get_autopilot_state(user_id=uid)
+            state = repo.save_autopilot_state(
+                state.model_copy(update={"items": [*state.items, *new_items]})
+            )
+        return autopilot_status_response(state)
+
+    @app.delete("/v1/autopilot/queue/{item_id}", response_model=AutopilotStatusResponse)
+    def remove_autopilot_item(
+        item_id: str,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> AutopilotStatusResponse:
+        with AUTOPILOT_STATE_LOCK:
+            state = repo.get_autopilot_state(user_id=uid)
+            target = next((item for item in state.items if item.item_id == item_id), None)
+            if target is None:
+                raise HTTPException(status_code=404, detail="autopilot item not found")
+            if target.status in {"importing", "editing"}:
+                raise HTTPException(
+                    status_code=400,
+                    detail="item is in flight; cancel its run from the edit jobs list instead",
+                )
+            state = repo.save_autopilot_state(
+                state.model_copy(
+                    update={
+                        "items": [item for item in state.items if item.item_id != item_id]
+                    }
+                )
+            )
+        return autopilot_status_response(state)
+
+    @app.post("/v1/autopilot/tick", response_model=AutopilotStatusResponse)
+    def trigger_autopilot_tick(
+        background_tasks: BackgroundTasks,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> AutopilotStatusResponse:
+        start_song_import, start_edit = autopilot_callables(repo, background_tasks.add_task)
+        state = run_autopilot_tick(
+            repo,
+            user_id=uid,
+            start_song_import=start_song_import,
+            start_edit=start_edit,
+        )
+        return autopilot_status_response(state)
+
     @app.post("/v1/music/analyses", response_model=RunManifest, status_code=202)
     def create_music_analysis(
         request: MusicAnalysisRequest,
@@ -1135,7 +1409,7 @@ def create_app(
             uid,
             "youtube_song_import",
             {"youtube_url": request.url},
-            ["download_youtube_audio", "publish_audio", "analyze_music", "publish_analysis"],
+            YOUTUBE_IMPORT_STEPS,
         )
         background_tasks.add_task(
             runner.run_youtube_song_import,
@@ -1291,7 +1565,7 @@ def create_app(
     ) -> EditJobStatus:
         return start_edit_job(
             request=request,
-            background_tasks=background_tasks,
+            schedule=background_tasks.add_task,
             repo=repo,
             uid=uid,
         )
@@ -1401,7 +1675,7 @@ def create_app(
                 title=run.inputs.get("title"),
                 export_options=ExportOptionsInput(**export_options) if export_options else None,
             ),
-            background_tasks=background_tasks,
+            schedule=background_tasks.add_task,
             repo=repo,
             uid=uid,
         )

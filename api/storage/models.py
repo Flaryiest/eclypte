@@ -26,6 +26,7 @@ PublishingPostStatus = Literal[
     "failed",
     "canceled",
 ]
+AutopilotItemStatus = Literal["pending", "importing", "editing", "packaged", "failed"]
 
 
 class DerivedFrom(BaseModel):
@@ -172,6 +173,42 @@ class PublishingPostRecord(BaseModel):
     source_run_id: str | None = None
     created_at: str
     updated_at: str
+
+
+class AutopilotItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_id: str
+    source_video_file_id: str
+    source_video_version_id: str
+    song_file_id: str | None = None
+    song_version_id: str | None = None
+    song_youtube_url: str | None = None
+    creative_brief: str = ""
+    status: AutopilotItemStatus = "pending"
+    import_run_id: str | None = None
+    edit_run_id: str | None = None
+    post_id: str | None = None
+    audio_start_sec: float | None = None
+    audio_end_sec: float | None = None
+    last_error: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class AutopilotState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    owner_user_id: str
+    enabled: bool = False
+    daily_target: int = Field(default=2, ge=1, le=10)
+    items: list[AutopilotItem] = Field(default_factory=list)
+    used_combos: list[str] = Field(default_factory=list)
+    consecutive_failures: int = 0
+    halted_reason: str | None = None
+    packaged_counts: dict[str, int] = Field(default_factory=dict)
+    last_tick_at: str | None = None
+    updated_at: str = ""
 
 
 class SynthesisPromptVersion(BaseModel):

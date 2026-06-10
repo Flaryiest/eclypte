@@ -182,6 +182,18 @@ curl -H "X-User-Id: local_dev" \
 `/dashboard/publish` is review-gated. Public R2 copies under `public/publishing/`
 and Buffer posts are created only when a user queues or schedules a package.
 
+Autopilot (review-gated content loop): set `ECLYPTE_AUTOPILOT=1` on the API to
+run the background tick loop (`ECLYPTE_AUTOPILOT_INTERVAL_SEC`, default 300).
+Without it, advance the queue manually:
+
+```bash
+curl -X POST -H "X-User-Id: local_dev" \
+  http://127.0.0.1:8000/v1/autopilot/tick
+```
+
+Manage state via `GET/PATCH /v1/autopilot` and `POST /v1/autopilot/queue`;
+auto-created packages appear as `ready` on `/dashboard/publish` for approval.
+
 Deploy the new R2-aware Modal wrappers before using video-analysis/render API
 jobs against live Modal. Run deploys from `api/prototyping/` so the shared
 `modal_s3` and `progress_events` modules resolve:

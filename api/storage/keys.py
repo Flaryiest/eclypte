@@ -38,6 +38,18 @@ def publishing_post_key(*, user_id: str, post_id: str) -> str:
     return f"{publishing_post_prefix(user_id=user_id)}{post_id}.json"
 
 
+def autopilot_state_key(*, user_id: str) -> str:
+    return f"users/{user_id}/autopilot/state.json"
+
+
+def autopilot_enabled_marker_prefix() -> str:
+    return "autopilot/enabled/"
+
+
+def autopilot_enabled_marker_key(*, user_id: str) -> str:
+    return f"{autopilot_enabled_marker_prefix()}{user_id}.json"
+
+
 def synthesis_prompt_state_key(*, user_id: str) -> str:
     return f"users/{user_id}/synthesis/prompt/state.json"
 

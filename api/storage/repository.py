@@ -5,6 +5,9 @@ import uuid
 from typing import Any
 
 from .keys import (
+    autopilot_enabled_marker_key,
+    autopilot_enabled_marker_prefix,
+    autopilot_state_key,
     publishing_post_key,
     publishing_post_prefix,
     synthesis_prompt_state_key,
@@ -16,6 +19,7 @@ from .keys import (
 )
 from .models import (
     ArtifactKind,
+    AutopilotState,
     DerivedFrom,
     FileManifest,
     FileVersionMeta,
@@ -768,6 +772,35 @@ class StorageRepository:
             ):
                 return record
         return None
+
+    def get_autopilot_state(self, *, user_id: str) -> AutopilotState:
+        try:
+            data = self._store.get_json(autopilot_state_key(user_id=user_id))
+        except KeyError:
+            return AutopilotState(owner_user_id=user_id, updated_at=_utc_now())
+        return AutopilotState.model_validate(data)
+
+    def save_autopilot_state(self, state: AutopilotState) -> AutopilotState:
+        saved = state.model_copy(update={"updated_at": _utc_now()})
+        self._store.put_json(
+            autopilot_state_key(user_id=saved.owner_user_id),
+            saved.model_dump(mode="json"),
+        )
+        marker_key = autopilot_enabled_marker_key(user_id=saved.owner_user_id)
+        if saved.enabled:
+            self._store.put_json(marker_key, {"user_id": saved.owner_user_id})
+        else:
+            self._store.delete(marker_key)
+        return saved
+
+    def list_autopilot_user_ids(self) -> list[str]:
+        keys = self._store.list_keys(autopilot_enabled_marker_prefix())
+        user_ids = []
+        for key in keys:
+            name = key.rsplit("/", 1)[-1]
+            if name.endswith(".json"):
+                user_ids.append(name[: -len(".json")])
+        return sorted(user_ids)
 
     def default_synthesis_prompt_version(
         self,

@@ -360,7 +360,10 @@ export default function PublishPage() {
                                 >
                                     <span className={styles.assetRowName}>
                                         <span className={styles.assetRowTitle}>{post.render_display_name}</span>
-                                        <span className={styles.assetRowMeta}>{post.collection_slug || "uncategorized"}</span>
+                                        <span className={styles.assetRowMeta}>
+                                            {post.collection_slug || "uncategorized"}
+                                            {post.auto_created ? " · autopilot" : ""}
+                                        </span>
                                     </span>
                                     <span className={styles.assetRowCell}>
                                         <StatusBadge label={post.status} tone={post.status} />
