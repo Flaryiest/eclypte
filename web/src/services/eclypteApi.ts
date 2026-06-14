@@ -444,6 +444,21 @@ export class EclypteApiClient {
         )
     }
 
+    async markPublishingPostPosted(
+        postId: string,
+        input: { postUrl?: string | null } = {},
+        signal?: AbortSignal,
+    ) {
+        return this.request<PublishingPost>(
+            `/v1/publishing/posts/${encodeURIComponent(postId)}/mark-posted`,
+            {
+                method: "POST",
+                body: JSON.stringify({ post_url: input.postUrl ?? null }),
+                signal,
+            },
+        )
+    }
+
     async getAutopilot(signal?: AbortSignal) {
         return this.request<AutopilotStatus>("/v1/autopilot", { signal })
     }

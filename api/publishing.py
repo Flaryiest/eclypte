@@ -488,7 +488,8 @@ def apply_buffer_status(
     keeps reconciling on later refreshes. A ``published`` or ``canceled`` record is
     never downgraded.
     """
-    update: dict[str, Any] = {"updated_at": now}
+    # A successful read clears any stale lookup error recorded by a prior failure.
+    update: dict[str, Any] = {"updated_at": now, "last_error": None}
     if result.status:
         update["buffer_status"] = result.status
     if result.post_url:

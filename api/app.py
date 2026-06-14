@@ -205,6 +205,10 @@ class PublishingPostSendRequest(BaseModel):
     scheduled_at: str | None = None
 
 
+class PublishingPostMarkPostedRequest(BaseModel):
+    post_url: str | None = None
+
+
 class PublishingBufferChannelStatus(BaseModel):
     id: str
     name: str | None = None
@@ -1236,7 +1240,18 @@ def create_app(
         try:
             result = client.get_post(post_id=post.buffer_post_id)
         except BufferClientError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            # A failed Buffer lookup for one post must not 502 the request (which
+            # breaks the page and stalls the poll). Record the reason on the record so
+            # it surfaces inline, log it for diagnosis, and leave the status untouched.
+            logger.warning(
+                "buffer get_post failed for post %s (buffer id %s): %s",
+                post.post_id,
+                post.buffer_post_id,
+                exc,
+            )
+            return repo.save_publishing_post(
+                post.model_copy(update={"last_error": str(exc), "updated_at": utc_now()})
+            )
         return repo.save_publishing_post(apply_buffer_status(post, result, now=utc_now()))
 
     @app.post("/v1/publishing/posts/{post_id}/cancel", response_model=PublishingPostRecord)
@@ -1255,6 +1270,29 @@ def create_app(
                 }
             )
         )
+
+    @app.post("/v1/publishing/posts/{post_id}/mark-posted", response_model=PublishingPostRecord)
+    def mark_publishing_post_posted(
+        post_id: str,
+        request: PublishingPostMarkPostedRequest,
+        repo: StorageRepository = Depends(repository),
+        uid: str = Depends(user_id),
+    ) -> PublishingPostRecord:
+        # Manual override for posts that went live but can't be reconciled from Buffer
+        # (e.g. an unqueryable/stale buffer id). Moves the post to the Posted lane and
+        # optionally records a permalink the user pasted in.
+        post = publishing_post_or_404(repo, uid, post_id)
+        if post.status == "canceled":
+            raise HTTPException(status_code=400, detail="publishing post is canceled")
+        update = {
+            "status": "published",
+            "posted_at": post.posted_at or utc_now(),
+            "last_error": None,
+            "updated_at": utc_now(),
+        }
+        if request.post_url:
+            update["post_url"] = request.post_url
+        return repo.save_publishing_post(post.model_copy(update=update))
 
     @app.get("/v1/autopilot", response_model=AutopilotStatusResponse)
     def get_autopilot(

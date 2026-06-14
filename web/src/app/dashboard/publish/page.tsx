@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import {
     CalendarClock,
+    CheckCircle,
     ExternalLink,
     RefreshCw,
     Save,
@@ -354,6 +355,25 @@ export default function PublishPage() {
         }
     }
 
+    const handleMarkPosted = async () => {
+        if (!api || !selected) {
+            return
+        }
+        // Manual override: the post went live but Buffer can't reconcile it (stale id).
+        // Move it to the Posted lane and follow it there.
+        setIsWorking(true)
+        setError(null)
+        try {
+            const next = await api.markPublishingPostPosted(selected.post_id)
+            replacePost(next)
+            setTab(statusToTab(next.status))
+        } catch (caught) {
+            setError(errorMessage(caught))
+        } finally {
+            setIsWorking(false)
+        }
+    }
+
     if (!isLoaded) {
         return (
             <DashboardPage eyebrow="Publish" title="Loading publishing">
@@ -535,6 +555,11 @@ export default function PublishPage() {
                                 {selected.buffer_post_id && (
                                     <button className={styles.secondaryButton} type="button" onClick={handleRefreshFromBuffer} disabled={isWorking}>
                                         <RefreshCw size={16} /> Refresh from Buffer
+                                    </button>
+                                )}
+                                {(selected.status === "queued" || selected.status === "scheduled") && (
+                                    <button className={styles.secondaryButton} type="button" onClick={handleMarkPosted} disabled={isWorking}>
+                                        <CheckCircle size={16} /> Mark as posted
                                     </button>
                                 )}
                                 <button className={styles.dangerButton} type="button" onClick={handleCancel} disabled={isWorking}>

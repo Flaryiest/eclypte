@@ -90,6 +90,19 @@ class LaggingPermalinkBufferClient(RecordingBufferClient):
         )
 
 
+class GetPostErrorBufferClient(RecordingBufferClient):
+    """Buffer can't resolve the stored post id (e.g. stale/unqueryable) — get_post
+    raises, which must degrade gracefully instead of 502ing the request."""
+
+    def create_video_post(self, **kwargs):
+        self.calls.append(kwargs)
+        return BufferPostResult(post_id="buf_err", status="queued", post_url=None)
+
+    def get_post(self, *, post_id):
+        self.post_calls.append(post_id)
+        raise BufferClientError("Buffer HTTP 404: post not found")
+
+
 class FailingBufferClient(RecordingBufferClient):
     def create_video_post(self, **kwargs):
         raise BufferClientError("Buffer rejected the media URL")
@@ -384,6 +397,84 @@ def test_refresh_status_publishes_on_sent_then_backfills_url(monkeypatch):
     assert second["status"] == "published"
     assert second["post_url"] == "https://instagram.com/reel/lag123"
     assert second["posted_at"] == "2026-06-14T10:00:00Z"
+
+
+def test_refresh_status_records_error_without_502(monkeypatch):
+    # A Buffer lookup that fails for one post must not 502 the request; it records
+    # the reason on the post (surfaced inline) and leaves the status untouched.
+    monkeypatch.setenv("BUFFER_INSTAGRAM_CHANNEL_ID", "channel_instagram")
+    monkeypatch.setenv("ECLYPTE_R2_PUBLIC_BASE_URL", "https://media.example.com")
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    render = _publish_render(repo, body=b"render-video")
+    buffer = GetPostErrorBufferClient()
+    client = TestClient(
+        create_app(
+            store=store,
+            workflow_runner=NoopWorkflowRunner(),
+            buffer_client=buffer,
+        )
+    )
+
+    post_id = client.post(
+        "/v1/publishing/posts",
+        headers={"X-User-Id": "user_123"},
+        json={"render_output": render},
+    ).json()["post_id"]
+    client.post(
+        f"/v1/publishing/posts/{post_id}/send-buffer",
+        headers={"X-User-Id": "user_123"},
+        json={"mode": "queue"},
+    )
+
+    response = client.post(
+        f"/v1/publishing/posts/{post_id}/refresh-status",
+        headers={"X-User-Id": "user_123"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "queued"
+    assert body["last_error"] == "Buffer HTTP 404: post not found"
+    assert buffer.post_calls == ["buf_err"]
+
+
+def test_mark_posted_override_moves_post_to_published(monkeypatch):
+    monkeypatch.setenv("BUFFER_INSTAGRAM_CHANNEL_ID", "channel_instagram")
+    monkeypatch.setenv("ECLYPTE_R2_PUBLIC_BASE_URL", "https://media.example.com")
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    render = _publish_render(repo, body=b"render-video")
+    buffer = QueuedBufferClient()
+    client = TestClient(
+        create_app(
+            store=store,
+            workflow_runner=NoopWorkflowRunner(),
+            buffer_client=buffer,
+        )
+    )
+
+    post_id = client.post(
+        "/v1/publishing/posts",
+        headers={"X-User-Id": "user_123"},
+        json={"render_output": render},
+    ).json()["post_id"]
+    client.post(
+        f"/v1/publishing/posts/{post_id}/send-buffer",
+        headers={"X-User-Id": "user_123"},
+        json={"mode": "queue"},
+    )
+
+    marked = client.post(
+        f"/v1/publishing/posts/{post_id}/mark-posted",
+        headers={"X-User-Id": "user_123"},
+        json={"post_url": "https://instagram.com/reel/manual"},
+    ).json()
+
+    assert marked["status"] == "published"
+    assert marked["posted_at"]
+    assert marked["post_url"] == "https://instagram.com/reel/manual"
+    assert marked["last_error"] is None
 
 
 def test_publishing_config_reports_non_secret_setup_and_buffer_channel(monkeypatch):
