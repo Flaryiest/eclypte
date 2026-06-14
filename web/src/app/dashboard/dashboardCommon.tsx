@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { useCallback, useEffect, useRef, type ReactNode } from "react"
 import styles from "./studio.module.css"
 import type { AssetState, AssetSummary, PublishingPostStatus, RunManifest, SynthesisReference } from "@/services/eclypteApi"
 
@@ -119,4 +119,28 @@ export function errorMessage(error: unknown) {
 
 export function isAbortError(error: unknown) {
     return error instanceof DOMException && error.name === "AbortError"
+}
+
+// Returns a stable callback that runs `load` with a fresh AbortSignal, aborting
+// any previous in-flight call first. This gives "latest wins" semantics without a
+// cache: a slow earlier load can't land after a newer one and clobber fresh state,
+// and the in-flight request is canceled on unmount. The loader should pass the
+// signal to its API calls, skip state writes on AbortError, and guard `finally`
+// cleanup with `signal.aborted` so a superseded call doesn't reset shared flags.
+export function useAbortableLoad(load: (signal: AbortSignal) => Promise<void>) {
+    const loadRef = useRef(load)
+    const controllerRef = useRef<AbortController | null>(null)
+    // Keep the ref pointed at the latest closure without writing during render.
+    // This effect commits before the consumer's load effect (registered later), so
+    // a trigger always sees the current `load`.
+    useEffect(() => {
+        loadRef.current = load
+    })
+    useEffect(() => () => controllerRef.current?.abort(), [])
+    return useCallback(() => {
+        controllerRef.current?.abort()
+        const controller = new AbortController()
+        controllerRef.current = controller
+        void loadRef.current(controller.signal)
+    }, [])
 }

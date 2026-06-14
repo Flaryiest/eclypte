@@ -1,9 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Bot, Pause, Play, Plus, RefreshCw, Trash2, Zap } from "lucide-react"
-import { DashboardPage, StatusBadge, errorMessage, formatDate } from "../dashboardCommon"
+import { DashboardPage, StatusBadge, errorMessage, formatDate, isAbortError, useAbortableLoad } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import { useRunStream } from "../useRunStream"
 import {
@@ -34,28 +34,31 @@ export default function AutopilotPage() {
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
 
-    const loadAutopilot = useCallback(async () => {
+    const loadAutopilot = useAbortableLoad(async (signal) => {
         if (!api) {
             return
         }
         setError(null)
         try {
             const [nextStatus, nextVideos, nextSongs] = await Promise.all([
-                api.getAutopilot(),
-                api.listAssets("source_video"),
-                api.listAssets("song_audio"),
+                api.getAutopilot(signal),
+                api.listAssets("source_video", signal),
+                api.listAssets("song_audio", signal),
             ])
             setAutopilot(nextStatus)
             setVideos(nextVideos)
             setSongs(nextSongs)
         } catch (caught) {
+            if (isAbortError(caught)) {
+                return
+            }
             setError(errorMessage(caught))
         }
-    }, [api])
+    })
 
     useEffect(() => {
-        void loadAutopilot()
-    }, [loadAutopilot])
+        loadAutopilot()
+    }, [api, loadAutopilot])
 
     const hasInFlight = (autopilot?.in_flight ?? 0) > 0
     useRunStream({
@@ -191,10 +194,9 @@ export default function AutopilotPage() {
                     <div className={styles.errorBanner}>
                         {autopilot.halted_reason}
                         <button
-                            className={styles.secondaryButton}
+                            className={`${styles.secondaryButton} ${styles.haltClearButton}`}
                             type="button"
                             onClick={() => updateAutopilot({ clearHalt: true })}
-                            style={{ marginLeft: 12 }}
                         >
                             Clear halt
                         </button>
@@ -216,7 +218,7 @@ export default function AutopilotPage() {
                     </div>
                     <div className={styles.fieldStack}>
                         <p className={styles.smallText}>
-                            Packaged today: {autopilot?.packaged_today ?? 0} / {autopilot?.daily_target ?? 2}
+                            Packaged today: {autopilot?.packaged_today ?? 0} / {autopilot?.daily_target ?? 3}
                             {" · "}In flight: {autopilot?.in_flight ?? 0}
                             {" · "}Pending: {autopilot?.pending ?? 0}
                         </p>
@@ -224,10 +226,10 @@ export default function AutopilotPage() {
                             Daily target
                             <select
                                 className={styles.input}
-                                value={autopilot?.daily_target ?? 2}
+                                value={autopilot?.daily_target ?? 3}
                                 onChange={(event) => updateAutopilot({ dailyTarget: Number(event.target.value) })}
                             >
-                                {[1, 2, 3, 4, 5].map((value) => (
+                                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((value) => (
                                     <option key={value} value={value}>{value} per day</option>
                                 ))}
                             </select>

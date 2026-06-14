@@ -251,12 +251,14 @@ Frontend architecture:
 - `web/src/app/dashboard/autopilot/page.tsx`: autopilot status (enable/pause, daily target, halt banner), backlog form (video asset + song asset or YouTube link + optional brief), queue/activity list, and a manual "Run tick now" action.
 - `web/src/app/dashboard/renders/page.tsx`: render outputs and recent render runs.
 - `web/src/app/dashboard/settings/page.tsx`: API/user/prompt/YouTube-cookie health plus realtime (Redis) and worker-progress status.
-- `web/src/app/dashboard/dashboardCommon.tsx`: shared dashboard page wrapper, skeleton placeholders (`Skeleton`/`SkeletonList`), formatting helpers, and the `errorMessage`/`isAbortError` error helpers used by all dashboard pages.
-- `web/src/app/dashboard/useRunStream.ts`: shared hook that subscribes to `/v1/runs/stream` with a debounced refresh callback and 1s polling fallback; used by the new-edit and renders pages.
+- `web/src/app/dashboard/dashboardCommon.tsx`: shared dashboard page wrapper, skeleton placeholders (`Skeleton`/`SkeletonList`), formatting helpers, the `errorMessage`/`isAbortError` error helpers, and `useAbortableLoad` — a no-cache loader hook (aborts the prior in-flight load, drops stale/aborted responses) that every dashboard page's primary list fetch routes through.
+- `web/src/app/dashboard/useRunStream.ts`: shared hook that subscribes to `/v1/runs/stream` with a debounced refresh callback, a ~15s safety-poll watchdog that reconciles a connected-but-silent stream, and a 1s polling fallback when the stream fails; used by the new-edit, renders, and autopilot pages.
 - `web/src/components/dashboard/sidebar/`: dashboard navigation.
 - `web/src/services/eclypteApi.ts`: typed browser API client. Extend this before adding ad hoc fetch calls.
 
 Run streams are newline-delimited JSON. Use `readJsonLineStream()` and `drainJsonLines()` from `eclypteApi.ts`; keep polling fallback logic because Redis may be absent or stale.
+
+Dashboard data loading is uncached but disciplined (no SWR/React Query yet): route each page's primary list fetch through `useAbortableLoad`, and update local state from a mutation's returned record instead of re-pulling the whole collection (e.g. archive/restore/delete patch the array in place). Two non-obvious rules: the Publish package list uses the compact `.packageRow` layout because the 5-column `.assetRow` table only fits the wide panel; and the Synthesis prompt textarea is user-owned — background reloads must not overwrite unsaved edits (guarded by the active-prompt dirty check in `loadSynthesis`).
 
 The frontend depends on these output keys:
 

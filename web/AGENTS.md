@@ -25,14 +25,15 @@ Repo-wide architecture and backend guidance lives in `../AGENTS.md`; this file a
 - `src/components/login/login.tsx` renders the Clerk `SignIn` modal; `src/components/navbar/navbar.tsx` controls opening it.
 - Fonts are configured in `src/app/layout.tsx` with both Google fonts and local font assets from `public/fonts/`.
 - `src/services/eclypteApi.ts` is the typed browser API client for FastAPI v1 endpoints, including uploads, assets, run streams, edit jobs, export options, downloads, synthesis prompt/reference, and publishing APIs.
-- `src/app/dashboard/dashboardCommon.tsx` exports the shared dashboard page wrapper, skeletons, formatting helpers, and the `errorMessage`/`isAbortError` error helpers used by all dashboard pages.
-- `src/app/dashboard/useRunStream.ts` is the shared run-stream hook (debounced refresh callback plus 1s polling fallback) used by `/dashboard/new-edit` and `/dashboard/renders`.
+- `src/app/dashboard/dashboardCommon.tsx` exports the shared dashboard page wrapper, skeletons, formatting helpers, the `errorMessage`/`isAbortError` error helpers, and `useAbortableLoad` — a no-cache loader hook (aborts the prior in-flight load, drops stale/aborted responses) that every dashboard page's primary list fetch routes through.
+- `src/app/dashboard/useRunStream.ts` is the shared run-stream hook (debounced refresh callback, a ~15s safety-poll watchdog that reconciles a connected-but-silent stream, plus a 1s polling fallback when the stream fails) used by `/dashboard/new-edit`, `/dashboard/renders`, and `/dashboard/autopilot`.
 
 ## Dashboard Pipeline Notes
 
 - The dashboard API base comes from `NEXT_PUBLIC_ECLYPTE_API_BASE_URL`, defaulting to `http://127.0.0.1:8000`. Local development should use `web/.env.local`; deployed frontends should set the same public env var in the hosting provider.
 - The current production API is `https://api-production-8fb8.up.railway.app`.
 - Temporary auth sends Clerk `user.id` as `X-User-Id`. Backend Clerk JWT verification is intentionally deferred.
+- Dashboard data loading is uncached but disciplined (no SWR/React Query yet): each page's primary list fetch goes through `useAbortableLoad` (aborts the prior load, latest-wins, cancels on unmount), and mutations patch local state from the returned record rather than re-pulling the whole collection (archive/restore/delete update the array in place). The Publish package list uses the compact `.packageRow` layout because the 5-column `.assetRow` table only fits the wide panel. The Synthesis prompt textarea is user-owned — background reloads (`loadSynthesis`) must not overwrite unsaved edits, guarded by the active-prompt dirty check.
 - V1 audio uploads accept WAV or any common audio format (MP3/M4A/AAC/FLAC/OGG); non-WAV audio is auto-converted to a WAV `song_audio` asset server-side via `POST /v1/music/conversions` (the assets page chains upload→convert→poll and archives the raw upload). Video uploads are `video/mp4` only. Validate accordingly before upload.
 - Uploads are browser-to-R2 using presigned PUT URLs from `POST /v1/uploads`, followed by `POST /v1/uploads/{upload_id}/complete` with a browser-computed SHA-256. `sha256File()` in `eclypteApi.ts` hashes the file in chunks via `hash-wasm` (not `crypto.subtle.digest`, which caps inputs at 2 GB), so large uploads work; the effective ceiling is R2's ~5 GiB single-PUT limit because multipart upload is not implemented.
 - Failed or aborted uploads should call `DELETE /v1/uploads/{upload_id}` so orphaned reservations/blob keys do not linger.

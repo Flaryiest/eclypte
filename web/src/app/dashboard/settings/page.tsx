@@ -1,9 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { RefreshCw } from "lucide-react"
-import { DashboardPage, StatusBadge, errorMessage, formatDate } from "../dashboardCommon"
+import { DashboardPage, StatusBadge, errorMessage, formatDate, isAbortError, useAbortableLoad } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import {
     ECLYPTE_API_BASE_URL,
@@ -22,7 +22,7 @@ export default function SettingsPage() {
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
 
-    const checkSettings = useCallback(async () => {
+    const checkSettings = useAbortableLoad(async (signal) => {
         if (!api) {
             return
         }
@@ -30,24 +30,29 @@ export default function SettingsPage() {
         setError(null)
         try {
             const [healthResponse, prompt] = await Promise.all([
-                api.health(),
-                api.getSynthesisPrompt(),
+                api.health(signal),
+                api.getSynthesisPrompt(signal),
             ])
             setHealth(healthResponse.ok ? "ok" : "failed")
             setHealthDetails(healthResponse)
             setPromptState(prompt)
         } catch (caught) {
+            if (isAbortError(caught)) {
+                return
+            }
             setHealth("failed")
             setHealthDetails(null)
             setError(errorMessage(caught))
         } finally {
-            setIsChecking(false)
+            if (!signal.aborted) {
+                setIsChecking(false)
+            }
         }
-    }, [api])
+    })
 
     useEffect(() => {
-        void checkSettings()
-    }, [checkSettings])
+        checkSettings()
+    }, [api, checkSettings])
 
     if (!isLoaded) {
         return <DashboardPage eyebrow="Settings" title="Loading settings"><div /></DashboardPage>

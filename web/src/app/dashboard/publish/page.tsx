@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import {
     CalendarClock,
@@ -17,6 +17,8 @@ import {
     StatusBadge,
     errorMessage,
     formatDate,
+    isAbortError,
+    useAbortableLoad,
 } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import {
@@ -54,37 +56,66 @@ export default function PublishPage() {
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
     const visiblePosts = useMemo(() => filterPosts(posts, tab), [posts, tab])
-    const selected = posts.find((post) => post.post_id === selectedId) || visiblePosts[0] || null
+    // Lane-aware: the detail panel always shows a post that lives in the active tab,
+    // so switching tabs never strands the panel on a post hidden from the list.
+    const selected = visiblePosts.find((post) => post.post_id === selectedId) ?? visiblePosts[0] ?? null
 
-    const loadPosts = useCallback(async () => {
+    // The loader must not depend on `tab` — that coupling made every tab switch
+    // refetch the whole list (and clobber optimistic updates). Read the live tab
+    // through a ref so default-selection stays correct without re-subscribing.
+    const tabRef = useRef(tab)
+    tabRef.current = tab
+
+    const refreshPosts = useAbortableLoad(async (signal) => {
         if (!api) {
             return
         }
         setIsLoading(true)
         setError(null)
         try {
-            const [nextConfig, next] = await Promise.all([
-                api.getPublishingConfig(),
-                api.listPublishingPosts({ status: "all" }),
-            ])
-            setConfig(nextConfig)
+            const next = await api.listPublishingPosts({ status: "all" }, signal)
             setPosts(next)
             setSelectedId((current) => {
                 if (current && next.some((post) => post.post_id === current)) {
                     return current
                 }
-                return filterPosts(next, tab)[0]?.post_id ?? next[0]?.post_id ?? null
+                return filterPosts(next, tabRef.current)[0]?.post_id ?? next[0]?.post_id ?? null
             })
         } catch (caught) {
+            if (isAbortError(caught)) {
+                return
+            }
             setError(errorMessage(caught))
         } finally {
-            setIsLoading(false)
+            if (!signal.aborted) {
+                setIsLoading(false)
+            }
         }
-    }, [api, tab])
+    })
+
+    const loadConfig = useAbortableLoad(async (signal) => {
+        if (!api) {
+            return
+        }
+        try {
+            setConfig(await api.getPublishingConfig(signal))
+        } catch (caught) {
+            if (isAbortError(caught)) {
+                return
+            }
+            setError(errorMessage(caught))
+        }
+    })
+
+    const handleManualRefresh = () => {
+        refreshPosts()
+        loadConfig()
+    }
 
     useEffect(() => {
-        void loadPosts()
-    }, [loadPosts])
+        refreshPosts()
+        loadConfig()
+    }, [api, refreshPosts, loadConfig])
 
     useEffect(() => {
         if (!selected) {
@@ -227,7 +258,7 @@ export default function PublishPage() {
             setTab(sent.status === "scheduled" ? "queued_scheduled" : statusToTab(sent.status))
         } catch (caught) {
             setError(errorMessage(caught))
-            await loadPosts()
+            refreshPosts()
         } finally {
             setIsWorking(false)
         }
@@ -290,7 +321,7 @@ export default function PublishPage() {
             title="Reels queue"
             subtitle="Review generated post packages, edit captions, and send approved renders to Buffer."
             action={
-                <button className={styles.secondaryButton} type="button" onClick={loadPosts} disabled={isLoading}>
+                <button className={styles.secondaryButton} type="button" onClick={handleManualRefresh} disabled={isLoading}>
                     <RefreshCw size={16} /> Refresh
                 </button>
             }
@@ -349,28 +380,27 @@ export default function PublishPage() {
                     ) : visiblePosts.length === 0 ? (
                         <div className={styles.emptyState}>No posts in this lane.</div>
                     ) : (
-                        <div className={styles.assetTable}>
+                        <div className={styles.packageList}>
                             {visiblePosts.map((post) => (
                                 <button
                                     type="button"
                                     key={post.post_id}
-                                    className={`${styles.assetRow} ${selected?.post_id === post.post_id ? styles.assetRowSelected : ""}`}
+                                    className={`${styles.packageRow} ${selected?.post_id === post.post_id ? styles.packageRowSelected : ""}`}
                                     onClick={() => setSelectedId(post.post_id)}
                                     aria-pressed={selected?.post_id === post.post_id}
                                 >
-                                    <span className={styles.assetRowName}>
-                                        <span className={styles.assetRowTitle}>{post.render_display_name}</span>
-                                        <span className={styles.assetRowMeta}>
-                                            {post.collection_slug || "uncategorized"}
-                                            {post.auto_created ? " · autopilot" : ""}
+                                    <span className={styles.packageRowHead}>
+                                        <span className={styles.packageRowTitle} title={post.render_display_name}>
+                                            {post.render_display_name}
                                         </span>
-                                    </span>
-                                    <span className={styles.assetRowCell}>
                                         <StatusBadge label={post.status} tone={post.status} />
                                     </span>
-                                    <span className={styles.assetRowCell}>{formatDate(post.updated_at)}</span>
-                                    <span className={styles.assetRowCell}>{post.buffer_post_id || "Not sent"}</span>
-                                    <span className={styles.assetRowCellNumeral}>{post.provider}</span>
+                                    <span className={styles.packageRowMeta}>
+                                        {post.collection_slug || "uncategorized"}
+                                        {post.auto_created ? " · autopilot" : ""}
+                                        {" · "}
+                                        {formatDate(post.updated_at)}
+                                    </span>
                                 </button>
                             ))}
                         </div>

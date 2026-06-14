@@ -1,6 +1,6 @@
 "use client"
 
-import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Activity, Download, Link2, RefreshCw, RotateCcw, Trash2, Upload } from "lucide-react"
 import {
@@ -12,6 +12,7 @@ import {
     formatDate,
     isAbortError,
     kindLabel,
+    useAbortableLoad,
     versionRef,
 } from "../dashboardCommon"
 import styles from "../studio.module.css"
@@ -58,21 +59,24 @@ export default function AssetsPage() {
     const isWorking = isUploading || isImporting
     const selectedAsset = selectedFileId ? visibleAssets.find((asset) => asset.file_id === selectedFileId) ?? null : null
 
-    const loadAssets = useCallback(async () => {
+    const loadAssets = useAbortableLoad(async (signal) => {
         if (!api) {
             return
         }
         setError(null)
         try {
-            setAssets(await api.listAssets({ includeArchived: true }))
+            setAssets(await api.listAssets({ includeArchived: true }, signal))
         } catch (caught) {
+            if (isAbortError(caught)) {
+                return
+            }
             setError(errorMessage(caught))
         }
-    }, [api])
+    })
 
     useEffect(() => {
-        void loadAssets()
-    }, [loadAssets])
+        loadAssets()
+    }, [api, loadAssets])
 
     useEffect(() => {
         return () => abortRef.current?.abort()
@@ -130,7 +134,7 @@ export default function AssetsPage() {
                 setStatus("Upload complete")
             }
             setFile(null)
-            await loadAssets()
+            loadAssets()
         } catch (caught) {
             if (!isAbortError(caught)) {
                 setError(errorMessage(caught))
@@ -164,7 +168,7 @@ export default function AssetsPage() {
             setStatus("YouTube song imported and analyzed")
             setYoutubeUrl("")
             setActiveTab("source")
-            await loadAssets()
+            loadAssets()
         } catch (caught) {
             if (!isAbortError(caught)) {
                 setError(errorMessage(caught))
@@ -195,7 +199,7 @@ export default function AssetsPage() {
                 onUpdate: (next) => setStatus(`Analysis ${next.status}`),
             })
             setStatus("Analysis complete")
-            await loadAssets()
+            loadAssets()
         } catch (caught) {
             setError(errorMessage(caught))
         } finally {
@@ -259,7 +263,19 @@ export default function AssetsPage() {
                 setSelectedFileId(null)
                 setPreview(null)
             }
-            await loadAssets()
+            // Soft delete (archive): move it to the Hidden lane in place instead of
+            // re-pulling the whole library.
+            setAssets((current) =>
+                current.map((item) =>
+                    item.file_id === asset.file_id
+                        ? {
+                              ...item,
+                              archived_at: new Date().toISOString(),
+                              archived_reason: item.archived_reason ?? "archived",
+                          }
+                        : item,
+                ),
+            )
         } catch (caught) {
             setError(errorMessage(caught))
         } finally {
@@ -274,10 +290,12 @@ export default function AssetsPage() {
         setRestoringId(asset.file_id)
         setError(null)
         try {
-            await api.restoreAsset(asset.file_id)
+            const restored = await api.restoreAsset(asset.file_id)
             setStatus(`${asset.display_name} restored`)
             setActiveTab(isSourceKind(asset.kind) ? "source" : "derived")
-            await loadAssets()
+            setAssets((current) =>
+                current.map((item) => (item.file_id === restored.file_id ? restored : item)),
+            )
         } catch (caught) {
             setError(errorMessage(caught))
         } finally {
@@ -540,7 +558,7 @@ function AssetDetail({
         <>
             <div className={styles.cardTop}>
                 <div>
-                    <h3 style={{ fontFamily: "var(--font-eiko), serif", fontSize: "1.4rem", textTransform: "none", letterSpacing: "-0.005em" }}>{asset.display_name}</h3>
+                    <h3 className={styles.detailTitle}>{asset.display_name}</h3>
                     <p className={styles.smallText}>
                         {kindLabel(asset.kind)} · {formatBytes(asset.current_version?.size_bytes)} · {formatDate(asset.updated_at)}
                     </p>

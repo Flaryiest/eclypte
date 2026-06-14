@@ -1,9 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Link, RefreshCw, RotateCcw, Save, Sparkles } from "lucide-react"
-import { DashboardPage, StatusBadge, errorMessage, formatDate } from "../dashboardCommon"
+import { DashboardPage, StatusBadge, errorMessage, formatDate, isAbortError, useAbortableLoad } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import {
     EclypteApiClient,
@@ -35,27 +35,39 @@ export default function SynthesisPage() {
     const activePrompt = promptState?.active_prompt
     const promptChanged = Boolean(activePrompt && promptText !== activePrompt.prompt_text)
 
-    const loadSynthesis = useCallback(async () => {
+    const loadSynthesis = useAbortableLoad(async (signal) => {
         if (!api) {
             return
         }
         setError(null)
         try {
             const [nextReferences, nextPrompt] = await Promise.all([
-                api.listSynthesisReferences(),
-                api.getSynthesisPrompt(),
+                api.listSynthesisReferences(signal),
+                api.getSynthesisPrompt(signal),
             ])
             setReferences(nextReferences)
+            // Don't clobber unsaved edits: only reseed the textarea when it still
+            // matches the prompt we currently have loaded (i.e. the user hasn't typed).
+            // The closure reads the latest committed promptText/promptState because
+            // useAbortableLoad always invokes the most recent loader closure.
+            const wasDirty = promptState
+                ? promptText !== promptState.active_prompt.prompt_text
+                : false
             setPromptState(nextPrompt)
-            setPromptText(nextPrompt.active_prompt.prompt_text)
+            if (!wasDirty) {
+                setPromptText(nextPrompt.active_prompt.prompt_text)
+            }
         } catch (caught) {
+            if (isAbortError(caught)) {
+                return
+            }
             setError(errorMessage(caught))
         }
-    }, [api])
+    })
 
     useEffect(() => {
-        void loadSynthesis()
-    }, [loadSynthesis])
+        loadSynthesis()
+    }, [api, loadSynthesis])
 
     const submitReferences = async () => {
         if (!api) {
@@ -73,7 +85,7 @@ export default function SynthesisPage() {
             await api.createSynthesisReferences(urls)
             setUrlInput("")
             setStatus(`${urls.length} reference${urls.length === 1 ? "" : "s"} queued`)
-            await loadSynthesis()
+            loadSynthesis()
         } catch (caught) {
             setError(errorMessage(caught))
         } finally {
@@ -98,7 +110,7 @@ export default function SynthesisPage() {
             })
             setActiveRun(completed)
             setStatus("Prompt guidance updated")
-            await loadSynthesis()
+            loadSynthesis()
         } catch (caught) {
             setError(errorMessage(caught))
         } finally {
@@ -238,7 +250,7 @@ export default function SynthesisPage() {
                                             </div>
                                             <StatusBadge label={isActive ? "active" : "saved"} tone={isActive ? "completed" : undefined} />
                                         </div>
-                                        <p className={styles.smallText} style={{ fontFamily: "ui-monospace, monospace" }}>{version.version_id}</p>
+                                        <p className={styles.monoText}>{version.version_id}</p>
                                         {!isActive && (
                                             <div className={styles.cardActions}>
                                                 <button className={styles.secondaryButton} type="button" onClick={() => activateVersion(version.version_id)}>

@@ -1,9 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Download, Eye, Play, RefreshCw, RotateCcw, Trash2, WandSparkles, XCircle } from "lucide-react"
-import { DashboardPage, SkeletonList, StatusBadge, errorMessage, formatBytes, formatDate, isAbortError, kindLabel, versionRef } from "../dashboardCommon"
+import { DashboardPage, SkeletonList, StatusBadge, errorMessage, formatBytes, formatDate, isAbortError, kindLabel, useAbortableLoad, versionRef } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import { downloadSignedUrl, safeDownloadFilename } from "@/services/downloadFile"
 import {
@@ -75,14 +75,7 @@ export default function NewEditPage() {
     const hasValidTrim = selectedDurationSec === null || selectedDurationSec >= MIN_TRIM_DURATION_SEC
     const canStart = Boolean(api && selectedSong && selectedVideo && !isCreating && hasValidTrim)
 
-    const loadJobs = useCallback(async () => {
-        if (!api) {
-            return
-        }
-        setJobs(await api.listEditJobs())
-    }, [api])
-
-    const loadDashboard = useCallback(async () => {
+    const loadDashboard = useAbortableLoad(async (signal) => {
         if (!api) {
             return
         }
@@ -90,23 +83,42 @@ export default function NewEditPage() {
         setError(null)
         try {
             const [nextAssets, nextJobs] = await Promise.all([
-                api.listAssets(),
-                api.listEditJobs(),
+                api.listAssets(undefined, signal),
+                api.listEditJobs(signal),
             ])
             setAssets(nextAssets)
             setJobs(nextJobs)
             setAudioId((current) => current || nextAssets.find((asset) => asset.kind === "song_audio")?.file_id || "")
             setVideoId((current) => current || nextAssets.find((asset) => asset.kind === "source_video")?.file_id || "")
         } catch (caught) {
+            if (isAbortError(caught)) {
+                return
+            }
             setError(errorMessage(caught))
         } finally {
-            setIsLoading(false)
+            if (!signal.aborted) {
+                setIsLoading(false)
+            }
         }
-    }, [api])
+    })
+
+    const refreshJobs = useAbortableLoad(async (signal) => {
+        if (!api) {
+            return
+        }
+        try {
+            setJobs(await api.listEditJobs(signal))
+        } catch (caught) {
+            if (isAbortError(caught)) {
+                return
+            }
+            setError(errorMessage(caught))
+        }
+    })
 
     useEffect(() => {
-        void loadDashboard()
-    }, [loadDashboard])
+        loadDashboard()
+    }, [api, loadDashboard])
 
     // Eagerly fetch the cheap poster image for completed jobs so the card shows an
     // instant "mock" of the render; the heavy MP4 only loads when the user hits play.
@@ -205,10 +217,6 @@ export default function NewEditPage() {
             })
         return () => controller.abort()
     }, [api, selectedVideo])
-
-    const refreshJobs = useCallback(() => {
-        void loadJobs().catch((caught) => setError(errorMessage(caught)))
-    }, [loadJobs])
 
     useRunStream({
         api,

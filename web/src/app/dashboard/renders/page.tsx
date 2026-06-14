@@ -11,6 +11,8 @@ import {
     errorMessage,
     formatBytes,
     formatDate,
+    isAbortError,
+    useAbortableLoad,
     versionRef,
 } from "../dashboardCommon"
 import styles from "../studio.module.css"
@@ -35,7 +37,7 @@ export default function RendersPage() {
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
     const hasActiveRuns = runs.some(isRunActive)
 
-    const loadRenders = useCallback(async () => {
+    const loadRenders = useAbortableLoad(async (signal) => {
         if (!api) {
             return
         }
@@ -43,21 +45,26 @@ export default function RendersPage() {
         setError(null)
         try {
             const [nextOutputs, nextRuns] = await Promise.all([
-                api.listAssets("render_output"),
-                api.listRuns({ workflowType: "render" }),
+                api.listAssets("render_output", signal),
+                api.listRuns({ workflowType: "render" }, signal),
             ])
             setOutputs(nextOutputs)
             setRuns(nextRuns)
         } catch (caught) {
+            if (isAbortError(caught)) {
+                return
+            }
             setError(errorMessage(caught))
         } finally {
-            setIsLoading(false)
+            if (!signal.aborted) {
+                setIsLoading(false)
+            }
         }
-    }, [api])
+    })
 
     useEffect(() => {
-        void loadRenders()
-    }, [loadRenders])
+        loadRenders()
+    }, [api, loadRenders])
 
     useRunStream({
         api,
@@ -125,7 +132,9 @@ export default function RendersPage() {
             if (preview?.asset.file_id === asset.file_id) {
                 setPreview(null)
             }
-            await loadRenders()
+            // Archived render outputs drop out of the render_output list, so remove
+            // it locally rather than re-pulling every output and run.
+            setOutputs((current) => current.filter((item) => item.file_id !== asset.file_id))
         } catch (caught) {
             setError(errorMessage(caught))
         } finally {
@@ -269,7 +278,7 @@ export default function RendersPage() {
                                         <li className={styles.listCard} key={run.run_id}>
                                             <div className={styles.cardTop}>
                                                 <div>
-                                                    <h3 style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.86rem" }}>{run.run_id}</h3>
+                                                    <h3 className={styles.monoTitle}>{run.run_id}</h3>
                                                     <p className={styles.smallText}>{run.current_step || "render"} · {formatDate(run.updated_at)}</p>
                                                 </div>
                                                 <StatusBadge label={run.status} tone={run.status} />

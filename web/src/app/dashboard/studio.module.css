@@ -162,6 +162,15 @@
 	letter-spacing: -0.005em;
 	text-transform: none;
 	line-height: 1.2;
+	overflow-wrap: anywhere;
+}
+
+/* Flex children only shrink/truncate when they are allowed to go below their
+   content width. The text column in card/panel headers sits next to a fixed
+   status badge, so long unbreakable names must be free to ellipsis or wrap. */
+.cardTop > div,
+.panelHeader > div {
+	min-width: 0;
 }
 
 .panelHeader p,
@@ -172,6 +181,7 @@
 	font-family: var(--font-neue), sans-serif;
 	font-size: 0.78rem;
 	line-height: 1.5;
+	overflow-wrap: anywhere;
 }
 
 .smallText {
@@ -1124,6 +1134,7 @@
 	font-weight: 400;
 	letter-spacing: -0.005em;
 	color: var(--ec-ink);
+	overflow-wrap: anywhere;
 }
 
 .heroCaptionMeta {
@@ -1338,4 +1349,110 @@
 	.disclosureCaret {
 		transition: none;
 	}
+}
+
+/* --- Text-overflow utilities --- */
+.truncate {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.breakAny {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+/* --- Compact package list (Publish side panel) ---
+   The asset table grid packs five columns; it only fits in a span-8 panel. The
+   publish queue lives in a narrow span-4 panel, so it uses a stacked two-line row
+   instead: title + status on the first line, muted meta on the second. */
+.packageList {
+	display: flex;
+	flex-direction: column;
+}
+
+.packageRow {
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+	width: 100%;
+	padding: 1rem 0.2rem 1rem 0.6rem;
+	border: none;
+	border-bottom: 1px solid var(--ec-rule);
+	background: transparent;
+	color: var(--ec-ink);
+	font-family: inherit;
+	text-align: left;
+	cursor: pointer;
+	transition: background-color 140ms ease;
+}
+
+.packageRow:hover {
+	background: var(--ec-paper-sunk);
+}
+
+.packageRowSelected {
+	background: var(--ec-paper-sunk);
+	box-shadow: inset 3px 0 0 var(--ec-ember);
+}
+
+.packageRowHead {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	min-width: 0;
+}
+
+.packageRowTitle {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--font-eiko), var(--font-neue), serif;
+	font-size: 1.02rem;
+	font-weight: 400;
+	letter-spacing: -0.005em;
+	color: var(--ec-ink);
+}
+
+.packageRowMeta {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--font-neue), sans-serif;
+	font-size: 0.72rem;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--ec-ink-muted);
+}
+
+/* --- Detail/run headings (replace ad-hoc inline styles) --- */
+.detailTitle {
+	margin: 0;
+	font-family: var(--font-eiko), var(--font-neue), serif;
+	font-size: 1.4rem;
+	font-weight: 400;
+	letter-spacing: -0.005em;
+	text-transform: none;
+	color: var(--ec-ink);
+	overflow-wrap: anywhere;
+}
+
+/* Compound selector wins the tie against `.listCard h3` regardless of nesting. */
+h3.monoTitle {
+	margin: 0;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+	font-size: 0.86rem;
+	font-weight: 400;
+	text-transform: none;
+	letter-spacing: 0;
+	color: var(--ec-ink);
+	overflow-wrap: anywhere;
+}
+
+.haltClearButton {
+	margin-left: 0.75rem;
 }
