@@ -18,7 +18,7 @@ Core invariants:
 
 - `web/`: Next.js 16.2.3, React 19.2, TypeScript, App Router. `web/AGENTS.md` has frontend-specific warnings.
 - `api/`: FastAPI app, workflow orchestration, storage substrate, YouTube downloader, and prototype media pipelines.
-- `api/publishing.py`: review-gated Buffer publishing for Instagram Reels — Gen-Z-voiced OpenAI/fallback caption generation, public R2 media copies, Buffer GraphQL payloads (declares the Instagram `reel` post type), channel diagnostics, and post-status refresh that back-fills the live permalink from Buffer's `externalLink`.
+- `api/publishing.py`: review-gated Buffer publishing for Instagram Reels — Gen-Z-voiced OpenAI/fallback caption generation, public R2 media copies, Buffer GraphQL payloads (declares the Instagram `reel` post type), channel diagnostics, and post-status refresh (`apply_buffer_status`) that marks a post `published` as soon as Buffer reports it sent (`sentAt`/sent status) and independently back-fills the permalink from `externalLink` when it appears.
 - `api/storage/`: R2 object access, file manifests, file versions, upload reservations, run manifests/events/progress, prompt versions, references, publishing posts, Postgres run store, Redis broadcaster, staging helpers, and tests.
 - `api/prototyping/music/`: YouTube/audio ingestion, Modal allin1 analysis, lyrics lookup, optional R2 publish.
 - `api/prototyping/video/`: scene detection, optical-flow motion analysis, impact detection, local CPU and Modal GPU runtimes, R2-aware Modal wrapper.
@@ -247,7 +247,7 @@ Frontend architecture:
 - `web/src/app/dashboard/new-edit/page.tsx`: compose/edit pipeline UI.
 - `web/src/app/dashboard/assets/page.tsx`: upload/import/manage asset library.
 - `web/src/app/dashboard/synthesis/page.tsx`: references and prompt management.
-- `web/src/app/dashboard/publish/page.tsx`: Buffer publishing queue with setup diagnostics, render preview, caption editing/regeneration, queue/schedule actions, posted/error metadata, an automatic one-shot Buffer status check for the selected post, and a manual "Refresh from Buffer" button that re-checks the selected post's status/permalink on demand (surfacing Buffer errors instead of swallowing them).
+- `web/src/app/dashboard/publish/page.tsx`: Buffer publishing queue with setup diagnostics, render preview, caption editing/regeneration, queue/schedule actions, posted/error metadata, per-lane tab counts, live reconciliation that polls in-flight posts against Buffer (~25s interval + on tab refocus) so queued posts auto-advance to Posted and permalinks back-fill, and a manual "Refresh from Buffer" button that re-checks on demand and surfaces Buffer errors (the background poll swallows them).
 - `web/src/app/dashboard/autopilot/page.tsx`: autopilot status (enable/pause, daily target, halt banner), backlog form (video asset + song asset or YouTube link + optional brief), queue/activity list, and a manual "Run tick now" action.
 - `web/src/app/dashboard/renders/page.tsx`: render outputs and recent render runs.
 - `web/src/app/dashboard/settings/page.tsx`: API/user/prompt/YouTube-cookie health plus realtime (Redis) and worker-progress status.

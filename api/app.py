@@ -33,6 +33,7 @@ from api.publishing import (
     BufferClient,
     BufferClientError,
     BufferChannelStatus,
+    apply_buffer_status,
     create_publish_post_for_render,
     format_post_text,
     generate_caption_draft,
@@ -1236,15 +1237,7 @@ def create_app(
             result = client.get_post(post_id=post.buffer_post_id)
         except BufferClientError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
-        update = {"updated_at": utc_now()}
-        if result.status:
-            update["buffer_status"] = result.status
-        if result.post_url:
-            update["post_url"] = result.post_url
-            if post.status != "published":
-                update["status"] = "published"
-                update["posted_at"] = post.posted_at or utc_now()
-        return repo.save_publishing_post(post.model_copy(update=update))
+        return repo.save_publishing_post(apply_buffer_status(post, result, now=utc_now()))
 
     @app.post("/v1/publishing/posts/{post_id}/cancel", response_model=PublishingPostRecord)
     def cancel_publishing_post(

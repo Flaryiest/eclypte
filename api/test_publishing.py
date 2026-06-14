@@ -65,6 +65,31 @@ class QueuedBufferClient(RecordingBufferClient):
         return BufferPostResult(post_id="buf_777", status="queued", post_url=None)
 
 
+class LaggingPermalinkBufferClient(RecordingBufferClient):
+    """Buffer reports the post sent right away, but the Instagram permalink only
+    appears on a later poll — the realistic case the status mapping must handle."""
+
+    def create_video_post(self, **kwargs):
+        self.calls.append(kwargs)
+        return BufferPostResult(post_id="buf_lag", status="buffer", post_url=None)
+
+    def get_post(self, *, post_id):
+        self.post_calls.append(post_id)
+        if len(self.post_calls) == 1:
+            return BufferPostResult(
+                post_id=post_id,
+                status="sent",
+                post_url=None,
+                sent_at="2026-06-14T10:00:00Z",
+            )
+        return BufferPostResult(
+            post_id=post_id,
+            status="sent",
+            post_url="https://instagram.com/reel/lag123",
+            sent_at="2026-06-14T10:00:00Z",
+        )
+
+
 class FailingBufferClient(RecordingBufferClient):
     def create_video_post(self, **kwargs):
         raise BufferClientError("Buffer rejected the media URL")
@@ -308,6 +333,57 @@ def test_refresh_status_backfills_post_url_from_buffer(monkeypatch):
     assert refreshed["buffer_status"] == "sent"
     assert refreshed["status"] == "published"
     assert refreshed["posted_at"]
+
+
+def test_refresh_status_publishes_on_sent_then_backfills_url(monkeypatch):
+    # A sent post must move to "published" as soon as Buffer reports it sent, even
+    # before the Instagram permalink exists; the permalink then back-fills on a later
+    # poll without disturbing the published status or posted_at.
+    monkeypatch.setenv("BUFFER_INSTAGRAM_CHANNEL_ID", "channel_instagram")
+    monkeypatch.setenv("ECLYPTE_R2_PUBLIC_BASE_URL", "https://media.example.com")
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    render = _publish_render(repo, body=b"render-video")
+    buffer = LaggingPermalinkBufferClient()
+    client = TestClient(
+        create_app(
+            store=store,
+            workflow_runner=NoopWorkflowRunner(),
+            buffer_client=buffer,
+        )
+    )
+
+    post_id = client.post(
+        "/v1/publishing/posts",
+        headers={"X-User-Id": "user_123"},
+        json={"render_output": render},
+    ).json()["post_id"]
+    client.post(
+        f"/v1/publishing/posts/{post_id}/send-buffer",
+        headers={"X-User-Id": "user_123"},
+        json={"mode": "queue"},
+    )
+
+    first = client.post(
+        f"/v1/publishing/posts/{post_id}/refresh-status",
+        headers={"X-User-Id": "user_123"},
+    ).json()
+
+    # Sent with no permalink yet → already published, posted_at from Buffer's sentAt.
+    assert first["status"] == "published"
+    assert first["buffer_status"] == "sent"
+    assert first["posted_at"] == "2026-06-14T10:00:00Z"
+    assert first["post_url"] is None
+
+    second = client.post(
+        f"/v1/publishing/posts/{post_id}/refresh-status",
+        headers={"X-User-Id": "user_123"},
+    ).json()
+
+    # Permalink arrives later; status stays published and posted_at is unchanged.
+    assert second["status"] == "published"
+    assert second["post_url"] == "https://instagram.com/reel/lag123"
+    assert second["posted_at"] == "2026-06-14T10:00:00Z"
 
 
 def test_publishing_config_reports_non_secret_setup_and_buffer_channel(monkeypatch):

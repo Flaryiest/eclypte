@@ -31,6 +31,7 @@ class BufferPostResult:
     post_id: str
     status: str | None = None
     post_url: str | None = None
+    sent_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -206,6 +207,7 @@ def _buffer_post_result(post: dict[str, Any]) -> BufferPostResult:
         post_id=str(post["id"]),
         status=str(post["status"]) if post.get("status") is not None else None,
         post_url=str(post["externalLink"]) if post.get("externalLink") else None,
+        sent_at=str(post["sentAt"]) if post.get("sentAt") else None,
     )
 
 
@@ -465,6 +467,37 @@ def format_post_text(caption: str, hashtags: list[str]) -> str:
 
 def queue_status_for_mode(mode: BufferShareMode) -> str:
     return "scheduled" if mode == "customScheduled" else "queued"
+
+
+# Buffer Post.status values that mean the post has gone live on the channel.
+SENT_BUFFER_STATUSES = {"sent", "service", "published"}
+
+
+def apply_buffer_status(
+    post: PublishingPostRecord,
+    result: BufferPostResult,
+    *,
+    now: str,
+) -> PublishingPostRecord:
+    """Merge a Buffer ``get_post`` result into a publishing record.
+
+    A post becomes ``published`` as soon as Buffer reports it sent (``sentAt`` set, or
+    a sent-like status) — not only once the Instagram permalink (``externalLink``)
+    appears, which can lag well behind the post going live. The permalink is
+    back-filled independently whenever it shows up, so a published-without-URL post
+    keeps reconciling on later refreshes. A ``published`` or ``canceled`` record is
+    never downgraded.
+    """
+    update: dict[str, Any] = {"updated_at": now}
+    if result.status:
+        update["buffer_status"] = result.status
+    if result.post_url:
+        update["post_url"] = result.post_url
+    is_sent = bool(result.sent_at) or (result.status or "").lower() in SENT_BUFFER_STATUSES
+    if (is_sent or result.post_url) and post.status not in ("published", "canceled"):
+        update["status"] = "published"
+        update["posted_at"] = post.posted_at or result.sent_at or now
+    return post.model_copy(update=update)
 
 
 def _first_error_message(errors: Any) -> str:

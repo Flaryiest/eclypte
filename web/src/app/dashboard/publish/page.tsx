@@ -38,6 +38,9 @@ const tabs: Array<{ id: PublishTab; label: string }> = [
     { id: "failed", label: "Failed" },
 ]
 
+// How often in-flight posts are reconciled against Buffer while the tab is visible.
+const POLL_INTERVAL_MS = 25000
+
 export default function PublishPage() {
     const { isLoaded, isSignedIn, user } = useUser()
     const [posts, setPosts] = useState<PublishingPost[]>([])
@@ -52,13 +55,29 @@ export default function PublishPage() {
     const [error, setError] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState(false)
     const [isWorking, setIsWorking] = useState(false)
-    const polledRef = useRef<Set<string>>(new Set())
+    const pollableIdsRef = useRef<string[]>([])
+    const syncedPostIdRef = useRef<string | null>(null)
+    const previewKeyRef = useRef<string | null>(null)
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
     const visiblePosts = useMemo(() => filterPosts(posts, tab), [posts, tab])
     // Lane-aware: the detail panel always shows a post that lives in the active tab,
     // so switching tabs never strands the panel on a post hidden from the list.
     const selected = visiblePosts.find((post) => post.post_id === selectedId) ?? visiblePosts[0] ?? null
+    // Posts still moving through Buffer (queued/scheduled, or published without a
+    // permalink yet); these get polled until they settle so the UI reconciles live.
+    const pollablePosts = useMemo(
+        () =>
+            posts.filter(
+                (post) =>
+                    Boolean(post.buffer_post_id)
+                    && (post.status === "queued"
+                        || post.status === "scheduled"
+                        || (post.status === "published" && !post.post_url)),
+            ),
+        [posts],
+    )
+    const hasPollable = pollablePosts.length > 0
 
     // The loader must not depend on `tab` — that coupling made every tab switch
     // refetch the whole list (and clobber optimistic updates). Read the live tab
@@ -117,13 +136,20 @@ export default function PublishPage() {
         loadConfig()
     }, [api, refreshPosts, loadConfig])
 
+    // Resync the editor only when the displayed post changes — not when a background
+    // poll replaces the same post's object — so live reconciliation never wipes
+    // unsaved caption/hashtag edits.
     useEffect(() => {
+        const id = selected?.post_id ?? null
+        if (id === syncedPostIdRef.current) {
+            return
+        }
+        syncedPostIdRef.current = id
         if (!selected) {
             setCaption("")
             setHashtags("")
             setNotes("")
             setScheduledAt("")
-            setPreview(null)
             return
         }
         setCaption(selected.caption)
@@ -132,10 +158,20 @@ export default function PublishPage() {
         setScheduledAt(toLocalDateTimeInput(selected.scheduled_at))
     }, [selected])
 
+    // Fetch the preview only when the displayed media changes. A background poll that
+    // updates the selected post's object (same render) must not reset the <video>.
     useEffect(() => {
         if (!api || !selected) {
+            previewKeyRef.current = null
+            setPreview(null)
             return
         }
+        const key = `${selected.render_file_id}:${selected.render_version_id}`
+        if (key === previewKeyRef.current) {
+            return
+        }
+        previewKeyRef.current = key
+        const postId = selected.post_id
         let ignore = false
         setPreview(null)
         void api.getDownloadUrl({
@@ -143,7 +179,7 @@ export default function PublishPage() {
             version_id: selected.render_version_id,
         }).then((download) => {
             if (!ignore) {
-                setPreview({ postId: selected.post_id, url: download.download_url })
+                setPreview({ postId, url: download.download_url })
             }
         }).catch((caught) => {
             if (!ignore) {
@@ -155,35 +191,55 @@ export default function PublishPage() {
         }
     }, [api, selected])
 
-    // A sent post has no live permalink until Buffer actually publishes it, and we
-    // never poll again afterward. So when the selected post has a Buffer id but no
-    // post URL yet, ask Buffer once (per post, on load/selection) to back-fill it.
+    // Keep the latest pollable ids in a ref so the interval below always reconciles the
+    // current in-flight set without re-subscribing on every poll.
     useEffect(() => {
-        if (!api || !selected || !selected.buffer_post_id || selected.post_url) {
+        pollableIdsRef.current = pollablePosts.map((post) => post.post_id)
+    })
+
+    // Live reconciliation: while posts are in flight, refresh them against Buffer on an
+    // interval and immediately when the tab regains focus, so queued posts auto-advance
+    // to Posted and permalinks fill in without a manual refresh. Background errors are
+    // swallowed (the manual "Refresh from Buffer" button surfaces them); merges are by
+    // id so the selected post's editor and unrelated rows are untouched.
+    useEffect(() => {
+        if (!api || !hasPollable) {
             return
         }
-        if (polledRef.current.has(selected.post_id)) {
-            return
-        }
-        polledRef.current.add(selected.post_id)
-        const postId = selected.post_id
-        let ignore = false
-        void api
-            .refreshPublishingPostStatus(postId)
-            .then((next) => {
-                if (!ignore) {
+        const controller = new AbortController()
+        let stopped = false
+        const reconcile = async () => {
+            if (document.visibilityState === "hidden") {
+                return
+            }
+            for (const postId of pollableIdsRef.current) {
+                try {
+                    const next = await api.refreshPublishingPostStatus(postId, controller.signal)
+                    if (stopped) {
+                        return
+                    }
                     setPosts((current) =>
                         current.map((post) => (post.post_id === next.post_id ? next : post)),
                     )
+                } catch {
+                    // Silent: background reconciliation must never clobber the UI.
                 }
-            })
-            .catch(() => {
-                polledRef.current.delete(postId)
-            })
-        return () => {
-            ignore = true
+            }
         }
-    }, [api, selected])
+        const interval = window.setInterval(reconcile, POLL_INTERVAL_MS)
+        const onVisible = () => {
+            if (document.visibilityState === "visible") {
+                void reconcile()
+            }
+        }
+        document.addEventListener("visibilitychange", onVisible)
+        return () => {
+            stopped = true
+            controller.abort()
+            window.clearInterval(interval)
+            document.removeEventListener("visibilitychange", onVisible)
+        }
+    }, [api, hasPollable])
 
     const replacePost = (next: PublishingPost) => {
         setPosts((current) => current.map((post) => post.post_id === next.post_id ? next : post))
@@ -284,10 +340,8 @@ export default function PublishPage() {
         if (!api || !selected) {
             return
         }
-        // Manual, on-demand re-check against Buffer. Unlike the automatic one-shot,
-        // this always asks (no polledRef guard) and surfaces any Buffer error instead
-        // of swallowing it, so we can see why a live post's URL isn't coming back.
-        polledRef.current.delete(selected.post_id)
+        // Manual, on-demand re-check that surfaces any Buffer error (the background
+        // poll swallows them), so we can see why a live post's URL isn't coming back.
         setIsWorking(true)
         setError(null)
         try {
@@ -355,16 +409,19 @@ export default function PublishPage() {
             )}
 
             <div className={styles.segmentedControl} role="tablist" aria-label="Publish status">
-                {tabs.map((item) => (
-                    <button
-                        key={item.id}
-                        className={tab === item.id ? styles.segmentActive : styles.segmentButton}
-                        type="button"
-                        onClick={() => setTab(item.id)}
-                    >
-                        {item.label}
-                    </button>
-                ))}
+                {tabs.map((item) => {
+                    const count = filterPosts(posts, item.id).length
+                    return (
+                        <button
+                            key={item.id}
+                            className={tab === item.id ? styles.segmentActive : styles.segmentButton}
+                            type="button"
+                            onClick={() => setTab(item.id)}
+                        >
+                            {item.label}{count > 0 ? ` ${count}` : ""}
+                        </button>
+                    )
+                })}
             </div>
 
             <section className={styles.grid}>
