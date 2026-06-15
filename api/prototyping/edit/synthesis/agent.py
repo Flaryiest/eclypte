@@ -31,7 +31,8 @@ Editorial guidelines (baseline — follow unless the user's instructions overrid
 - The opening is the most important section. The first 1.5 seconds decide whether a viewer stays: open on the single most visually striking moment you can find (an impact frame, a burst of motion, an iconic character moment) — never a slow establishing shot — and land the first cut within ~1.5s. Invest the most creativity at the start; this is what hooks the viewer.
 - Each timeline item may optionally set "transition_in" ("cut" | "flash" | "crossfade") and "effect" ("freeze" | "punch_in"). Use flash on hard musical impacts (a drop or a downbeat slam), punch_in to add life to a longer held shot, and freeze for a dramatic stop on a final hit. Use them sparingly — a few per edit, at musical moments.
 - After the opening, plain cut transitions are fine. You do not need to apply creative patterns to every shot — the rest of the edit should carry the story, not show off.
-- Span the full source from beginning to end regardless of song length: the edit must reach the ending of the source, not just a cluster of early or high-energy moments. A shorter song means fewer, more spread-out shots — not a smaller slice of the film. You may still dwell on or revisit a standout moment.
+- Span the full source from beginning to end regardless of song length: the edit must reach the end of the source's actual content (stop before any end-credits or black tail), not just a cluster of early or high-energy moments. A shorter song means fewer, more spread-out shots — not a smaller slice of the film. You may still dwell on or revisit a standout moment.
+- Never select dead frames: black frames, fades-to-black, solid-color frames, logos, title cards, or end credits. These usually sit in the first and last few seconds of the source — do not open or close the edit on them. Every shot must be real content (characters, action, scenery).
 - Pick shots mostly in chronological order from the source video. Small re-orderings for pacing are OK, but the overall progression should move forward through the source.
 - CRITICAL: every `source_timestamp` in your final `finish_edit` call MUST be DISTINCT from every other `source_timestamp` (differ by more than 1 second). The adapter will drop any duplicates — repeated shots will be silently removed, shortening your AMV. This is the most common failure mode; double-check before calling `finish_edit`.
 
@@ -138,12 +139,15 @@ def _format_source_context(source_duration_sec: float) -> str:
     d = float(source_duration_sec)
     return (
         f"Source video: {d:.0f} seconds long.\n"
-        f"Span the FULL source from start to end regardless of song length: your "
-        f"earliest shots should come from near 0s and your latest from near {d:.0f}s. "
-        f"A shorter song means fewer, more spread-out shots — NOT a smaller slice of "
-        f"the film. You may still dwell on or revisit a standout moment (a climax, a "
-        f"key scene); coverage need not be even, but do not leave the back half or "
-        f"ending of the source unrepresented."
+        f"Span the FULL content from start to end regardless of song length: your "
+        f"earliest shots should come from near the start of the action and your latest "
+        f"from near the end of the content. A shorter song means fewer, more spread-out "
+        f"shots — NOT a smaller slice of the film. You may still dwell on or revisit a "
+        f"standout moment (a climax, a key scene); coverage need not be even, but do not "
+        f"leave the back half of the source unrepresented.\n"
+        f"IMPORTANT: the first and last few seconds are usually a black/logo intro or an "
+        f"end-credits roll. Do NOT anchor your opening or closing shot there — open and "
+        f"close on real content, and never pick black frames, title cards, or credits."
     )
 
 

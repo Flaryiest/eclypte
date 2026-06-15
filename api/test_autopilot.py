@@ -133,7 +133,10 @@ def test_select_trim_windows_prefers_high_energy_chorus():
 
     assert windows
     start, end = windows[0]
-    assert 55.0 <= start <= 65.0
+    # Anchors on the chorus but begins ~CHORUS_LEAD_IN_SEC before it, so the reel
+    # captures the build-in instead of cutting in on the downbeat.
+    assert start < 60.0
+    assert 56.0 <= start <= 58.5
     assert 15.0 <= end - start <= 22.0
     assert end <= 120.0
 

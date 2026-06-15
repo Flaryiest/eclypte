@@ -1099,7 +1099,7 @@ class DefaultWorkflowRunner:
             size_bytes=int(output["size_bytes"]),
             sha256=output["sha256"],
             original_filename=index_name,
-            created_by_step="ensure_clip_index",
+            created_by_step=CLIP_INDEX_BUILD_STEP,
             derived_from_step="ensure_clip_index",
             input_file_version_ids=[source_ref.version_id],
             derived_from_run_id=run_id,
@@ -1412,6 +1412,12 @@ def _read_json_version(repo: StorageRepository, version_ref: FileVersionRef) -> 
     return json.loads(repo.read_version_bytes(version_ref).decode("utf-8"))
 
 
+# Bump this when the CLIP index format changes so older indexes are rebuilt once
+# instead of silently reused. v2 added per-frame brightness/detail for the
+# black/credit-frame content filter.
+CLIP_INDEX_BUILD_STEP = "ensure_clip_index_v2"
+
+
 def _find_clip_index_for_source(
     repo: StorageRepository,
     user_id: str,
@@ -1426,7 +1432,11 @@ def _find_clip_index_for_source(
             version_id=manifest.current_version_id,
         )
         meta = repo.load_file_version_meta(version_ref)
-        if source_version_id in meta.derived_from.input_file_version_ids:
+        # Only reuse indexes built by the current format; stale ones rebuild once.
+        if (
+            meta.created_by_step == CLIP_INDEX_BUILD_STEP
+            and source_version_id in meta.derived_from.input_file_version_ids
+        ):
             return FileRef(user_id=user_id, file_id=manifest.file_id), version_ref, meta
     return None
 

@@ -9,7 +9,7 @@ from api.storage.refs import FileVersionRef
 from api.storage.refs import RunRef
 from api.storage.repository import StorageRepository
 from api.storage.test_fakes import InMemoryObjectStore
-from api.workflows import DefaultWorkflowRunner
+from api.workflows import CLIP_INDEX_BUILD_STEP, DefaultWorkflowRunner
 
 
 def _create_youtube_import_run(repo: StorageRepository):
@@ -45,6 +45,7 @@ def _publish_artifact(
     body: bytes,
     content_type: str,
     input_file_version_ids: list[str] | None = None,
+    created_by_step: str = "test",
 ):
     file_ref = FileRef(user_id="user_123", file_id=file_id)
     repo.create_file_manifest(file_ref=file_ref, kind=kind, display_name=filename)
@@ -53,7 +54,7 @@ def _publish_artifact(
         body=body,
         content_type=content_type,
         original_filename=filename,
-        created_by_step="test",
+        created_by_step=created_by_step,
         derived_from_step="test",
         input_file_version_ids=input_file_version_ids or [],
     )
@@ -347,6 +348,7 @@ def test_agent_timeline_reuses_existing_clip_index_and_active_prompt(monkeypatch
         body=b"npz",
         content_type="application/x-numpy-data",
         input_file_version_ids=[source_video["version_id"]],
+        created_by_step=CLIP_INDEX_BUILD_STEP,
     )
     prompt = repo.create_synthesis_prompt_version(
         user_id="user_123",
@@ -404,6 +406,7 @@ def test_agent_timeline_emits_parent_progress_milestones(monkeypatch):
         body=b"npz",
         content_type="application/x-numpy-data",
         input_file_version_ids=[source_video["version_id"]],
+        created_by_step=CLIP_INDEX_BUILD_STEP,
     )
     parent = repo.create_run(
         user_id="user_123",

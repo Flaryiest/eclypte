@@ -91,7 +91,7 @@ def test_source_duration_added_to_user_prompt():
         # where the end of the film is, regardless of the active system prompt.
         first_input = mock_create.call_args_list[0].kwargs["input"]
         assert "137" in first_input
-        assert "full source" in first_input.lower()
+        assert "full content" in first_input.lower()
 
 
 def test_run_synthesis_loop_accepts_injected_prompt_and_query_function():

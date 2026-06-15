@@ -58,6 +58,10 @@ def build_index_r2(
         emit_progress(progress_context, 25, f"Extracted {len(frames_data)} frames")
 
         timestamps = np.array([frame[0] for frame in frames_data], dtype=np.float32)
+        # Per-frame content signals so query-time can drop dead frames (black
+        # intros/outros, end credits, solid title cards) from results.
+        brightness = np.array([float(frame[1].mean()) for frame in frames_data], dtype=np.float32)
+        detail = np.array([float(frame[1].std()) for frame in frames_data], dtype=np.float32)
         embeddings = embed_frames(
             [frame[1] for frame in frames_data],
             on_progress=lambda processed, total: emit_progress(
@@ -66,7 +70,13 @@ def build_index_r2(
                 f"Embedded {processed}/{total} frames",
             ),
         )
-        np.savez(index_path, timestamps=timestamps, embeddings=embeddings)
+        np.savez(
+            index_path,
+            timestamps=timestamps,
+            embeddings=embeddings,
+            brightness=brightness,
+            detail=detail,
+        )
 
         body = index_path.read_bytes()
         emit_progress(progress_context, 90, "Uploading CLIP index")
@@ -100,22 +110,12 @@ def _load_index_from_r2(r2_config: dict, index_key: str):
         with np.load(index_path) as data:
             timestamps = data["timestamps"]
             embeddings = data["embeddings"]
+            # Older indexes (built before the content filter) lack these.
+            brightness = data["brightness"] if "brightness" in data else None
+            detail = data["detail"] if "detail" in data else None
 
-    _INDEX_CACHE[index_key] = (timestamps, embeddings)
-    return timestamps, embeddings
-
-
-def _top_k_results(timestamps, similarities, *, top_k: int) -> list[dict]:
-    import numpy as np
-
-    top_indices = np.argsort(similarities)[::-1][:top_k]
-    return [
-        {
-            "timestamp": float(timestamps[index]),
-            "score": float(similarities[index]),
-        }
-        for index in top_indices
-    ]
+    _INDEX_CACHE[index_key] = (timestamps, embeddings, brightness, detail)
+    return timestamps, embeddings, brightness, detail
 
 
 @app.function(image=storage_image, gpu="T4", scaledown_window=600)
@@ -126,9 +126,12 @@ def query_index_r2(
     top_k: int = 5,
 ) -> list[dict]:
     from edit.index.embed import embed_text
+    from edit.index.query import rank_with_content_filter
     import numpy as np
 
-    timestamps, embeddings = _load_index_from_r2(r2_config, index_key)
+    timestamps, embeddings, brightness, detail = _load_index_from_r2(r2_config, index_key)
     query_embedding = embed_text(query)[0]
     similarities = np.dot(embeddings, query_embedding)
-    return _top_k_results(timestamps, similarities, top_k=top_k)
+    return rank_with_content_filter(
+        timestamps, similarities, brightness, detail, top_k=top_k
+    )

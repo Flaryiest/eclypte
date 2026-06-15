@@ -22,6 +22,9 @@ from api.storage.repository import StorageRepository
 TRIM_TARGET_SEC = 18.0
 TRIM_MIN_SEC = 15.0
 TRIM_MAX_SEC = 22.0
+# Begin a section-anchored window this many seconds before the section starts, so a
+# chorus-anchored reel captures the build-in rather than cutting in on the downbeat.
+CHORUS_LEAD_IN_SEC = 2.5
 COMBO_WINDOW_BUCKET_SEC = 5
 MAX_CONSECUTIVE_FAILURES = 3
 MAX_FINISHED_ITEMS = 50
@@ -124,7 +127,7 @@ def select_trim_windows(
         except (TypeError, ValueError):
             continue
         label = str(segment.get("label") or "").lower()
-        add_candidate(start, bonus=0.15 if "chorus" in label else 0.0)
+        add_candidate(start - CHORUS_LEAD_IN_SEC, bonus=0.15 if "chorus" in label else 0.0)
 
     step = COMBO_WINDOW_BUCKET_SEC
     start = 0.0
