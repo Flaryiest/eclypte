@@ -39,7 +39,7 @@ def _patch_timeline_paths(timeline: dict, *, video_path: Path, audio_path: Path)
     image=storage_image,
     cpu=RENDER_PROFILES["standard"]["cpu"],
     memory=RENDER_PROFILES["standard"]["memory"],
-    timeout=3600,
+    timeout=86400,
 )
 def render_r2(
     r2_config: dict,
