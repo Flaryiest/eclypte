@@ -6,6 +6,7 @@ from typing import Callable
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from api.prototyping.edit import skills
 from api.prototyping.edit.index.query import query_clips
 
 _ENV_PATH = Path(__file__).resolve().parent / ".env"
@@ -95,6 +96,30 @@ TOOLS = [
                         "required": ["start_time", "end_time", "source_timestamp"],
                     },
                 },
+                "overlays": {
+                    "type": "array",
+                    "description": (
+                        "Optional text/mask overlay layers composited over the reel. "
+                        "Omit entirely if none. Use sparingly."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "skill_id": {
+                                "type": "string",
+                                "enum": sorted(skills.ids()),
+                                "description": "Which overlay skill to apply.",
+                            },
+                            "text": {
+                                "type": "string",
+                                "description": "Text content for text.* skills (ignored by mask.* skills).",
+                            },
+                            "start_time": {"type": "number", "description": "Overlay start time in seconds"},
+                            "end_time": {"type": "number", "description": "Overlay end time in seconds"},
+                        },
+                        "required": ["skill_id", "start_time", "end_time"],
+                    },
+                },
             },
             "required": ["timeline"],
         },
@@ -133,6 +158,22 @@ def _format_short_edit_context(song_duration_sec: float) -> str:
         f"within ~1.5s, no slow intro), keep every shot earning its place, and aim "
         f"for an ending that loops cleanly back into the opening."
     )
+
+
+def _format_overlay_skills() -> str:
+    lines = [
+        "Available overlay skills (optional text/mask layers added via the "
+        "`overlays` field of finish_edit):"
+    ]
+    for entry in skills.agent_catalog():
+        lines.append(f"- {entry['id']}: {entry['description']}")
+    lines.append(
+        "Use overlays sparingly and only when they add to the edit. Put any hook "
+        "text in the first ~1.5s, keep text short and legible, and give each "
+        "overlay a start_time/end_time inside the song duration. text.* skills "
+        "need a `text` value; mask.* skills do not."
+    )
+    return "\n".join(lines)
 
 
 def _format_source_context(source_duration_sec: float) -> str:
@@ -192,8 +233,11 @@ def run_synthesis_loop(
     sections are formatted into the prompt so the agent sizes and paces the
     edit to the music.
 
-    Returns the final list of timeline events:
-      [{"start_time": float, "end_time": float, "source_timestamp": float}, ...]
+    Returns the agent output:
+      {
+        "shots": [{"start_time": float, "end_time": float, "source_timestamp": float}, ...],
+        "overlays": [{"skill_id": str, "text"?: str, "start_time": float, "end_time": float}, ...],
+      }
     """
     load_dotenv(_ENV_PATH)
     client = OpenAI(api_key=openai_api_key or os.environ.get("OPENAI_API_KEY"))
@@ -208,6 +252,7 @@ def run_synthesis_loop(
     song_duration = float((song or {}).get("source", {}).get("duration_sec", 0.0) or 0.0)
     if 0.0 < song_duration <= SHORT_EDIT_MAX_SEC:
         context_blocks.append(_format_short_edit_context(song_duration))
+    context_blocks.append(_format_overlay_skills())
     if context_blocks:
         user_content = "\n\n".join(context_blocks) + "\n\nUser brief:\n" + instructions
     else:
@@ -251,7 +296,7 @@ def run_synthesis_loop(
                 issued_query = True
             elif tc.name == "finish_edit":
                 print("Agent finished editing.")
-                return args["timeline"]
+                return {"shots": args["timeline"], "overlays": args.get("overlays") or []}
 
         next_input: list[dict] = list(tool_outputs)
         if issued_query:

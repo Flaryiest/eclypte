@@ -13,11 +13,14 @@ moviepy v2 API conventions used: `subclipped`, `with_duration`, `with_start`,
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
 from moviepy import AudioFileClip, ColorClip, CompositeVideoClip, VideoFileClip, concatenate_videoclips
 
+from .. import skills
+from ..skills.base import RenderContext, ResolvedOverlay
 from ..synthesis.timeline_schema import OutputSpec, Shot, Timeline
 from ..synthesis.validators import validate_timeline
 from .effects import apply_effects
@@ -27,6 +30,50 @@ from .transitions import apply_transition
 CODEC_VIDEO = "libx264"
 CODEC_AUDIO = "aac"
 DEFAULT_ENCODE_PRESET = "medium"
+
+# Font lookup for text overlays. The Modal render image bundles a font at
+# /fonts/overlay.otf; ECLYPTE_OVERLAY_FONT overrides; the rest are local
+# fallbacks so the guarded renderer test runs without the bundled font.
+_FONT_CANDIDATES = [
+    os.environ.get("ECLYPTE_OVERLAY_FONT"),
+    "/fonts/overlay.otf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    r"C:\Windows\Fonts\arialbd.ttf",
+    r"C:\Windows\Fonts\arial.ttf",
+]
+
+
+def _resolve_font_path() -> str:
+    for candidate in _FONT_CANDIDATES:
+        if candidate and Path(candidate).exists():
+            return candidate
+    raise FileNotFoundError(
+        "no overlay font available; set ECLYPTE_OVERLAY_FONT or bundle /fonts/overlay.otf"
+    )
+
+
+def _apply_overlays(base, timeline: Timeline, target_size: tuple[int, int]):
+    """Composite the timeline's overlay skills on top of the concatenated video."""
+    if not timeline.overlays:
+        return base
+    ctx = RenderContext(
+        output_size=target_size,
+        fps=timeline.output.fps,
+        font_path=_resolve_font_path(),
+    )
+    layers = []
+    for ov in timeline.overlays:
+        resolved = ResolvedOverlay(
+            skill_id=ov.skill_id,
+            timeline_start_sec=ov.timeline_start_sec,
+            timeline_end_sec=ov.timeline_end_sec,
+            params=ov.params,
+        )
+        layers.extend(skills.get(ov.skill_id).build_layers(resolved, ctx))
+    if not layers:
+        return base
+    return CompositeVideoClip([base, *layers], size=target_size)
 
 
 def _log_timing(step: str, started_at: float) -> None:
@@ -79,11 +126,12 @@ def render_timeline(
 
         concat_started = time.perf_counter()
         concat = concatenate_videoclips(shot_clips, method="compose")
+        composited = _apply_overlays(concat, timeline, target_size)
         audio_slice = audio.subclipped(
             timeline.audio.start_sec,
             timeline.audio.start_sec + timeline.output.duration_sec,
         )
-        final = concat.with_audio(audio_slice).with_duration(timeline.output.duration_sec)
+        final = composited.with_audio(audio_slice).with_duration(timeline.output.duration_sec)
         _log_timing("concat/compose", concat_started)
         _report(progress_callback, 45, "Composed timeline")
 

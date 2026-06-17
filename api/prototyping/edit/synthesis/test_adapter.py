@@ -26,6 +26,55 @@ def _three_shots_contiguous():
     ]
 
 
+def test_adapt_maps_overlays():
+    overlays = [
+        {"skill_id": "text.hook", "text": "no way", "start_time": 0.0, "end_time": 1.5},
+        {"skill_id": "mask.vignette", "start_time": 0.0, "end_time": 6.0},
+    ]
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH, overlays=overlays)
+
+    assert len(tl.overlays) == 2
+    hook = tl.overlays[0]
+    assert hook.skill_id == "text.hook"
+    assert hook.params == {"text": "no way"}
+    assert hook.timeline_start_sec == pytest.approx(0.0)
+    assert hook.timeline_end_sec == pytest.approx(1.5)
+    assert tl.overlays[1].skill_id == "mask.vignette"
+    assert tl.overlays[1].params == {"strength": 0.6}
+
+
+def test_adapt_without_overlays_is_empty():
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH)
+    assert tl.overlays == []
+
+
+def test_adapt_drops_unknown_skill_overlay():
+    overlays = [{"skill_id": "text.bogus", "text": "x", "start_time": 0.0, "end_time": 1.0}]
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH, overlays=overlays)
+    assert tl.overlays == []
+
+
+def test_adapt_drops_overlay_with_invalid_params():
+    # A text skill with empty text fails its params model -> dropped, not raised.
+    overlays = [{"skill_id": "text.hook", "text": "", "start_time": 0.0, "end_time": 1.0}]
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH, overlays=overlays)
+    assert tl.overlays == []
+
+
+def test_adapt_clamps_overlay_window_to_timeline():
+    overlays = [{"skill_id": "mask.vignette", "start_time": -3.0, "end_time": 100.0}]
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH, overlays=overlays)
+    ov = tl.overlays[0]
+    assert ov.timeline_start_sec == pytest.approx(0.0)
+    assert ov.timeline_end_sec == pytest.approx(tl.output.duration_sec)
+
+
+def test_adapt_drops_overlay_with_nonpositive_window():
+    overlays = [{"skill_id": "mask.vignette", "start_time": 5.0, "end_time": 5.0}]
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH, overlays=overlays)
+    assert tl.overlays == []
+
+
 def test_basic_adapt():
     tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH)
 

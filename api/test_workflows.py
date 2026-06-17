@@ -369,7 +369,10 @@ def test_agent_timeline_reuses_existing_clip_index_and_active_prompt(monkeypatch
 
     def fake_synthesis(**kwargs):
         captured.update(kwargs)
-        return [{"start_time": 0.0, "end_time": 4.0, "source_timestamp": 2.0}]
+        return {
+            "shots": [{"start_time": 0.0, "end_time": 4.0, "source_timestamp": 2.0}],
+            "overlays": [],
+        }
 
     monkeypatch.setattr("api.workflows._run_agent_synthesis", fake_synthesis)
 
@@ -424,10 +427,13 @@ def test_agent_timeline_emits_parent_progress_milestones(monkeypatch):
     )
     monkeypatch.setattr(
         "api.workflows._run_agent_synthesis",
-        lambda **_kwargs: [
-            {"start_time": 0.0, "end_time": 2.0, "source_timestamp": 2.0},
-            {"start_time": 2.0, "end_time": 4.0, "source_timestamp": 8.0},
-        ],
+        lambda **_kwargs: {
+            "shots": [
+                {"start_time": 0.0, "end_time": 2.0, "source_timestamp": 2.0},
+                {"start_time": 2.0, "end_time": 4.0, "source_timestamp": 8.0},
+            ],
+            "overlays": [],
+        },
     )
 
     runner.run_timeline_plan(
@@ -486,7 +492,10 @@ def test_agent_timeline_builds_missing_clip_index(monkeypatch):
     monkeypatch.setattr("api.workflows._build_clip_index_r2", fake_build)
     monkeypatch.setattr(
         "api.workflows._run_agent_synthesis",
-        lambda **_kwargs: [{"start_time": 0.0, "end_time": 4.0, "source_timestamp": 2.0}],
+        lambda **_kwargs: {
+            "shots": [{"start_time": 0.0, "end_time": 4.0, "source_timestamp": 2.0}],
+            "overlays": [],
+        },
     )
 
     runner.run_timeline_plan(

@@ -199,17 +199,18 @@ Subsystems:
 
 - `patterns/`: pattern catalog and registry. Stable pattern ids are `<layer>.<slug>`.
 - `knowledge/`: seed pattern YAML and generated/reference guidance markdown.
-- `synthesis/timeline_schema.py`: Pydantic timeline schema.
-- `synthesis/validators.py`: contiguity, bounds, and pattern-id validation.
+- `skills/`: registry of creative overlay skills (text/masks) the agent composites over the reel. Each skill is one self-contained module (`text.hook`, `text.caption`, `text.lower_third`, `mask.vignette`) declaring `id`, an agent-facing `description`, a Pydantic `params_model`, and `build_layers(overlay, ctx)`. Skills self-register on import (`register(...)`); the agent tool enum, validators, and renderer all read the registry (`skills.ids()` / `skills.get()` / `skills.agent_catalog()`), so adding/removing a skill is a single module plus one import line in `skills/__init__.py`. Skill metadata stays moviepy-free (Railway control plane); `build_layers` imports moviepy/numpy lazily and runs only inside the Modal renderer.
+- `synthesis/timeline_schema.py`: Pydantic timeline schema. `Timeline.overlays` carries optional `Overlay` items (`skill_id` + window + validated `params`), composited over the shots.
+- `synthesis/validators.py`: contiguity, bounds, and pattern-id validation, plus registry-driven overlay checks (known `skill_id`, in-bounds window).
 - `synthesis/planner.py`: deterministic planner baseline. Maps each shot's song-progress fraction to a source-position window so the edit spans the full source regardless of length.
 - `synthesis/agent.py`: OpenAI Responses API synthesis loop.
-- `synthesis/adapter.py`: converts agent output into renderable timelines, dedupes near-duplicate source timestamps, trims song-duration overshoot, runs continuity post-processing, beat-snaps interior cut boundaries (±0.15s) onto `markers.beats_used_sec`, and maps optional per-shot `transition_in`/`effect` choices.
+- `synthesis/adapter.py`: converts agent output into renderable timelines, dedupes near-duplicate source timestamps, trims song-duration overshoot, runs continuity post-processing, beat-snaps interior cut boundaries (±0.15s) onto `markers.beats_used_sec`, maps optional per-shot `transition_in`/`effect` choices, and resolves the agent's optional `overlays` against the skill registry (clamps the window, validates params, and drops invalid/unknown overlays with a log rather than failing the edit). The agent now returns `{"shots", "overlays"}`.
 - `index/frames.py`: sequential frame extraction. Do not revert to per-frame `CAP_PROP_POS_MSEC` seeking on long videos.
 - `index/embed.py`: CLIP frame/text embeddings.
 - `index/query.py`: `query_ranges` motion-statistics ranking used by the deterministic planner; an optional `time_window` biases candidates toward a source region.
 - `index/storage_modal.py`: R2-aware API CLIP app `eclypte-clip-index-r2`, with `build_index_r2` and `query_index_r2`. The build records per-frame `brightness`/`detail` in the index; `query_index_r2` ranks through `query.rank_with_content_filter`, which drops near-black and flat frames (black intros/outros, credits, title cards) so the agent can't select them. Bump `CLIP_INDEX_BUILD_STEP` in `api/workflows.py` (and reindex) when the index format changes; redeploy `eclypte-clip-index-r2` after changing this.
 - `reference/`: reference AMV download, metrics, ingest, consolidation, and prompt-weight parsing.
-- `render/renderer.py`: MoviePy v2 renderer. Reads timeline JSON + media only (not planner internals); also saves an RGB JPEG poster frame and reports real frame-encode progress through proglog's `frame_index` bar.
+- `render/renderer.py`: MoviePy v2 renderer. Reads timeline JSON + media only (not planner internals); composites `timeline.overlays` (skill layers) over the concatenated shots before attaching audio; also saves an RGB JPEG poster frame (taken after compositing, so overlays show) and reports real frame-encode progress through proglog's `frame_index` bar. Resolves the overlay font via `ECLYPTE_OVERLAY_FONT` → `/fonts/overlay.otf` → bundled DejaVu.
 - `render_storage_modal.py`: R2-aware API renderer `eclypte-render-r2` (uploads the rendered MP4 and the poster image).
 
 Agent planning defaults:
@@ -290,7 +291,7 @@ Modal wrappers should use pure local modules through `add_local_python_source()`
 
 Shared wrapper helpers live at the `api/prototyping/` root: `modal_s3.py` (S3/R2 client + object download) and `progress_events.py` (progress emission). Import them by bare module name inside Modal function bodies, list them in each app's `add_local_python_source()`, and deploy from `api/prototyping/` so they resolve.
 
-`add_local_python_source()` snapshots local code at `modal deploy` time. Pushing to Railway does NOT update Modal: after changing anything inside the bundled `edit` package that the renderer uses (`edit/render/**`, `edit/synthesis/timeline_schema.py`, `edit/synthesis/validators.py`), redeploy `eclypte-render-r2` or live renders keep running the old code (and may reject timelines that use newer schema values). `eclypte-clip-index-r2` also bundles `edit` but only needs a redeploy when index code changes. On Windows, prefix `modal` commands with `PYTHONUTF8=1` (or `$env:PYTHONIOENCODING="utf-8"`) — the CLI prints Unicode glyphs that crash the default charmap console.
+`add_local_python_source()` snapshots local code at `modal deploy` time. Pushing to Railway does NOT update Modal: after changing anything inside the bundled `edit` package that the renderer uses (`edit/render/**`, `edit/skills/**`, `edit/synthesis/timeline_schema.py`, `edit/synthesis/validators.py`), redeploy `eclypte-render-r2` or live renders keep running the old code (and may reject timelines that use newer schema values, or silently drop overlays whose skills the old image lacks). `eclypte-clip-index-r2` also bundles `edit` but only needs a redeploy when index code changes. On Windows, prefix `modal` commands with `PYTHONUTF8=1` (or `$env:PYTHONIOENCODING="utf-8"`) — the CLI prints Unicode glyphs that crash the default charmap console.
 
 ## Testing Guidance
 

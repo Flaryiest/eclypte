@@ -45,10 +45,11 @@ def test_run_synthesis_loop():
 
         mock_query.return_value = [{"timestamp": 5.0, "score": 0.9}]
 
-        timeline = run_synthesis_loop("dummy.mp4", "make a cool video")
+        result = run_synthesis_loop("dummy.mp4", "make a cool video")
 
-        assert len(timeline) == 1
-        assert timeline[0]["source_timestamp"] == 5.0
+        assert len(result["shots"]) == 1
+        assert result["shots"][0]["source_timestamp"] == 5.0
+        assert result["overlays"] == []
         mock_query.assert_called_with("test", "dummy.mp4", 2)
         assert mock_create.call_count == 2
 
@@ -114,13 +115,61 @@ def test_run_synthesis_loop_accepts_injected_prompt_and_query_function():
         mock_client.responses.create = MagicMock(side_effect=[first, second])
         query_fn = MagicMock(return_value=[{"timestamp": 6.0, "score": 0.95}])
 
-        timeline = run_synthesis_loop(
+        result = run_synthesis_loop(
             "source.mp4",
             "make it sharp",
             system_prompt="ACTIVE PROMPT",
             query_clips_fn=query_fn,
         )
 
-        assert timeline[0]["source_timestamp"] == 6.0
+        assert result["shots"][0]["source_timestamp"] == 6.0
         query_fn.assert_called_with("opening strike", "source.mp4", 3)
         assert mock_client.responses.create.call_args_list[0].kwargs["instructions"] == "ACTIVE PROMPT"
+
+
+def test_finish_edit_returns_overlays():
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai, \
+         patch("api.prototyping.edit.synthesis.agent.query_clips"):
+
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        finish = _fake_response(
+            [_function_call(
+                "finish_edit",
+                '{"timeline": [{"start_time": 0, "end_time": 2, "source_timestamp": 5.0}], '
+                '"overlays": [{"skill_id": "text.hook", "text": "no way", '
+                '"start_time": 0.0, "end_time": 1.5}]}',
+                "call_1",
+            )],
+            response_id="resp_1",
+        )
+        mock_client.responses.create = MagicMock(side_effect=[finish])
+
+        result = run_synthesis_loop("dummy.mp4", "make a cool video")
+
+        assert result["overlays"] == [
+            {"skill_id": "text.hook", "text": "no way", "start_time": 0.0, "end_time": 1.5}
+        ]
+
+
+def test_overlay_skill_catalog_injected_into_user_prompt():
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai, \
+         patch("api.prototyping.edit.synthesis.agent.query_clips"):
+
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        finish = _fake_response(
+            [_function_call(
+                "finish_edit",
+                '{"timeline": [{"start_time": 0, "end_time": 2, "source_timestamp": 5.0}]}',
+                "call_1",
+            )],
+            response_id="resp_1",
+        )
+        mock_client.responses.create = MagicMock(side_effect=[finish])
+
+        run_synthesis_loop("dummy.mp4", "make a cool video")
+
+        first_input = mock_client.responses.create.call_args_list[0].kwargs["input"]
+        assert "text.hook" in first_input
+        assert "mask.vignette" in first_input

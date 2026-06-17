@@ -68,6 +68,20 @@ class Markers(BaseModel):
     sections: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class Overlay(BaseModel):
+    """A creative overlay (text/mask) composited over the reel.
+
+    `skill_id` names a registered overlay skill; `params` is the validated
+    parameter dict that skill expects. Optional + back-compat: an older
+    renderer that doesn't know `overlays` simply ignores them.
+    """
+
+    skill_id: str
+    timeline_start_sec: float
+    timeline_end_sec: float
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
 class Timeline(BaseModel):
     schema_version: int = SCHEMA_VERSION
     source: SourceRef
@@ -75,3 +89,4 @@ class Timeline(BaseModel):
     audio: AudioSpec
     shots: list[Shot]
     markers: Markers = Field(default_factory=Markers)
+    overlays: list[Overlay] = Field(default_factory=list)

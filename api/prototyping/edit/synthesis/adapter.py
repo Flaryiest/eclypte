@@ -5,6 +5,7 @@ from .timeline_schema import (
     Effect,
     Markers,
     OutputSpec,
+    Overlay,
     Shot,
     ShotSource,
     SourceRef,
@@ -31,6 +32,7 @@ def adapt(
     output_crop: str = "letterbox",
     crop_focus_x: float = 0.5,
     audio_start_sec: float = 0.0,
+    overlays: list[dict] | None = None,
 ) -> Timeline:
     """
     Convert `run_synthesis_loop` output into a validated renderable Timeline.
@@ -162,10 +164,56 @@ def adapt(
         audio=AudioSpec(path=audio_path, start_sec=round(audio_start_sec, 3)),
         shots=shots,
         markers=Markers(beats_used_sec=beats_used, sections=sections),
+        overlays=_resolve_overlays(overlays or [], round(last_end, 3)),
     )
 
     validate_timeline(timeline, source_duration_sec=source_duration_sec)
     return timeline
+
+
+def _resolve_overlays(raw_overlays: list[dict], duration_sec: float) -> list[Overlay]:
+    """Validate agent overlay specs against the skill registry.
+
+    Overlays are decorative, so a bad one is dropped (with a log) rather than
+    failing the whole edit — mirroring how duplicate shots are dropped above.
+    Each overlay's window is clamped into [0, duration_sec]; its params are
+    validated against the named skill's params model.
+    """
+    from .. import skills  # registry of overlay skills (moviepy-free metadata)
+
+    known = skills.ids()
+    resolved: list[Overlay] = []
+    for raw in raw_overlays:
+        skill_id = str(raw.get("skill_id") or "")
+        if skill_id not in known:
+            print(f"adapter: dropped overlay with unknown skill_id {skill_id!r}")
+            continue
+        try:
+            start = float(raw["start_time"])
+            end = float(raw["end_time"])
+        except (KeyError, TypeError, ValueError):
+            print(f"adapter: dropped overlay {skill_id!r} with missing/invalid timing")
+            continue
+        start = max(0.0, min(start, duration_sec))
+        end = min(end, duration_sec)
+        if end - start <= 0:
+            print(f"adapter: dropped overlay {skill_id!r} with non-positive window")
+            continue
+        candidate = {"text": raw["text"]} if raw.get("text") is not None else {}
+        try:
+            params = skills.get(skill_id).params_model(**candidate).model_dump()
+        except Exception as exc:  # invalid params for this skill
+            print(f"adapter: dropped overlay {skill_id!r} with invalid params: {exc}")
+            continue
+        resolved.append(
+            Overlay(
+                skill_id=skill_id,
+                timeline_start_sec=round(start, 3),
+                timeline_end_sec=round(end, 3),
+                params=params,
+            )
+        )
+    return resolved
 
 
 def snap_shots_to_beats(

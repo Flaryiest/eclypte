@@ -1028,7 +1028,7 @@ class DefaultWorkflowRunner:
         )
         self._append_progress_context(repo, progress_context, 70, "Adapting agent timeline")
         timeline = adapt(
-            agent_output=agent_output,
+            agent_output=agent_output["shots"],
             song=song,
             video=video,
             source_video_path=source_meta.original_filename,
@@ -1037,6 +1037,7 @@ class DefaultWorkflowRunner:
             output_crop=export_options.crop,
             crop_focus_x=export_options.crop_focus_x,
             audio_start_sec=export_options.audio_start_sec,
+            overlays=agent_output["overlays"],
         )
         self._append_progress_context(repo, progress_context, 75, "Validating timeline coverage")
         _validate_agent_timeline_coverage(timeline, song)
@@ -1478,7 +1479,7 @@ def _run_agent_synthesis(
     system_prompt: str,
     query_clips_fn,
     source_duration_sec: float | None = None,
-) -> list[dict]:
+) -> dict:
     from api.prototyping.edit.synthesis.agent import run_synthesis_loop
 
     return run_synthesis_loop(

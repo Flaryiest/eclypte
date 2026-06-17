@@ -57,6 +57,23 @@ def validate_timeline(
                 f"gap/overlap of {gap:.4f}s between shot[{i}] and shot[{i + 1}]"
             )
 
+    if timeline.overlays:
+        from .. import skills  # registry of overlay skills (moviepy-free metadata)
+
+        known_skill_ids = skills.ids()
+        for i, ov in enumerate(timeline.overlays):
+            if ov.skill_id not in known_skill_ids:
+                errors.append(f"overlay[{i}] references unknown skill_id {ov.skill_id!r}")
+            if ov.timeline_start_sec < -GAP_TOLERANCE_SEC:
+                errors.append(f"overlay[{i}] start {ov.timeline_start_sec} is negative")
+            if ov.timeline_end_sec <= ov.timeline_start_sec:
+                errors.append(f"overlay[{i}] has non-positive window")
+            if ov.timeline_end_sec > timeline.output.duration_sec + GAP_TOLERANCE_SEC:
+                errors.append(
+                    f"overlay[{i}] end {ov.timeline_end_sec} exceeds "
+                    f"output.duration_sec {timeline.output.duration_sec}"
+                )
+
     if known_pattern_ids is not None:
         for i, shot in enumerate(timeline.shots):
             refs = list(shot.pattern_refs)
