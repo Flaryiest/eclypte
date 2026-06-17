@@ -14,11 +14,16 @@ TODAY = "2026-06-09"
 class RecordingStarts:
     def __init__(self):
         self.import_calls = []
+        self.analysis_calls = []
         self.edit_calls = []
 
     def start_song_import(self, user_id, url):
         self.import_calls.append((user_id, url))
         return f"run_import_{len(self.import_calls)}"
+
+    def start_music_analysis(self, user_id, *, audio):
+        self.analysis_calls.append((user_id, audio))
+        return f"run_analysis_{len(self.analysis_calls)}"
 
     def start_edit(self, user_id, **kwargs):
         self.edit_calls.append((user_id, kwargs))
@@ -54,6 +59,7 @@ def tick(repo, starts):
         repo,
         user_id=USER,
         start_song_import=starts.start_song_import,
+        start_music_analysis=starts.start_music_analysis,
         start_edit=starts.start_edit,
         now=NOW,
     )
@@ -77,9 +83,9 @@ def make_analysis(duration_sec=120.0, chorus_start=60.0):
     }
 
 
-def publish_song_with_analysis(repo, *, song_version_id="v_song"):
-    """Create a completed music_analysis run + artifact for the test song."""
-    analysis_ref = FileRef(user_id=USER, file_id="file_analysis")
+def publish_analysis_artifact(repo, *, file_id="file_analysis", analysis=None):
+    """Publish a music_analysis artifact, returning (file_id, version_id)."""
+    analysis_ref = FileRef(user_id=USER, file_id=file_id)
     repo.create_file_manifest(
         file_ref=analysis_ref,
         kind="music_analysis",
@@ -87,12 +93,18 @@ def publish_song_with_analysis(repo, *, song_version_id="v_song"):
     )
     version = repo.publish_json(
         file_ref=analysis_ref,
-        data=make_analysis(),
+        data=analysis if analysis is not None else make_analysis(),
         original_filename="song.json",
         created_by_step="test",
         derived_from_step="test",
         input_file_version_ids=[],
     )
+    return analysis_ref.file_id, version.version_id
+
+
+def publish_song_with_analysis(repo, *, song_version_id="v_song"):
+    """Create a completed music_analysis run + artifact for the test song."""
+    file_id, version_id = publish_analysis_artifact(repo)
     run = repo.create_run(
         user_id=USER,
         workflow_type="music_analysis",
@@ -103,8 +115,8 @@ def publish_song_with_analysis(repo, *, song_version_id="v_song"):
         RunRef(user_id=USER, run_id=run.run_id),
         status="completed",
         outputs={
-            "music_analysis_file_id": analysis_ref.file_id,
-            "music_analysis_version_id": version.version_id,
+            "music_analysis_file_id": file_id,
+            "music_analysis_version_id": version_id,
         },
     )
 
@@ -166,22 +178,22 @@ def test_tick_disabled_takes_no_action():
     assert state.items[0].status == "pending"
 
 
-def test_tick_starts_edit_for_pending_item_with_song():
+def test_tick_analyzes_song_without_analysis():
     repo = build_repo()
     starts = RecordingStarts()
     save_state(repo, items=[make_item()])
 
     state = tick(repo, starts)
 
-    assert len(starts.edit_calls) == 1
-    _, kwargs = starts.edit_calls[0]
-    assert kwargs["audio"] == {"file_id": "file_song", "version_id": "v_song"}
-    assert kwargs["export_options"]["format"] == "reels_cinematic"
-    assert "audio_start_sec" not in kwargs["export_options"]
+    # No analysis exists yet, so the tick must run analysis first rather than
+    # starting an untrimmed (full-song) edit.
+    assert starts.edit_calls == []
+    assert starts.analysis_calls == [
+        (USER, {"file_id": "file_song", "version_id": "v_song"})
+    ]
     item = state.items[0]
-    assert item.status == "editing"
-    assert item.edit_run_id == "run_edit_1"
-    assert combo_key("file_video", "file_song", None) in state.used_combos
+    assert item.status == "analyzing"
+    assert item.analysis_run_id == "run_analysis_1"
 
 
 def test_tick_uses_trim_window_from_music_analysis():
@@ -220,6 +232,9 @@ def test_tick_starts_import_for_youtube_item():
 def test_tick_advances_completed_import_to_edit():
     repo = build_repo()
     starts = RecordingStarts()
+    # A real YouTube import records the music analysis in its run outputs, so the
+    # window is available the moment the import completes — no separate analysis pass.
+    analysis_file_id, analysis_version_id = publish_analysis_artifact(repo)
     run = repo.create_run(
         user_id=USER,
         workflow_type="youtube_song_import",
@@ -229,7 +244,12 @@ def test_tick_advances_completed_import_to_edit():
     repo.update_run_status(
         RunRef(user_id=USER, run_id=run.run_id),
         status="completed",
-        outputs={"audio_file_id": "file_song", "audio_version_id": "v_song"},
+        outputs={
+            "audio_file_id": "file_song",
+            "audio_version_id": "v_song",
+            "music_analysis_file_id": analysis_file_id,
+            "music_analysis_version_id": analysis_version_id,
+        },
     )
     item = make_item(
         song_file_id=None,
@@ -243,10 +263,73 @@ def test_tick_advances_completed_import_to_edit():
     state = tick(repo, starts)
 
     assert len(starts.edit_calls) == 1
+    assert starts.analysis_calls == []
+    _, kwargs = starts.edit_calls[0]
+    options = kwargs["export_options"]
+    assert 15.0 <= options["audio_end_sec"] - options["audio_start_sec"] <= 22.0
     updated = state.items[0]
     assert updated.status == "editing"
     assert updated.song_file_id == "file_song"
     assert updated.song_version_id == "v_song"
+
+
+def _complete_analysis_run(repo, *, song_version_id="v_song", analysis=None, file_id="file_analysis"):
+    """Create a completed music_analysis run carrying an analysis artifact."""
+    analysis_file_id, analysis_version_id = publish_analysis_artifact(
+        repo, file_id=file_id, analysis=analysis
+    )
+    run = repo.create_run(
+        user_id=USER,
+        workflow_type="music_analysis",
+        inputs={"audio_version_id": song_version_id},
+        steps=["analyze_music", "publish_analysis"],
+    )
+    repo.update_run_status(
+        RunRef(user_id=USER, run_id=run.run_id),
+        status="completed",
+        outputs={
+            "music_analysis_file_id": analysis_file_id,
+            "music_analysis_version_id": analysis_version_id,
+        },
+    )
+    return run.run_id
+
+
+def test_tick_advances_completed_analysis_to_edit():
+    repo = build_repo()
+    starts = RecordingStarts()
+    analysis_run_id = _complete_analysis_run(repo)
+    item = make_item(status="analyzing", analysis_run_id=analysis_run_id)
+    save_state(repo, items=[item])
+
+    state = tick(repo, starts)
+
+    assert len(starts.edit_calls) == 1
+    _, kwargs = starts.edit_calls[0]
+    options = kwargs["export_options"]
+    assert options["format"] == "reels_cinematic"
+    assert 15.0 <= options["audio_end_sec"] - options["audio_start_sec"] <= 22.0
+    updated = state.items[0]
+    assert updated.status == "editing"
+    assert updated.edit_run_id == "run_edit_1"
+    assert updated.audio_start_sec == options["audio_start_sec"]
+
+
+def test_tick_fails_when_analysis_yields_no_window():
+    repo = build_repo()
+    starts = RecordingStarts()
+    analysis_run_id = _complete_analysis_run(
+        repo, analysis={"schema_version": 1, "source": {"duration_sec": 0.0}}
+    )
+    item = make_item(status="analyzing", analysis_run_id=analysis_run_id)
+    save_state(repo, items=[item])
+
+    state = tick(repo, starts)
+
+    assert starts.edit_calls == []
+    updated = state.items[0]
+    assert updated.status == "failed"
+    assert "trim window" in (updated.last_error or "")
 
 
 def test_tick_packages_completed_edit(monkeypatch):
@@ -326,10 +409,15 @@ def test_tick_respects_daily_target():
 def test_tick_skips_already_used_combo_without_counting_failure():
     repo = build_repo()
     starts = RecordingStarts()
+    # A short song yields exactly one window (0, duration); marking it used means
+    # every window for this pair is exhausted.
+    short_analysis = make_analysis(duration_sec=20.0, chorus_start=0.0)
+    short_analysis["source"]["duration_sec"] = 20.0
+    _complete_analysis_run(repo, analysis=short_analysis)
     save_state(
         repo,
         items=[make_item()],
-        used_combos=[combo_key("file_video", "file_song", None)],
+        used_combos=[combo_key("file_video", "file_song", (0.0, 20.0))],
     )
 
     state = tick(repo, starts)
@@ -385,6 +473,34 @@ def test_autopilot_endpoints_flow(monkeypatch):
     )
     song = publish_artifact(
         repo, user_id="local_dev", file_id="file_song", kind="song_audio", filename="song.wav"
+    )
+    # Pre-seed a completed analysis so the first tick can pick a trim window and
+    # start the edit directly (no separate analyzing pass needed for this flow).
+    analysis_ref = FileRef(user_id="local_dev", file_id="file_song_analysis")
+    repo.create_file_manifest(
+        file_ref=analysis_ref, kind="music_analysis", display_name="song.json"
+    )
+    analysis_version = repo.publish_json(
+        file_ref=analysis_ref,
+        data=make_analysis(),
+        original_filename="song.json",
+        created_by_step="test",
+        derived_from_step="test",
+        input_file_version_ids=[],
+    )
+    analysis_run = repo.create_run(
+        user_id="local_dev",
+        workflow_type="music_analysis",
+        inputs={"audio_version_id": song["version_id"]},
+        steps=["analyze_music", "publish_analysis"],
+    )
+    repo.update_run_status(
+        RunRef(user_id="local_dev", run_id=analysis_run.run_id),
+        status="completed",
+        outputs={
+            "music_analysis_file_id": analysis_ref.file_id,
+            "music_analysis_version_id": analysis_version.version_id,
+        },
     )
 
     health = client.get("/healthz").json()

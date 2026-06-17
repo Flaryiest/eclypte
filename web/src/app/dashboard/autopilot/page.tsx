@@ -389,7 +389,7 @@ function isAutopilotRunUpdate(message: RunStreamMessage) {
 }
 
 function itemTone(status: AutopilotItemStatus) {
-    if (status === "importing" || status === "editing") {
+    if (status === "importing" || status === "analyzing" || status === "editing") {
         return "running" as const
     }
     if (status === "packaged") {
@@ -410,6 +410,9 @@ function itemDetail(item: AutopilotItem) {
     }
     if (item.status === "importing") {
         return "importing song from YouTube"
+    }
+    if (item.status === "analyzing") {
+        return "analyzing song audio"
     }
     if (item.creative_brief) {
         return item.creative_brief

@@ -151,7 +151,13 @@ export type PublishingConfig = {
     buffer_channel: PublishingBufferChannel | null
 }
 
-export type AutopilotItemStatus = "pending" | "importing" | "editing" | "packaged" | "failed"
+export type AutopilotItemStatus =
+    | "pending"
+    | "importing"
+    | "analyzing"
+    | "editing"
+    | "packaged"
+    | "failed"
 
 export type AutopilotItem = {
     item_id: string
@@ -163,6 +169,7 @@ export type AutopilotItem = {
     creative_brief: string
     status: AutopilotItemStatus
     import_run_id: string | null
+    analysis_run_id: string | null
     edit_run_id: string | null
     post_id: string | null
     audio_start_sec: number | null

@@ -770,6 +770,25 @@ def create_app(
             )
             return run.run_id
 
+        def start_music_analysis(uid: str, *, audio: dict[str, str]) -> str:
+            run = create_workflow_run(
+                repo,
+                uid,
+                "music_analysis",
+                {
+                    "audio_file_id": audio["file_id"],
+                    "audio_version_id": audio["version_id"],
+                },
+                ["analyze_music", "publish_analysis"],
+            )
+            schedule(
+                runner.run_music_analysis,
+                user_id=uid,
+                run_id=run.run_id,
+                audio=audio,
+            )
+            return run.run_id
+
         def start_edit(
             uid: str,
             *,
@@ -792,7 +811,7 @@ def create_app(
             job = start_edit_job(request=request, schedule=schedule, repo=repo, uid=uid)
             return job.run_id
 
-        return start_song_import, start_edit
+        return start_song_import, start_music_analysis, start_edit
 
     def autopilot_status_response(state) -> AutopilotStatusResponse:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -802,7 +821,9 @@ def create_app(
             halted_reason=state.halted_reason,
             last_tick_at=state.last_tick_at,
             packaged_today=state.packaged_counts.get(today, 0),
-            in_flight=sum(1 for item in state.items if item.status in {"importing", "editing"}),
+            in_flight=sum(
+                1 for item in state.items if item.status in {"importing", "analyzing", "editing"}
+            ),
             pending=sum(1 for item in state.items if item.status == "pending"),
             items=sorted(state.items, key=lambda item: item.created_at, reverse=True),
             loop_configured=autopilot_loop_configured(),
@@ -815,13 +836,16 @@ def create_app(
         repo = build_background_repository()
         if repo is None:
             return
-        start_song_import, start_edit = autopilot_callables(repo, _spawn_workflow)
+        start_song_import, start_music_analysis, start_edit = autopilot_callables(
+            repo, _spawn_workflow
+        )
         for uid in repo.list_autopilot_user_ids():
             try:
                 run_autopilot_tick(
                     repo,
                     user_id=uid,
                     start_song_import=start_song_import,
+                    start_music_analysis=start_music_analysis,
                     start_edit=start_edit,
                 )
             except Exception:
@@ -1394,11 +1418,14 @@ def create_app(
         repo: StorageRepository = Depends(repository),
         uid: str = Depends(user_id),
     ) -> AutopilotStatusResponse:
-        start_song_import, start_edit = autopilot_callables(repo, background_tasks.add_task)
+        start_song_import, start_music_analysis, start_edit = autopilot_callables(
+            repo, background_tasks.add_task
+        )
         state = run_autopilot_tick(
             repo,
             user_id=uid,
             start_song_import=start_song_import,
+            start_music_analysis=start_music_analysis,
             start_edit=start_edit,
         )
         return autopilot_status_response(state)

@@ -30,7 +30,7 @@ MAX_CONSECUTIVE_FAILURES = 3
 MAX_FINISHED_ITEMS = 50
 PACKAGED_COUNT_RETENTION_DAYS = 14
 
-ACTIVE_ITEM_STATUSES = {"importing", "editing"}
+ACTIVE_ITEM_STATUSES = {"importing", "analyzing", "editing"}
 
 # Serializes state read-modify-write between the tick loop and API routes in
 # this single-replica deployment; R2 has no conditional writes to lean on.
@@ -39,6 +39,10 @@ STATE_LOCK = threading.Lock()
 
 class StartSongImport(Protocol):
     def __call__(self, user_id: str, url: str) -> str: ...
+
+
+class StartMusicAnalysis(Protocol):
+    def __call__(self, user_id: str, *, audio: dict[str, str]) -> str: ...
 
 
 class StartEdit(Protocol):
@@ -139,6 +143,24 @@ def select_trim_windows(
     return [window for _, window in ranked]
 
 
+def _read_analysis_artifact(
+    repo: StorageRepository,
+    *,
+    user_id: str,
+    file_id: str | None,
+    version_id: str | None,
+) -> dict | None:
+    if not file_id or not version_id:
+        return None
+    try:
+        body = repo.read_version_bytes(
+            FileVersionRef(user_id=user_id, file_id=file_id, version_id=version_id)
+        )
+        return json.loads(body.decode("utf-8"))
+    except (KeyError, ValueError):
+        return None
+
+
 def find_music_analysis(
     repo: StorageRepository,
     *,
@@ -158,17 +180,14 @@ def find_music_analysis(
         )
         if not (is_analysis or is_import):
             continue
-        file_id = run.outputs.get("music_analysis_file_id")
-        version_id = run.outputs.get("music_analysis_version_id")
-        if not file_id or not version_id:
-            continue
-        try:
-            body = repo.read_version_bytes(
-                FileVersionRef(user_id=user_id, file_id=file_id, version_id=version_id)
-            )
-            return json.loads(body.decode("utf-8"))
-        except (KeyError, ValueError):
-            continue
+        analysis = _read_analysis_artifact(
+            repo,
+            user_id=user_id,
+            file_id=run.outputs.get("music_analysis_file_id"),
+            version_id=run.outputs.get("music_analysis_version_id"),
+        )
+        if analysis is not None:
+            return analysis
     return None
 
 
@@ -177,6 +196,7 @@ def run_autopilot_tick(
     *,
     user_id: str,
     start_song_import: StartSongImport,
+    start_music_analysis: StartMusicAnalysis,
     start_edit: StartEdit,
     now: datetime | None = None,
 ) -> AutopilotState:
@@ -185,6 +205,7 @@ def run_autopilot_tick(
             repo,
             user_id=user_id,
             start_song_import=start_song_import,
+            start_music_analysis=start_music_analysis,
             start_edit=start_edit,
             now=now,
         )
@@ -195,6 +216,7 @@ def _run_tick_locked(
     *,
     user_id: str,
     start_song_import: StartSongImport,
+    start_music_analysis: StartMusicAnalysis,
     start_edit: StartEdit,
     now: datetime | None,
 ) -> AutopilotState:
@@ -220,46 +242,64 @@ def _run_tick_locked(
             update={"status": "failed", "last_error": error, "updated_at": now_iso}
         )
 
-    def start_edit_for_item(item: AutopilotItem) -> AutopilotItem:
-        nonlocal consecutive_failures
+    def begin_edit_or_analysis(item: AutopilotItem) -> AutopilotItem:
+        """Start the trimmed edit, or kick off music analysis first if missing.
+
+        The trim window is derived from the song's music analysis, so a song
+        without analysis cannot yield a window — starting an edit anyway would
+        render the full song. Instead we run analysis first and pick up the edit
+        on a later tick (the edit pipeline reuses this analysis).
+        """
         if not item.song_file_id or not item.song_version_id:
             return fail_item(item, "item has no song to edit with")
         analysis = find_music_analysis(
             repo, user_id=user_id, song_version_id=item.song_version_id
         )
-        windows = select_trim_windows(analysis)
-        window: tuple[float, float] | None = None
-        if windows:
-            window = next(
-                (
-                    candidate
-                    for candidate in windows
-                    if combo_key(item.source_video_file_id, item.song_file_id, candidate)
-                    not in used_combos
-                ),
-                None,
+        if analysis is None:
+            try:
+                analysis_run_id = start_music_analysis(
+                    user_id,
+                    audio={
+                        "file_id": item.song_file_id,
+                        "version_id": item.song_version_id,
+                    },
+                )
+            except Exception as exc:
+                return fail_item(item, f"failed to start music analysis: {exc}")
+            return item.model_copy(
+                update={
+                    "status": "analyzing",
+                    "analysis_run_id": analysis_run_id,
+                    "updated_at": now_iso,
+                }
             )
-            if window is None:
-                return fail_item(
-                    item,
-                    "every trim window for this video/song pair was already used",
-                    count_failure=False,
-                )
-        else:
-            if (
-                combo_key(item.source_video_file_id, item.song_file_id, None)
-                in used_combos
-            ):
-                return fail_item(
-                    item,
-                    "this video/song pair was already used in full",
-                    count_failure=False,
-                )
+        return start_trimmed_edit(item, analysis)
 
-        export_options: dict[str, object] = {"format": "reels_cinematic"}
-        if window is not None:
-            export_options["audio_start_sec"] = window[0]
-            export_options["audio_end_sec"] = window[1]
+    def start_trimmed_edit(item: AutopilotItem, analysis: dict) -> AutopilotItem:
+        windows = select_trim_windows(analysis)
+        if not windows:
+            return fail_item(item, "music analysis produced no usable trim window")
+        window = next(
+            (
+                candidate
+                for candidate in windows
+                if combo_key(item.source_video_file_id, item.song_file_id, candidate)
+                not in used_combos
+            ),
+            None,
+        )
+        if window is None:
+            return fail_item(
+                item,
+                "every trim window for this video/song pair was already used",
+                count_failure=False,
+            )
+
+        export_options: dict[str, object] = {
+            "format": "reels_cinematic",
+            "audio_start_sec": window[0],
+            "audio_end_sec": window[1],
+        }
 
         title = _edit_title(repo, user_id=user_id, item=item)
         try:
@@ -283,8 +323,8 @@ def _run_tick_locked(
             update={
                 "status": "editing",
                 "edit_run_id": edit_run_id,
-                "audio_start_sec": window[0] if window else None,
-                "audio_end_sec": window[1] if window else None,
+                "audio_start_sec": window[0],
+                "audio_end_sec": window[1],
                 "updated_at": now_iso,
             }
         )
@@ -302,7 +342,7 @@ def _run_tick_locked(
                 if not song_file_id or not song_version_id:
                     items[index] = fail_item(item, "song import completed without audio outputs")
                 else:
-                    items[index] = start_edit_for_item(
+                    items[index] = begin_edit_or_analysis(
                         item.model_copy(
                             update={
                                 "song_file_id": song_file_id,
@@ -311,6 +351,24 @@ def _run_tick_locked(
                             }
                         )
                     )
+        elif item.status == "analyzing" and item.analysis_run_id:
+            run = _load_run(repo, user_id=user_id, run_id=item.analysis_run_id)
+            if run is None or run.status in {"failed", "canceled"}:
+                error = (run.last_error if run else None) or "music analysis did not complete"
+                items[index] = fail_item(item, error)
+            elif run.status == "completed":
+                analysis = _read_analysis_artifact(
+                    repo,
+                    user_id=user_id,
+                    file_id=run.outputs.get("music_analysis_file_id"),
+                    version_id=run.outputs.get("music_analysis_version_id"),
+                )
+                if analysis is None:
+                    items[index] = fail_item(
+                        item, "music analysis completed without an analysis output"
+                    )
+                else:
+                    items[index] = start_trimmed_edit(item, analysis)
         elif item.status == "editing" and item.edit_run_id:
             run = _load_run(repo, user_id=user_id, run_id=item.edit_run_id)
             if run is None or run.status in {"failed", "canceled"}:
@@ -364,7 +422,7 @@ def _run_tick_locked(
                 break
             item = items[next_index]
             if item.song_file_id and item.song_version_id:
-                items[next_index] = start_edit_for_item(item)
+                items[next_index] = begin_edit_or_analysis(item)
             elif item.song_youtube_url:
                 try:
                     import_run_id = start_song_import(user_id, item.song_youtube_url)

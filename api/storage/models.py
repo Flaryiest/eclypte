@@ -26,7 +26,9 @@ PublishingPostStatus = Literal[
     "failed",
     "canceled",
 ]
-AutopilotItemStatus = Literal["pending", "importing", "editing", "packaged", "failed"]
+AutopilotItemStatus = Literal[
+    "pending", "importing", "analyzing", "editing", "packaged", "failed"
+]
 
 
 class DerivedFrom(BaseModel):
@@ -187,6 +189,7 @@ class AutopilotItem(BaseModel):
     creative_brief: str = ""
     status: AutopilotItemStatus = "pending"
     import_run_id: str | None = None
+    analysis_run_id: str | None = None
     edit_run_id: str | None = None
     post_id: str | None = None
     audio_start_sec: float | None = None
