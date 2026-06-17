@@ -37,15 +37,18 @@ def test_plain_cut_returns_clip_unchanged():
     assert apply_transition(None, clip, _shot()) is clip
 
 
-def test_flash_brightens_start_then_decays():
-    clip = apply_transition(None, _clip((10, 10, 10)), _shot(transition="flash"))
+def test_flash_blooms_in_middle_then_returns():
+    clip = apply_transition(None, _clip((100, 100, 100)), _shot(transition="flash"))
 
     assert clip.duration == pytest.approx(DURATION)
     assert tuple(clip.size) == SIZE
-    first = clip.get_frame(0.0)
-    late = clip.get_frame(0.5)
-    assert first.mean() > 150  # blended hard toward white
-    assert late.mean() == pytest.approx(10.0, abs=1.0)  # untouched after the blink
+    start = clip.get_frame(0.0)
+    mid = clip.get_frame(0.06)  # ~middle of the 0.12s bloom
+    after = clip.get_frame(0.5)
+    assert start.mean() == pytest.approx(100.0, abs=2.0)  # eases in, no instant onset
+    assert mid.mean() > start.mean() + 5  # gentle brightness lift peaks mid-bloom
+    assert mid.mean() < 200  # never washes toward white
+    assert after.mean() == pytest.approx(100.0, abs=1.0)  # returns to source after the bloom
 
 
 def test_crossfade_dissolves_from_previous_frame():

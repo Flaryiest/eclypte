@@ -29,7 +29,7 @@ Editorial guidelines (baseline — follow unless the user's instructions overrid
 - Fit the full song. The final shot's end_time MUST equal the song duration (within ~0.5s). Do not stop early.
 - Pace shots against the sections. Denser cuts in high-energy sections (chorus, drop); longer holds in low-energy sections (intro, verse, bridge).
 - The opening is the most important section. The first 1.5 seconds decide whether a viewer stays: open on the single most visually striking moment you can find (an impact frame, a burst of motion, an iconic character moment) — never a slow establishing shot — and land the first cut within ~1.5s. Invest the most creativity at the start; this is what hooks the viewer.
-- Each timeline item may optionally set "transition_in" ("cut" | "flash" | "crossfade") and "effect" ("freeze" | "punch_in"). Use flash on hard musical impacts (a drop or a downbeat slam), punch_in to add life to a longer held shot, and freeze for a dramatic stop on a final hit. Use them sparingly — a few per edit, at musical moments.
+- Each timeline item may optionally set "transition_in" ("cut" | "flash" | "crossfade") and "effect" ("freeze" | "punch_in"). "flash" renders a subtle brightness bloom (a gentle exposure lift, not a white strobe) — use it at most once per edit, only on the single hardest drop, and default to "cut" otherwise. Use punch_in to add life to a longer held shot, and freeze for a dramatic stop on a final hit. Use all of these sparingly, at musical moments.
 - After the opening, plain cut transitions are fine. You do not need to apply creative patterns to every shot — the rest of the edit should carry the story, not show off.
 - Span the full source from beginning to end regardless of song length: the edit must reach the end of the source's actual content (stop before any end-credits or black tail), not just a cluster of early or high-energy moments. A shorter song means fewer, more spread-out shots — not a smaller slice of the film. You may still dwell on or revisit a standout moment.
 - Never select dead frames: black frames, fades-to-black, solid-color frames, logos, title cards, or end credits. These usually sit in the first and last few seconds of the source — do not open or close the edit on them. Every shot must be real content (characters, action, scenery).
@@ -84,7 +84,7 @@ TOOLS = [
                             "transition_in": {
                                 "type": "string",
                                 "enum": ["cut", "flash", "crossfade"],
-                                "description": "Optional transition into this shot (default cut). Use flash on hard musical impacts.",
+                                "description": "Optional transition into this shot (default cut). 'flash' is a subtle brightness bloom, not a white strobe — use at most once per edit, on the single hardest drop.",
                             },
                             "effect": {
                                 "type": "string",
