@@ -186,7 +186,10 @@ Autopilot (review-gated content loop): set `ECLYPTE_AUTOPILOT=1` on the API to
 run the background tick loop (`ECLYPTE_AUTOPILOT_INTERVAL_SEC`, default 300).
 Current per-edit defaults: `reels_cinematic` format (native 1080x1920 with the
 widescreen picture letterboxed in), energy-ranked ~15–22s trim window, agent
-planning, daily target 3 (per-user, adjustable 1–10).
+planning, daily target 3 (per-user, adjustable 1–10). A song without a music
+analysis is analyzed first (`analyzing` state) so the window is always
+energy-ranked, never the full song. An optional per-user `burn_lyrics` toggle
+turns queued edits into synced-lyric reels.
 Without it, advance the queue manually:
 
 ```bash
@@ -216,10 +219,15 @@ PYTHONUTF8=1 modal deploy edit/render_storage_modal.py
 
 Modal snapshots local source at deploy time — pushing to Railway does not
 update deployed apps. Redeploy `eclypte-render-r2` whenever `edit/render/**`,
-`edit/synthesis/timeline_schema.py`, or `edit/synthesis/validators.py` change
-(encode settings, effects/transitions, schema values), or live renders keep
-the old behavior. On Windows the UTF-8 env var matters: without it the Modal
-CLI can die printing Unicode (`'charmap' codec can't encode character`).
+`edit/skills/**`, `edit/synthesis/timeline_schema.py`, or
+`edit/synthesis/validators.py` change (encode settings, effects/transitions,
+overlay skills, schema values), or live renders keep the old behavior — an
+older render image silently drops overlays whose skills it lacks. Redeploy
+`eclypte-video-r2` whenever `video/analysis_cuda.py` or `video/credits.py`
+change (its image bundles `tesseract-ocr` + `pytesseract` for end-credit OCR);
+re-analyze a film afterward to populate the new `credits.content_end_sec`. On
+Windows the UTF-8 env var matters: without it the Modal CLI can die printing
+Unicode (`'charmap' codec can't encode character`).
 
 Music analysis API jobs reuse the existing `eclypte-analysis::analyze_remote`
 Modal function from `api/prototyping/music/analysis_modal.py`.
@@ -304,6 +312,8 @@ python -m pytest api/test_api_v1.py -v
 python -m pytest api/storage -v
 python -m pytest api/prototyping/edit/synthesis/ -v
 python -m pytest api/prototyping/edit/index/ -v
+python -m pytest api/prototyping/edit/skills/ -v
+python -m pytest api/prototyping/video/test_credits.py -v
 ```
 
 `pytest.ini` disables pytest's cache provider and sets tmp-path retention to
