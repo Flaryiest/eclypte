@@ -33,6 +33,7 @@ def adapt(
     crop_focus_x: float = 0.5,
     audio_start_sec: float = 0.0,
     overlays: list[dict] | None = None,
+    content_end_sec: float | None = None,
 ) -> Timeline:
     """
     Convert `run_synthesis_loop` output into a validated renderable Timeline.
@@ -47,6 +48,11 @@ def adapt(
         raise ValueError("agent_output is empty")
 
     source_duration_sec = float(video["source"]["duration_sec"])
+    # Cap the usable source to the detected content end (credit boundary) so no
+    # shot can anchor into the end credits. Falls back to the full source.
+    effective_source_end = source_duration_sec
+    if content_end_sec is not None:
+        effective_source_end = min(source_duration_sec, float(content_end_sec))
 
     ordered = sorted(agent_output, key=lambda s: float(s["start_time"]))
 
@@ -62,13 +68,13 @@ def adapt(
                 f"agent_output[{i}] has non-positive duration: "
                 f"start_time={start_time}, end_time={end_time}"
             )
-        if duration > source_duration_sec:
+        if duration > effective_source_end:
             raise ValueError(
                 f"agent_output[{i}] duration {duration:.3f}s exceeds "
-                f"source video duration {source_duration_sec:.3f}s"
+                f"usable source duration {effective_source_end:.3f}s"
             )
 
-        src_start = max(0.0, min(src_ts, source_duration_sec - duration))
+        src_start = max(0.0, min(src_ts, effective_source_end - duration))
         src_end = src_start + duration
 
         # Optional agent-chosen styling; unknown values fall back to plain cuts.
@@ -139,7 +145,7 @@ def adapt(
     shots, beats_used = snap_shots_to_beats(
         shots,
         [float(b) for b in song.get("beats_sec") or []],
-        source_duration_sec=source_duration_sec,
+        source_duration_sec=effective_source_end,
     )
 
     sections = [
@@ -167,7 +173,7 @@ def adapt(
         overlays=_resolve_overlays(overlays or [], round(last_end, 3)),
     )
 
-    validate_timeline(timeline, source_duration_sec=source_duration_sec)
+    validate_timeline(timeline, source_duration_sec=effective_source_end)
     return timeline
 
 

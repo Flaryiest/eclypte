@@ -181,13 +181,14 @@ Heavy audio landmines:
 - `scenes.py`: PySceneDetect scene boundaries, with whole-clip fallback.
 - `motion.py`: Farneback optical flow, normalized motion curves, camera movement class, stability, and raw signals.
 - `impact.py`: adaptive visual-energy impact/stillness detection.
+- `credits.py`: end-credit detection. `decide_content_end` (pure, unit-tested) finds the dense-text credits block by scanning per-frame OCR word counts backward from the end and returns a conservative `content_end_sec = credits_start − 30s` (with guardrails so mid-film text can't truncate the edit); `detect_content_end` does the tail decode + Tesseract OCR (imports cv2/pytesseract lazily; stays Modal-free like scenes/motion).
 
-`analysis_cuda.py` is the GPU orchestrator. It decodes sequentially and resets previous-frame state at scene boundaries so optical flow does not cross cuts.
+`analysis_cuda.py` is the GPU orchestrator. It decodes sequentially and resets previous-frame state at scene boundaries so optical flow does not cross cuts, then runs `credits.detect_content_end` and adds a `credits` block (`{detected, credits_start_sec, content_end_sec}`) to the `video_analysis` payload. Planning hard-caps the usable source to `content_end_sec`: `_run_agent_timeline_plan` passes it as the agent's source duration, into `adapt(content_end_sec=...)` (clamps every shot's source range), and filters CLIP `query_clips` results beyond it. Older analyses without `credits` fall back to full duration.
 
 Modal apps:
 
 - `api/prototyping/video/analysis_modal.py`: volume-based prototype app `eclypte-video`.
-- `api/prototyping/video/storage_modal.py`: R2-aware API app `eclypte-video-r2`, function `analyze_r2`.
+- `api/prototyping/video/storage_modal.py`: R2-aware API app `eclypte-video-r2`, function `analyze_r2`. Its image bundles `tesseract-ocr` + `pytesseract` (for credit OCR) and `add_local_python_source(... "credits" ...)`; redeploy `eclypte-video-r2` after changing `analysis_cuda.py`/`credits.py` (re-analyze a film to populate the new `credits` block).
 
 OpenCV-CUDA has no friendly local wheel path. Keep CUDA/OpenCV build complexity inside Modal unless the task explicitly asks for dependency work.
 

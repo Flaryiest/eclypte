@@ -974,6 +974,11 @@ class DefaultWorkflowRunner:
             end_sec=export_options.audio_end_sec,
         )
         video = _read_json_version(repo, video_ref)
+        # End credits are excluded by capping the usable source at the detected
+        # content end (video analysis credit detection); fall back to full source.
+        content_end_sec = (video.get("credits") or {}).get("content_end_sec") or float(
+            video["source"]["duration_sec"]
+        )
 
         repo.update_run_status(run_ref, status="running", current_step="ensure_clip_index")
         self._append_progress_context(repo, progress_context, 15, "Checking CLIP index")
@@ -1009,12 +1014,14 @@ class DefaultWorkflowRunner:
         r2_config = self._r2_config_payload()
 
         def query_clip_index(query: str, _video_filename: str, top_k: int = 5) -> list[dict]:
-            return _query_clip_index_r2(
+            results = _query_clip_index_r2(
                 r2_config=r2_config,
                 index_key=clip_meta.storage_key,
                 query=query,
                 top_k=top_k,
             )
+            # Never offer credit-region timestamps to the agent.
+            return [r for r in results if float(r.get("timestamp", 0.0)) <= content_end_sec]
 
         creative_brief = str(kwargs.get("creative_brief") or "").strip() or DEFAULT_CREATIVE_BRIEF
         self._append_progress_context(repo, progress_context, 55, "Running agent timeline planner")
@@ -1024,7 +1031,7 @@ class DefaultWorkflowRunner:
             song=song,
             system_prompt=active_prompt.prompt_text,
             query_clips_fn=query_clip_index,
-            source_duration_sec=float(video["source"]["duration_sec"]),
+            source_duration_sec=content_end_sec,
         )
         self._append_progress_context(repo, progress_context, 70, "Adapting agent timeline")
         timeline = adapt(
@@ -1038,6 +1045,7 @@ class DefaultWorkflowRunner:
             crop_focus_x=export_options.crop_focus_x,
             audio_start_sec=export_options.audio_start_sec,
             overlays=agent_output["overlays"],
+            content_end_sec=content_end_sec,
         )
         self._append_progress_context(repo, progress_context, 75, "Validating timeline coverage")
         _validate_agent_timeline_coverage(timeline, song)

@@ -75,6 +75,25 @@ def test_adapt_drops_overlay_with_nonpositive_window():
     assert tl.overlays == []
 
 
+def test_adapt_clamps_source_range_to_content_end():
+    # Shots anchored deep in the source must be pulled back so their source
+    # range never crosses content_end_sec (the credit boundary).
+    shots = [
+        {"start_time": 0.0, "end_time": 2.0, "source_timestamp": 290.0},
+        {"start_time": 2.0, "end_time": 4.0, "source_timestamp": 250.0},
+    ]
+    tl = adapt(shots, SONG, VIDEO, SRC_PATH, AUDIO_PATH, content_end_sec=200.0)
+    for shot in tl.shots:
+        assert shot.source.end_sec <= 200.0 + 1e-6
+
+
+def test_adapt_without_content_end_uses_full_source():
+    shots = [{"start_time": 0.0, "end_time": 2.0, "source_timestamp": 290.0}]
+    tl = adapt(shots, SONG, VIDEO, SRC_PATH, AUDIO_PATH)
+    # Anchor near the end stays near the end (clamped only by full source length).
+    assert tl.shots[0].source.end_sec > 200.0
+
+
 def test_basic_adapt():
     tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH)
 
@@ -161,7 +180,7 @@ def test_non_positive_duration_raises():
 
 def test_duration_exceeds_source_raises():
     agent = [{"start_time": 0.0, "end_time": 400.0, "source_timestamp": 0.0}]
-    with pytest.raises(ValueError, match="exceeds source video duration"):
+    with pytest.raises(ValueError, match="exceeds usable source duration"):
         adapt(agent, SONG, VIDEO, SRC_PATH, AUDIO_PATH)
 
 

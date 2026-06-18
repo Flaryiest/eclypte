@@ -7,6 +7,7 @@ import numpy as np
 from scenes import detect_scenes
 from motion import build_motion_dict, flow_stats, to_gray_small
 from impact import impacts_per_scene
+from credits import detect_content_end
 
 SCHEMA_VERSION = 1
 
@@ -86,9 +87,25 @@ def analyze_cuda(video_path, out_path=None, progress_callback=None):
         )
         impacts = impacts_per_scene((start_sec, end_sec), motion, fps_hz)
         scene_dicts.append(_assemble_scene(i, start_sec, end_sec, motion, impacts))
-    _report(progress_callback, 95, "Assembled video analysis")
+    _report(progress_callback, 95, "Detecting end credits")
+    try:
+        credits = detect_content_end(video_path, src_meta["duration_sec"], fps_hz)
+    except Exception as exc:  # OCR is best-effort; never fail analysis for it
+        print(f"[analysis_cuda] credit detection failed: {exc}")
+        credits = {
+            "credits_detected": False,
+            "credits_start_sec": None,
+            "content_end_sec": src_meta["duration_sec"],
+        }
+    print(f"[analysis_cuda] content_end_sec={credits['content_end_sec']} "
+          f"(credits_detected={credits['credits_detected']})")
 
-    result = {"schema_version": SCHEMA_VERSION, "source": src_meta, "scenes": scene_dicts}
+    result = {
+        "schema_version": SCHEMA_VERSION,
+        "source": src_meta,
+        "scenes": scene_dicts,
+        "credits": credits,
+    }
     if out_path:
         Path(out_path).write_text(json.dumps(result, indent=2))
     _report(progress_callback, 100, "Video analysis complete")
