@@ -12,7 +12,6 @@ image = (
         "ffmpeg", "git", "cmake", "build-essential", "pkg-config",
         "libavcodec-dev", "libavformat-dev", "libswscale-dev",
         "libjpeg-dev", "libpng-dev",
-        "tesseract-ocr",  # end-credit OCR (credits.detect_content_end)
     )
     .pip_install("numpy")
     .run_commands(
@@ -32,6 +31,9 @@ image = (
         "cd /opt/opencv/build && make -j$(nproc) && make install && ldconfig",
         "rm -rf /opt/opencv /opt/opencv_contrib",
     )
+    # Installed AFTER the OpenCV build so adding it never invalidates that
+    # expensive cached layer. end-credit OCR (credits.detect_content_end).
+    .apt_install("tesseract-ocr")
     .pip_install("scenedetect", "boto3", "pytesseract")
     .add_local_python_source("analysis_cuda", "scenes", "motion", "impact", "credits", "modal_s3", "progress_events")
 )
