@@ -20,6 +20,29 @@ def _lyrics_path() -> Path:
     return Path("./content/lyrics.txt")
 
 
+# A real synced LRC has at least one [mm:ss] timestamp; plain lyrics don't.
+_LRC_TIMESTAMP_RE = re.compile(r"\[\d{1,3}:\d{2}")
+
+
+def search_synced_lyrics(query: str) -> str | None:
+    """Return a synced LRC string for `query`, or None if unavailable.
+
+    Best-effort: any provider/network error returns None. Plain (unsynced)
+    lyrics are rejected — only timestamped LRC is useful for video overlays.
+    """
+    cleaned = _clean_query(query or "")
+    if not cleaned:
+        return None
+    try:
+        with _local_syncedlyrics_cache():
+            lrc = syncedlyrics.search(cleaned)
+    except Exception:
+        return None
+    if not lrc or not _LRC_TIMESTAMP_RE.search(lrc):
+        return None
+    return lrc
+
+
 @contextmanager
 def _local_syncedlyrics_cache():
     if os.name != "nt":

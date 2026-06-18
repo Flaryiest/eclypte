@@ -182,6 +182,7 @@ export type AutopilotItem = {
 export type AutopilotStatus = {
     enabled: boolean
     daily_target: number
+    burn_lyrics: boolean
     halted_reason: string | null
     last_tick_at: string | null
     packaged_today: number
@@ -281,6 +282,7 @@ export type EditJobRequest = {
     creativeBrief?: string
     title?: string
     exportOptions?: ExportOptions
+    burnLyrics?: boolean
 }
 
 export type DownloadUrlResponse = {
@@ -471,7 +473,7 @@ export class EclypteApiClient {
     }
 
     async updateAutopilot(
-        input: { enabled?: boolean; dailyTarget?: number; clearHalt?: boolean },
+        input: { enabled?: boolean; dailyTarget?: number; burnLyrics?: boolean; clearHalt?: boolean },
         signal?: AbortSignal,
     ) {
         return this.request<AutopilotStatus>("/v1/autopilot", {
@@ -479,6 +481,7 @@ export class EclypteApiClient {
             body: JSON.stringify({
                 enabled: input.enabled,
                 daily_target: input.dailyTarget,
+                burn_lyrics: input.burnLyrics,
                 clear_halt: input.clearHalt ?? false,
             }),
             signal,
@@ -629,6 +632,7 @@ export class EclypteApiClient {
                 creative_brief: input.creativeBrief,
                 title: input.title,
                 export_options: serializeExportOptions(input.exportOptions),
+                burn_lyrics: input.burnLyrics ?? false,
             }),
             signal,
         })

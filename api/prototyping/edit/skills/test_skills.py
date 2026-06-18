@@ -30,3 +30,9 @@ def test_vignette_strength_defaults_and_rejects_out_of_range():
     assert skill.params_model().strength == pytest.approx(0.6)
     with pytest.raises(Exception):
         skill.params_model(strength=2.0)
+
+
+def test_text_lyric_registered():
+    skill = skills.get("text.lyric")
+    assert skill.description.strip()
+    assert skill.params_model(text="a line").text == "a line"

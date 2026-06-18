@@ -178,6 +178,7 @@ class EditJobRequest(BaseModel):
     creative_brief: str = ""
     title: str | None = None
     export_options: ExportOptionsInput | None = None
+    burn_lyrics: bool = False
 
 
 class InternalProgressRequest(BaseModel):
@@ -296,12 +297,14 @@ class AutopilotQueueRequest(BaseModel):
 class AutopilotUpdateRequest(BaseModel):
     enabled: bool | None = None
     daily_target: int | None = Field(default=None, ge=1, le=10)
+    burn_lyrics: bool | None = None
     clear_halt: bool = False
 
 
 class AutopilotStatusResponse(BaseModel):
     enabled: bool
     daily_target: int
+    burn_lyrics: bool
     halted_reason: str | None
     last_tick_at: str | None
     packaged_today: int
@@ -717,6 +720,7 @@ def create_app(
                 "source_video_version_id": request.source_video.version_id,
                 "planning_mode": request.planning_mode,
                 "creative_brief": request.creative_brief,
+                "burn_lyrics": str(request.burn_lyrics).lower(),
                 **export_options.as_run_inputs(),
             },
             EDIT_STAGE_ORDER,
@@ -731,6 +735,7 @@ def create_app(
             creative_brief=request.creative_brief,
             title=title,
             export_options=export_options.as_payload(),
+            burn_lyrics=request.burn_lyrics,
         )
         return edit_status_from_run(repo, uid, run)
 
@@ -797,6 +802,7 @@ def create_app(
             creative_brief: str,
             title: str,
             export_options: dict[str, object] | None,
+            burn_lyrics: bool = False,
         ) -> str:
             request = EditJobRequest(
                 audio=FileVersionInput(**audio),
@@ -807,6 +813,7 @@ def create_app(
                 export_options=(
                     ExportOptionsInput(**export_options) if export_options else None
                 ),
+                burn_lyrics=burn_lyrics,
             )
             job = start_edit_job(request=request, schedule=schedule, repo=repo, uid=uid)
             return job.run_id
@@ -818,6 +825,7 @@ def create_app(
         return AutopilotStatusResponse(
             enabled=state.enabled,
             daily_target=state.daily_target,
+            burn_lyrics=state.burn_lyrics,
             halted_reason=state.halted_reason,
             last_tick_at=state.last_tick_at,
             packaged_today=state.packaged_counts.get(today, 0),
@@ -1338,6 +1346,8 @@ def create_app(
                 update["enabled"] = request.enabled
             if request.daily_target is not None:
                 update["daily_target"] = request.daily_target
+            if request.burn_lyrics is not None:
+                update["burn_lyrics"] = request.burn_lyrics
             if request.clear_halt:
                 update["halted_reason"] = None
                 update["consecutive_failures"] = 0

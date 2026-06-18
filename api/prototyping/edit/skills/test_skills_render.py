@@ -49,6 +49,20 @@ def test_text_hook_layer_timing_and_fits_width(ctx):
     assert layer.size[0] <= OUTPUT_SIZE[0]
 
 
+def test_text_lyric_layer_timing(ctx):
+    overlay = ResolvedOverlay(
+        skill_id="text.lyric",
+        timeline_start_sec=1.0,
+        timeline_end_sec=3.5,
+        params={"text": "we were the kings"},
+    )
+    layers = skills.get("text.lyric").build_layers(overlay, ctx)
+    assert len(layers) == 1
+    assert layers[0].start == pytest.approx(1.0)
+    assert layers[0].duration == pytest.approx(2.5)
+    assert layers[0].size[0] <= OUTPUT_SIZE[0]
+
+
 def test_vignette_layer_matches_output_size(ctx):
     overlay = ResolvedOverlay(
         skill_id="mask.vignette",

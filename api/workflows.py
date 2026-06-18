@@ -177,6 +177,7 @@ class DefaultWorkflowRunner:
                 planning_mode=planning_mode,
                 creative_brief=creative_brief,
                 export_options=export_options,
+                burn_lyrics=bool(kwargs.get("burn_lyrics", False)),
                 allow_deterministic_fallback=bool(
                     kwargs.get("allow_deterministic_timeline_fallback", False)
                 ),
@@ -423,6 +424,7 @@ class DefaultWorkflowRunner:
         planning_mode: str,
         creative_brief: str,
         export_options: dict | None,
+        burn_lyrics: bool = False,
         allow_deterministic_fallback: bool = False,
     ) -> dict[str, str]:
         resolved_export = resolve_export_options(export_options, max_duration_sec=None)
@@ -461,6 +463,7 @@ class DefaultWorkflowRunner:
                 creative_brief=creative_brief,
                 max_duration_sec=None,
                 export_options=resolved_export.as_payload(),
+                burn_lyrics=burn_lyrics,
                 progress_context=self._progress_context(
                     user_id=user_id,
                     run_id=parent_ref.run_id,
@@ -613,13 +616,23 @@ class DefaultWorkflowRunner:
                 input_file_version_ids=[audio_ref.version_id],
                 derived_from_run_id=run_id,
             )
+            outputs = {
+                "music_analysis_file_id": file_ref.file_id,
+                "music_analysis_version_id": version.version_id,
+            }
+            lyrics_outputs = _publish_song_lyrics(
+                repo,
+                user_id=user_id,
+                run_id=run_id,
+                audio_version_id=audio_ref.version_id,
+                query=Path(audio_meta.original_filename).stem,
+            )
+            if lyrics_outputs:
+                outputs.update(lyrics_outputs)
             repo.update_run_status(
                 RunRef(user_id=user_id, run_id=run_id),
                 status="completed",
-                outputs={
-                    "music_analysis_file_id": file_ref.file_id,
-                    "music_analysis_version_id": version.version_id,
-                },
+                outputs=outputs,
             )
         except Exception as exc:
             self._mark_failed(repo, user_id, run_id, exc)
@@ -703,15 +716,25 @@ class DefaultWorkflowRunner:
                 input_file_version_ids=[audio_version.version_id],
                 derived_from_run_id=run_id,
             )
+            outputs = {
+                "audio_file_id": audio_ref.file_id,
+                "audio_version_id": audio_version.version_id,
+                "music_analysis_file_id": analysis_ref.file_id,
+                "music_analysis_version_id": analysis_version.version_id,
+            }
+            lyrics_outputs = _publish_song_lyrics(
+                repo,
+                user_id=user_id,
+                run_id=run_id,
+                audio_version_id=audio_version.version_id,
+                query=title,
+            )
+            if lyrics_outputs:
+                outputs.update(lyrics_outputs)
             repo.update_run_status(
                 RunRef(user_id=user_id, run_id=run_id),
                 status="completed",
-                outputs={
-                    "audio_file_id": audio_ref.file_id,
-                    "audio_version_id": audio_version.version_id,
-                    "music_analysis_file_id": analysis_ref.file_id,
-                    "music_analysis_version_id": analysis_version.version_id,
-                },
+                outputs=outputs,
             )
             repo.append_run_progress(
                 run_ref=RunRef(user_id=user_id, run_id=run_id),
@@ -897,6 +920,38 @@ class DefaultWorkflowRunner:
         )
         return music_ref, video_ref, audio_ref, source_ref
 
+    def _build_lyric_overlays(
+        self,
+        repo: StorageRepository,
+        user_id: str,
+        audio_ref: FileVersionRef,
+        audio_meta,
+        export_options,
+    ) -> list[dict]:
+        """Expand the song's synced lyrics into windowed `text.lyric` overlays.
+
+        Uses the stored `lyrics` asset when present, else an on-demand fetch by
+        the song name (so songs imported before lyrics existed still work).
+        Returns [] when no synced lyrics are available.
+        """
+        from api.prototyping.edit.synthesis.lyrics import (
+            expand_lyrics_overlays,
+            parse_lrc,
+        )
+
+        lrc = _find_song_lyrics_lrc(repo, user_id=user_id, audio_version_id=audio_ref.version_id)
+        if not lrc:
+            from api.prototyping.music.lyrics import search_synced_lyrics
+
+            lrc = search_synced_lyrics(Path(audio_meta.original_filename).stem)
+        if not lrc:
+            return []
+        return expand_lyrics_overlays(
+            parse_lrc(lrc),
+            export_options.audio_start_sec,
+            export_options.audio_end_sec,
+        )
+
     def _run_deterministic_timeline_plan(
         self,
         repo: StorageRepository,
@@ -979,6 +1034,12 @@ class DefaultWorkflowRunner:
         content_end_sec = (video.get("credits") or {}).get("content_end_sec") or float(
             video["source"]["duration_sec"]
         )
+        # Optional data-driven lyric overlays (deterministic, not agent-placed).
+        lyric_overlays = (
+            self._build_lyric_overlays(repo, user_id, audio_ref, audio_meta, export_options)
+            if kwargs.get("burn_lyrics")
+            else []
+        )
 
         repo.update_run_status(run_ref, status="running", current_step="ensure_clip_index")
         self._append_progress_context(repo, progress_context, 15, "Checking CLIP index")
@@ -1044,7 +1105,7 @@ class DefaultWorkflowRunner:
             output_crop=export_options.crop,
             crop_focus_x=export_options.crop_focus_x,
             audio_start_sec=export_options.audio_start_sec,
-            overlays=agent_output["overlays"],
+            overlays=agent_output["overlays"] + lyric_overlays,
             content_end_sec=content_end_sec,
         )
         self._append_progress_context(repo, progress_context, 75, "Validating timeline coverage")
@@ -1419,6 +1480,87 @@ def _read_json_version(repo: StorageRepository, version_ref: FileVersionRef) -> 
     import json
 
     return json.loads(repo.read_version_bytes(version_ref).decode("utf-8"))
+
+
+def _publish_song_lyrics(
+    repo: StorageRepository,
+    *,
+    user_id: str,
+    run_id: str,
+    audio_version_id: str,
+    query: str,
+) -> dict[str, str] | None:
+    """Best-effort: fetch a synced LRC for `query` and publish a `lyrics` asset.
+
+    Returns lyrics output refs on success, or None when no synced lyrics exist or
+    anything fails — lyrics are optional and must never break a run.
+    """
+    try:
+        from api.prototyping.music.lyrics import search_synced_lyrics
+
+        lrc = search_synced_lyrics(query)
+        if not lrc:
+            return None
+        file_ref = FileRef(user_id=user_id, file_id=f"file_lyrics_{run_id}")
+        repo.create_file_manifest(
+            file_ref=file_ref,
+            kind="lyrics",
+            display_name=f"lyrics: {query}"[:120],
+            source_run_id=run_id,
+        )
+        version = repo.publish_bytes(
+            file_ref=file_ref,
+            body=lrc.encode("utf-8"),
+            content_type="text/plain",
+            original_filename="lyrics.lrc",
+            created_by_step="fetch_lyrics",
+            derived_from_step="fetch_lyrics",
+            input_file_version_ids=[audio_version_id],
+            derived_from_run_id=run_id,
+        )
+        return {"lyrics_file_id": file_ref.file_id, "lyrics_version_id": version.version_id}
+    except Exception as exc:  # network/provider/storage — never fail the run
+        print(f"[workflows] lyrics fetch failed for {query!r}: {exc}")
+        return None
+
+
+def _find_song_lyrics_lrc(
+    repo: StorageRepository,
+    *,
+    user_id: str,
+    audio_version_id: str,
+) -> str | None:
+    """Return the stored synced LRC for a song, or None.
+
+    Mirrors lyrics-output discovery: a completed youtube_song_import (by output
+    audio_version_id) or music_analysis (by input audio_version_id) run that
+    carries `lyrics_file_id`/`lyrics_version_id`.
+    """
+    for run in repo.list_run_manifests(user_id):
+        if run.status != "completed":
+            continue
+        is_import = (
+            run.workflow_type == "youtube_song_import"
+            and run.outputs.get("audio_version_id") == audio_version_id
+        )
+        is_analysis = (
+            run.workflow_type == "music_analysis"
+            and run.inputs.get("audio_version_id") == audio_version_id
+        )
+        if not (is_import or is_analysis):
+            continue
+        file_id = run.outputs.get("lyrics_file_id")
+        version_id = run.outputs.get("lyrics_version_id")
+        if not file_id or not version_id:
+            continue
+        try:
+            body = repo.read_version_bytes(
+                FileVersionRef(user_id=user_id, file_id=file_id, version_id=version_id)
+            )
+            return body.decode("utf-8")
+        except (KeyError, ValueError):
+            continue
+    return None
 
 
 # Bump this when the CLIP index format changes so older indexes are rebuilt once
