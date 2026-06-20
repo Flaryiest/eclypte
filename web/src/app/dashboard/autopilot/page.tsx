@@ -68,7 +68,7 @@ export default function AutopilotPage() {
         refresh: loadAutopilot,
     })
 
-    const updateAutopilot = async (input: { enabled?: boolean; dailyTarget?: number; burnLyrics?: boolean; clearHalt?: boolean }) => {
+    const updateAutopilot = async (input: { enabled?: boolean; dailyTarget?: number; clearHalt?: boolean }) => {
         if (!api) {
             return
         }
@@ -233,17 +233,6 @@ export default function AutopilotPage() {
                                     <option key={value} value={value}>{value} per day</option>
                                 ))}
                             </select>
-                        </label>
-                        <label
-                            className={styles.fieldLabel}
-                            style={{ flexDirection: "row", alignItems: "center", gap: "0.5rem" }}
-                        >
-                            <input
-                                type="checkbox"
-                                checked={autopilot?.burn_lyrics ?? false}
-                                onChange={(event) => updateAutopilot({ burnLyrics: event.target.checked })}
-                            />
-                            Burn synced lyrics
                         </label>
                         <button
                             className={autopilot?.enabled ? styles.secondaryButton : styles.primaryButton}

@@ -188,8 +188,7 @@ Current per-edit defaults: `reels_cinematic` format (native 1080x1920 with the
 widescreen picture letterboxed in), energy-ranked ~15–22s trim window, agent
 planning, daily target 3 (per-user, adjustable 1–10). A song without a music
 analysis is analyzed first (`analyzing` state) so the window is always
-energy-ranked, never the full song. An optional per-user `burn_lyrics` toggle
-turns queued edits into synced-lyric reels.
+energy-ranked, never the full song.
 Without it, advance the queue manually:
 
 ```bash

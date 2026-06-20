@@ -55,7 +55,6 @@ class StartEdit(Protocol):
         creative_brief: str,
         title: str,
         export_options: dict[str, object] | None,
-        burn_lyrics: bool,
     ) -> str: ...
 
 
@@ -314,7 +313,6 @@ def _run_tick_locked(
                 creative_brief=item.creative_brief,
                 title=title,
                 export_options=export_options,
-                burn_lyrics=state.burn_lyrics,
             )
         except Exception as exc:
             return fail_item(item, f"failed to start edit: {exc}")

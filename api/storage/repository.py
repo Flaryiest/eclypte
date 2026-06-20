@@ -778,6 +778,10 @@ class StorageRepository:
             data = self._store.get_json(autopilot_state_key(user_id=user_id))
         except KeyError:
             return AutopilotState(owner_user_id=user_id, updated_at=_utc_now())
+        # Drop the removed `burn_lyrics` field so state persisted before the
+        # lyric-overlay feature was removed still loads under extra="forbid".
+        if isinstance(data, dict):
+            data.pop("burn_lyrics", None)
         return AutopilotState.model_validate(data)
 
     def save_autopilot_state(self, state: AutopilotState) -> AutopilotState:

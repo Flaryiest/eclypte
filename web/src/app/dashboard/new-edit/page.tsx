@@ -48,7 +48,6 @@ export default function NewEditPage() {
     const [audioEndSec, setAudioEndSec] = useState(0)
     const [cropFocusX, setCropFocusX] = useState(0.5)
     const [creativeBrief, setCreativeBrief] = useState("")
-    const [burnLyrics, setBurnLyrics] = useState(false)
     const [title, setTitle] = useState("")
     const [error, setError] = useState<string | null>(null)
     const [mediaStatus, setMediaStatus] = useState<string | null>(null)
@@ -251,7 +250,6 @@ export default function NewEditPage() {
                     audioEndSec: songDurationSec === null ? null : audioEndSec,
                     cropFocusX,
                 },
-                burnLyrics,
             })
             setJobs((current) => [job, ...current.filter((item) => item.run_id !== job.run_id)])
             setTitle("")
@@ -621,20 +619,6 @@ export default function NewEditPage() {
                                     placeholder="Fast hook, cinematic pacing, follow the character arc."
                                     disabled={isCreating}
                                 />
-                            </label>
-                        )}
-                        {planningMode === "agent" && (
-                            <label
-                                className={styles.fieldLabel}
-                                style={{ flexDirection: "row", alignItems: "center", gap: "0.5rem" }}
-                            >
-                                <input
-                                    type="checkbox"
-                                    checked={burnLyrics}
-                                    onChange={(event) => setBurnLyrics(event.target.checked)}
-                                    disabled={isCreating}
-                                />
-                                Burn synced lyrics (when available)
                             </label>
                         )}
                     </div>

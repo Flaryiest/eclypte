@@ -205,7 +205,6 @@ class AutopilotState(BaseModel):
     owner_user_id: str
     enabled: bool = False
     daily_target: int = Field(default=3, ge=1, le=10)
-    burn_lyrics: bool = False
     items: list[AutopilotItem] = Field(default_factory=list)
     used_combos: list[str] = Field(default_factory=list)
     consecutive_failures: int = 0
