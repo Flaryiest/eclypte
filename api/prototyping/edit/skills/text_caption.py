@@ -11,7 +11,8 @@ class TextCaption(OverlaySkill):
     id = "text.caption"
     description = (
         "Smaller centered caption near the bottom (inside the Instagram safe "
-        "area) for a short supporting line. Param: text."
+        "area) for a short supporting line. Only use when the brief explicitly "
+        "asks for on-screen text; otherwise omit it. Param: text."
     )
     params_model = TextParams
 

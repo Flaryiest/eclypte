@@ -168,10 +168,11 @@ def _format_overlay_skills() -> str:
     for entry in skills.agent_catalog():
         lines.append(f"- {entry['id']}: {entry['description']}")
     lines.append(
-        "Use overlays sparingly and only when they add to the edit. Put any hook "
-        "text in the first ~1.5s, keep text short and legible, and give each "
-        "overlay a start_time/end_time inside the song duration. text.* skills "
-        "need a `text` value; mask.* skills do not."
+        "Do not add any overlay by default — most edits should ship with NO "
+        "overlays at all. Only add a text overlay when the user's brief "
+        "explicitly asks for on-screen text. When you do, keep it short and "
+        "legible and give each overlay a start_time/end_time inside the song "
+        "duration. text.* skills need a `text` value; mask.* skills do not."
     )
     return "\n".join(lines)
 

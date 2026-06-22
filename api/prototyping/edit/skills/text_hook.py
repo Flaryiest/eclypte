@@ -10,9 +10,9 @@ STYLE = TextStyle(size_frac=0.075, rel_y=0.17, align="center", stroke_frac=0.08)
 class TextHook(OverlaySkill):
     id = "text.hook"
     description = (
-        "Large centered hook line in the upper third — the punchy opening "
-        "statement that makes a viewer stay. Use once, early (within the first "
-        "~1.5s), with a few words at most. Param: text."
+        "Large centered hook line in the upper third. Only use when the brief "
+        "explicitly asks for on-screen hook text; otherwise omit it. A few words "
+        "at most. Param: text."
     )
     params_model = TextParams
 

@@ -11,7 +11,8 @@ class TextLowerThird(OverlaySkill):
     id = "text.lower_third"
     description = (
         "Left-aligned lower-third label (a name, place, or tag) sitting above "
-        "the bottom safe area. Param: text."
+        "the bottom safe area. Only use when the brief explicitly asks for "
+        "on-screen text; otherwise omit it. Param: text."
     )
     params_model = TextParams
 
