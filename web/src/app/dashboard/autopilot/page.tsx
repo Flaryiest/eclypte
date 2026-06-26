@@ -1,27 +1,24 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Bot, Pause, Play, Plus, RefreshCw, Trash2, Zap } from "lucide-react"
-import { DashboardPage, StatusBadge, errorMessage, formatDate, isAbortError, useAbortableLoad } from "../dashboardCommon"
+import { DashboardPage, StatusBadge, errorMessage, formatDate } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import { useRunStream } from "../useRunStream"
 import {
     AssetSummary,
     AutopilotItem,
     AutopilotItemStatus,
-    AutopilotStatus,
     EclypteApiClient,
     RunStreamMessage,
 } from "@/services/eclypteApi"
+import { useAssets, useAutopilot } from "@/stores/dashboardResources"
 
 type SongMode = "asset" | "youtube"
 
 export default function AutopilotPage() {
     const { isLoaded, isSignedIn, user } = useUser()
-    const [autopilot, setAutopilot] = useState<AutopilotStatus | null>(null)
-    const [videos, setVideos] = useState<AssetSummary[]>([])
-    const [songs, setSongs] = useState<AssetSummary[]>([])
     const [selectedVideoId, setSelectedVideoId] = useState("")
     const [songMode, setSongMode] = useState<SongMode>("asset")
     const [selectedSongId, setSelectedSongId] = useState("")
@@ -33,32 +30,21 @@ export default function AutopilotPage() {
     const [isTicking, setIsTicking] = useState(false)
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
-
-    const loadAutopilot = useAbortableLoad(async (signal) => {
-        if (!api) {
-            return
-        }
-        setError(null)
-        try {
-            const [nextStatus, nextVideos, nextSongs] = await Promise.all([
-                api.getAutopilot(signal),
-                api.listAssets("source_video", signal),
-                api.listAssets("song_audio", signal),
-            ])
-            setAutopilot(nextStatus)
-            setVideos(nextVideos)
-            setSongs(nextSongs)
-        } catch (caught) {
-            if (isAbortError(caught)) {
-                return
-            }
-            setError(errorMessage(caught))
-        }
-    })
-
-    useEffect(() => {
-        loadAutopilot()
-    }, [api, loadAutopilot])
+    const autopilotResource = useAutopilot(api)
+    const autopilot = autopilotResource.data ?? null
+    const setAutopilot = autopilotResource.set
+    // Shares the cached library with assets/new-edit; archived assets are dropped below.
+    const assetsResource = useAssets(api, { includeArchived: true })
+    const assets = assetsResource.data ?? []
+    const videos = assets.filter((asset) => asset.kind === "source_video" && asset.current_version_id && !asset.archived_at)
+    const songs = assets.filter((asset) => asset.kind === "song_audio" && asset.current_version_id && !asset.archived_at)
+    const loadError = autopilotResource.error ?? assetsResource.error
+    const revalidateAutopilot = autopilotResource.revalidate
+    const revalidateAssets = assetsResource.revalidate
+    const loadAutopilot = useCallback(() => {
+        revalidateAutopilot()
+        revalidateAssets()
+    }, [revalidateAutopilot, revalidateAssets])
 
     const hasInFlight = (autopilot?.in_flight ?? 0) > 0
     useRunStream({
@@ -182,10 +168,10 @@ export default function AutopilotPage() {
                 </>
             }
         >
-            {(error || status) && (
+            {(error || loadError || status) && (
                 <div className={styles.fieldStack}>
-                    {status && !error && <div className={styles.successBanner}>{status}</div>}
-                    {error && <div className={styles.errorBanner}>{error}</div>}
+                    {status && !error && !loadError && <div className={styles.successBanner}>{status}</div>}
+                    {(error || loadError) && <div className={styles.errorBanner}>{error || loadError}</div>}
                 </div>
             )}
 

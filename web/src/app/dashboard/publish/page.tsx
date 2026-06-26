@@ -18,8 +18,6 @@ import {
     StatusBadge,
     errorMessage,
     formatDate,
-    isAbortError,
-    useAbortableLoad,
 } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import {
@@ -28,6 +26,7 @@ import {
     PublishingPost,
     PublishingPostStatus,
 } from "@/services/eclypteApi"
+import { usePublishingConfig, usePublishingPosts } from "@/stores/dashboardResources"
 
 type PublishTab = "ready" | "queued_scheduled" | "published" | "failed"
 type Preview = { postId: string; url: string }
@@ -44,8 +43,6 @@ const POLL_INTERVAL_MS = 25000
 
 export default function PublishPage() {
     const { isLoaded, isSignedIn, user } = useUser()
-    const [posts, setPosts] = useState<PublishingPost[]>([])
-    const [config, setConfig] = useState<PublishingConfig | null>(null)
     const [selectedId, setSelectedId] = useState<string | null>(null)
     const [tab, setTab] = useState<PublishTab>("ready")
     const [caption, setCaption] = useState("")
@@ -54,13 +51,19 @@ export default function PublishPage() {
     const [scheduledAt, setScheduledAt] = useState("")
     const [preview, setPreview] = useState<Preview | null>(null)
     const [error, setError] = useState<string | null>(null)
-    const [isLoading, setIsLoading] = useState(false)
     const [isWorking, setIsWorking] = useState(false)
     const pollableIdsRef = useRef<string[]>([])
     const syncedPostIdRef = useRef<string | null>(null)
     const previewKeyRef = useRef<string | null>(null)
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
+    const postsResource = usePublishingPosts(api, { status: "all" })
+    const posts = useMemo(() => postsResource.data ?? [], [postsResource.data])
+    const setPosts = postsResource.set
+    const configResource = usePublishingConfig(api)
+    const config = configResource.data ?? null
+    const isLoading = postsResource.isLoading
+    const loadError = postsResource.error ?? configResource.error
     const visiblePosts = useMemo(() => filterPosts(posts, tab), [posts, tab])
     // Lane-aware: the detail panel always shows a post that lives in the active tab,
     // so switching tabs never strands the panel on a post hidden from the list.
@@ -86,56 +89,22 @@ export default function PublishPage() {
     const tabRef = useRef(tab)
     tabRef.current = tab
 
-    const refreshPosts = useAbortableLoad(async (signal) => {
-        if (!api) {
-            return
-        }
-        setIsLoading(true)
-        setError(null)
-        try {
-            const next = await api.listPublishingPosts({ status: "all" }, signal)
-            setPosts(next)
-            setSelectedId((current) => {
-                if (current && next.some((post) => post.post_id === current)) {
-                    return current
-                }
-                return filterPosts(next, tabRef.current)[0]?.post_id ?? next[0]?.post_id ?? null
-            })
-        } catch (caught) {
-            if (isAbortError(caught)) {
-                return
-            }
-            setError(errorMessage(caught))
-        } finally {
-            if (!signal.aborted) {
-                setIsLoading(false)
-            }
-        }
-    })
-
-    const loadConfig = useAbortableLoad(async (signal) => {
-        if (!api) {
-            return
-        }
-        try {
-            setConfig(await api.getPublishingConfig(signal))
-        } catch (caught) {
-            if (isAbortError(caught)) {
-                return
-            }
-            setError(errorMessage(caught))
-        }
-    })
-
     const handleManualRefresh = () => {
-        refreshPosts()
-        loadConfig()
+        postsResource.revalidate()
+        configResource.revalidate()
     }
 
+    // Default the selected post once the cached list loads (or when the current
+    // selection drops out of the list), preferring a post in the active tab. The
+    // live tab is read via ref so a tab switch doesn't re-run this.
     useEffect(() => {
-        refreshPosts()
-        loadConfig()
-    }, [api, refreshPosts, loadConfig])
+        setSelectedId((current) => {
+            if (current && posts.some((post) => post.post_id === current)) {
+                return current
+            }
+            return filterPosts(posts, tabRef.current)[0]?.post_id ?? posts[0]?.post_id ?? null
+        })
+    }, [posts])
 
     // Resync the editor only when the displayed post changes — not when a background
     // poll replaces the same post's object — so live reconciliation never wipes
@@ -219,7 +188,7 @@ export default function PublishPage() {
                     if (stopped) {
                         return
                     }
-                    setPosts((current) =>
+                    setPosts((current = []) =>
                         current.map((post) => (post.post_id === next.post_id ? next : post)),
                     )
                 } catch {
@@ -240,10 +209,10 @@ export default function PublishPage() {
             window.clearInterval(interval)
             document.removeEventListener("visibilitychange", onVisible)
         }
-    }, [api, hasPollable])
+    }, [api, hasPollable, setPosts])
 
     const replacePost = (next: PublishingPost) => {
-        setPosts((current) => current.map((post) => post.post_id === next.post_id ? next : post))
+        setPosts((current = []) => current.map((post) => post.post_id === next.post_id ? next : post))
         setSelectedId(next.post_id)
     }
 
@@ -315,7 +284,7 @@ export default function PublishPage() {
             setTab(sent.status === "scheduled" ? "queued_scheduled" : statusToTab(sent.status))
         } catch (caught) {
             setError(errorMessage(caught))
-            refreshPosts()
+            postsResource.revalidate()
         } finally {
             setIsWorking(false)
         }
@@ -400,7 +369,7 @@ export default function PublishPage() {
                 </button>
             }
         >
-            {error && <div className={styles.errorBanner}>{error}</div>}
+            {(error || loadError) && <div className={styles.errorBanner}>{error || loadError}</div>}
 
             {config && (
                 <section className={styles.grid}>

@@ -1,24 +1,21 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Link, RefreshCw, RotateCcw, Save, Sparkles } from "lucide-react"
-import { DashboardPage, StatusBadge, errorMessage, formatDate, isAbortError, useAbortableLoad } from "../dashboardCommon"
+import { DashboardPage, StatusBadge, errorMessage, formatDate } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import {
     EclypteApiClient,
     RunManifest,
-    SynthesisPromptState,
-    SynthesisReference,
     waitForRunCompletion,
 } from "@/services/eclypteApi"
+import { useSynthesisPrompt, useSynthesisReferences } from "@/stores/dashboardResources"
 
 const DEFAULT_LABEL = "Manual prompt edit"
 
 export default function SynthesisPage() {
     const { isLoaded, isSignedIn, user } = useUser()
-    const [references, setReferences] = useState<SynthesisReference[]>([])
-    const [promptState, setPromptState] = useState<SynthesisPromptState | null>(null)
     const [urlInput, setUrlInput] = useState("")
     const [promptText, setPromptText] = useState("")
     const [versionLabel, setVersionLabel] = useState(DEFAULT_LABEL)
@@ -31,43 +28,43 @@ export default function SynthesisPage() {
     const [refsOpen, setRefsOpen] = useState(false)
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
+    const referencesResource = useSynthesisReferences(api)
+    const references = referencesResource.data ?? []
+    const promptResource = useSynthesisPrompt(api)
+    const promptState = promptResource.data ?? null
+    const setPromptState = promptResource.set
+    const loadError = referencesResource.error ?? promptResource.error
+    const revalidateReferences = referencesResource.revalidate
+    const revalidatePrompt = promptResource.revalidate
+    const loadSynthesis = useCallback(() => {
+        revalidateReferences()
+        revalidatePrompt()
+    }, [revalidateReferences, revalidatePrompt])
     const completedReferences = references.filter((reference) => reference.status === "completed")
     const activePrompt = promptState?.active_prompt
     const promptChanged = Boolean(activePrompt && promptText !== activePrompt.prompt_text)
 
-    const loadSynthesis = useAbortableLoad(async (signal) => {
-        if (!api) {
+    // Reseed the user-owned prompt textarea from the cached prompt only when it isn't
+    // dirty, so a background revalidate (or another tab's activation) never wipes
+    // unsaved edits. `lastSeededRef` tracks the value we last wrote into the textarea.
+    const activePromptText = promptState?.active_prompt.prompt_text
+    const lastSeededRef = useRef<string | null>(null)
+    useEffect(() => {
+        if (activePromptText === undefined) {
             return
         }
-        setError(null)
-        try {
-            const [nextReferences, nextPrompt] = await Promise.all([
-                api.listSynthesisReferences(signal),
-                api.getSynthesisPrompt(signal),
-            ])
-            setReferences(nextReferences)
-            // Don't clobber unsaved edits: only reseed the textarea when it still
-            // matches the prompt we currently have loaded (i.e. the user hasn't typed).
-            // The closure reads the latest committed promptText/promptState because
-            // useAbortableLoad always invokes the most recent loader closure.
-            const wasDirty = promptState
-                ? promptText !== promptState.active_prompt.prompt_text
-                : false
-            setPromptState(nextPrompt)
-            if (!wasDirty) {
-                setPromptText(nextPrompt.active_prompt.prompt_text)
+        setPromptText((current) => {
+            if (current === activePromptText) {
+                lastSeededRef.current = activePromptText
+                return current
             }
-        } catch (caught) {
-            if (isAbortError(caught)) {
-                return
+            if (lastSeededRef.current === null || current === lastSeededRef.current) {
+                lastSeededRef.current = activePromptText
+                return activePromptText
             }
-            setError(errorMessage(caught))
-        }
-    })
-
-    useEffect(() => {
-        loadSynthesis()
-    }, [api, loadSynthesis])
+            return current
+        })
+    }, [activePromptText])
 
     const submitReferences = async () => {
         if (!api) {
@@ -195,10 +192,10 @@ export default function SynthesisPage() {
                 </>
             }
         >
-            {(error || status) && (
+            {(error || loadError || status) && (
                 <div className={styles.fieldStack}>
-                    {status && <div className={styles.successBanner}>{status}</div>}
-                    {error && <div className={styles.errorBanner}>{error}</div>}
+                    {status && !error && !loadError && <div className={styles.successBanner}>{status}</div>}
+                    {(error || loadError) && <div className={styles.errorBanner}>{error || loadError}</div>}
                 </div>
             )}
 

@@ -11,13 +11,12 @@ import {
     errorMessage,
     formatBytes,
     formatDate,
-    isAbortError,
-    useAbortableLoad,
     versionRef,
 } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import { downloadSignedUrl, safeDownloadFilename } from "@/services/downloadFile"
-import { AssetSummary, EclypteApiClient, RunStreamMessage, RunSummary, isRunActive } from "@/services/eclypteApi"
+import { AssetSummary, EclypteApiClient, RunStreamMessage, isRunActive } from "@/services/eclypteApi"
+import { useAssets, useRuns } from "@/stores/dashboardResources"
 import { useRunStream } from "../useRunStream"
 
 type RenderPreview = { asset: AssetSummary; url: string }
@@ -25,46 +24,27 @@ type RenderPreview = { asset: AssetSummary; url: string }
 export default function RendersPage() {
     const { isLoaded, isSignedIn, user } = useUser()
     const router = useRouter()
-    const [outputs, setOutputs] = useState<AssetSummary[]>([])
-    const [runs, setRuns] = useState<RunSummary[]>([])
     const [preview, setPreview] = useState<RenderPreview | null>(null)
     const [error, setError] = useState<string | null>(null)
-    const [isLoading, setIsLoading] = useState(false)
     const [downloadingId, setDownloadingId] = useState<string | null>(null)
     const [deletingId, setDeletingId] = useState<string | null>(null)
     const [publishingId, setPublishingId] = useState<string | null>(null)
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
+    const outputsResource = useAssets(api, { kind: "render_output" })
+    const outputs = useMemo(() => outputsResource.data ?? [], [outputsResource.data])
+    const setOutputs = outputsResource.set
+    const runsResource = useRuns(api, { workflowType: "render" })
+    const runs = runsResource.data ?? []
+    const isLoading = outputsResource.isLoading || runsResource.isLoading
+    const loadError = outputsResource.error ?? runsResource.error
     const hasActiveRuns = runs.some(isRunActive)
-
-    const loadRenders = useAbortableLoad(async (signal) => {
-        if (!api) {
-            return
-        }
-        setIsLoading(true)
-        setError(null)
-        try {
-            const [nextOutputs, nextRuns] = await Promise.all([
-                api.listAssets("render_output", signal),
-                api.listRuns({ workflowType: "render" }, signal),
-            ])
-            setOutputs(nextOutputs)
-            setRuns(nextRuns)
-        } catch (caught) {
-            if (isAbortError(caught)) {
-                return
-            }
-            setError(errorMessage(caught))
-        } finally {
-            if (!signal.aborted) {
-                setIsLoading(false)
-            }
-        }
-    })
-
-    useEffect(() => {
-        loadRenders()
-    }, [api, loadRenders])
+    const revalidateOutputs = outputsResource.revalidate
+    const revalidateRuns = runsResource.revalidate
+    const loadRenders = useCallback(() => {
+        revalidateOutputs()
+        revalidateRuns()
+    }, [revalidateOutputs, revalidateRuns])
 
     useRunStream({
         api,
@@ -134,7 +114,7 @@ export default function RendersPage() {
             }
             // Archived render outputs drop out of the render_output list, so remove
             // it locally rather than re-pulling every output and run.
-            setOutputs((current) => current.filter((item) => item.file_id !== asset.file_id))
+            setOutputs((current = []) => current.filter((item) => item.file_id !== asset.file_id))
         } catch (caught) {
             setError(errorMessage(caught))
         } finally {
@@ -189,7 +169,7 @@ export default function RendersPage() {
                 </button>
             }
         >
-            {error && <div className={styles.errorBanner}>{error}</div>}
+            {(error || loadError) && <div className={styles.errorBanner}>{error || loadError}</div>}
 
             {isLoading && outputs.length === 0 ? (
                 <SkeletonList count={3} />
