@@ -655,19 +655,25 @@ def create_app(
         manifest: FileManifest,
         runs: list[RunManifest],
         uid: str,
+        version_metas: dict[str, FileVersionMeta] | None = None,
     ) -> AssetSummary:
+        # `version_metas` lets list endpoints prefetch every current-version meta in
+        # one parallel batch; single-asset callers omit it and read the one meta.
         current_version = None
         if manifest.current_version_id:
-            try:
-                current_version = repo.load_file_version_meta(
-                    FileVersionRef(
-                        user_id=uid,
-                        file_id=manifest.file_id,
-                        version_id=manifest.current_version_id,
+            if version_metas is not None:
+                current_version = version_metas.get(manifest.file_id)
+            else:
+                try:
+                    current_version = repo.load_file_version_meta(
+                        FileVersionRef(
+                            user_id=uid,
+                            file_id=manifest.file_id,
+                            version_id=manifest.current_version_id,
+                        )
                     )
-                )
-            except KeyError:
-                current_version = None
+                except KeyError:
+                    current_version = None
         analysis, analysis_run = analysis_for_asset(manifest, runs)
         latest_run = analysis_run
         if latest_run is None and manifest.source_run_id:
@@ -1004,7 +1010,11 @@ def create_app(
             manifests = [manifest for manifest in manifests if manifest.archived_at is None]
         manifests = [manifest for manifest in manifests if manifest.current_version_id is not None]
         runs = repo.list_run_manifests(uid)
-        return [summarize_asset(repo, manifest, runs, uid) for manifest in manifests]
+        version_metas = repo.load_current_version_metas(manifests, uid)
+        return [
+            summarize_asset(repo, manifest, runs, uid, version_metas)
+            for manifest in manifests
+        ]
 
     @app.delete("/v1/assets/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
     def delete_asset(

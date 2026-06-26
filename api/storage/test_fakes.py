@@ -45,6 +45,12 @@ class InMemoryObjectStore:
     def get_json(self, key: str) -> dict:
         return json.loads(self.get_bytes(key).decode("utf-8"))
 
+    def get_json_many(self, keys: list[str]) -> dict[str, dict | None]:
+        result: dict[str, dict | None] = {}
+        for key in keys:
+            result[key] = self.get_json(key) if key in self.objects else None
+        return result
+
     def head(self, key: str) -> ObjectHead:
         obj = self.objects[key]
         return ObjectHead(

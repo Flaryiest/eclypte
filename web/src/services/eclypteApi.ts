@@ -316,7 +316,9 @@ export class EclypteApiError extends Error {
 
 export class EclypteApiClient {
     private readonly baseUrl: string
-    private readonly userId: string
+    // Public so the dashboard cache store can scope resource keys per user. It's a
+    // Clerk user id (already sent as the X-User-Id header), not a secret.
+    readonly userId: string
 
     constructor({ baseUrl = ECLYPTE_API_BASE_URL, userId }: ApiClientOptions) {
         this.baseUrl = baseUrl.replace(/\/+$/, "")

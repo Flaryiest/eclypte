@@ -112,10 +112,38 @@ class StorageRepository:
             if key.endswith("/manifest.json")
         ]
         manifests = [
-            FileManifest.model_validate(self._store.get_json(key))
-            for key in keys
+            FileManifest.model_validate(data)
+            for data in self._store.get_json_many(keys).values()
+            if data is not None
         ]
         return sorted(manifests, key=lambda item: item.updated_at, reverse=True)
+
+    def load_current_version_metas(
+        self,
+        manifests: list[FileManifest],
+        user_id: str,
+    ) -> dict[str, FileVersionMeta]:
+        """Batch-read the current-version meta for each manifest in one fan-out.
+
+        Returns a {file_id: FileVersionMeta} map; a manifest whose meta is missing
+        is simply absent. Lets callers avoid a sequential meta GET per asset.
+        """
+        refs = {
+            manifest.file_id: FileVersionRef(
+                user_id=user_id,
+                file_id=manifest.file_id,
+                version_id=manifest.current_version_id,
+            )
+            for manifest in manifests
+            if manifest.current_version_id is not None
+        }
+        raw = self._store.get_json_many([ref.meta_key for ref in refs.values()])
+        metas: dict[str, FileVersionMeta] = {}
+        for file_id, ref in refs.items():
+            data = raw.get(ref.meta_key)
+            if data is not None:
+                metas[file_id] = FileVersionMeta.model_validate(data)
+        return metas
 
     def archive_file_manifest(
         self,
@@ -718,8 +746,9 @@ class StorageRepository:
     def list_synthesis_references(self, user_id: str) -> list[SynthesisReferenceRecord]:
         keys = self._store.list_keys(synthesis_reference_prefix(user_id=user_id))
         records = [
-            SynthesisReferenceRecord.model_validate(self._store.get_json(key))
-            for key in keys
+            SynthesisReferenceRecord.model_validate(data)
+            for data in self._store.get_json_many(keys).values()
+            if data is not None
         ]
         return sorted(records, key=lambda item: item.updated_at, reverse=True)
 
@@ -751,8 +780,9 @@ class StorageRepository:
     ) -> list[PublishingPostRecord]:
         keys = self._store.list_keys(publishing_post_prefix(user_id=user_id))
         records = [
-            PublishingPostRecord.model_validate(self._store.get_json(key))
-            for key in keys
+            PublishingPostRecord.model_validate(data)
+            for data in self._store.get_json_many(keys).values()
+            if data is not None
         ]
         if status is not None:
             records = [record for record in records if record.status == status]
@@ -836,8 +866,9 @@ class StorageRepository:
         ]
         keys = self._store.list_keys(synthesis_prompt_version_prefix(user_id=user_id))
         versions.extend(
-            SynthesisPromptVersion.model_validate(self._store.get_json(key))
-            for key in keys
+            SynthesisPromptVersion.model_validate(data)
+            for data in self._store.get_json_many(keys).values()
+            if data is not None
         )
         return sorted(
             versions,

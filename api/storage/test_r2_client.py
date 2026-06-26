@@ -115,6 +115,26 @@ def test_r2_object_store_maps_missing_objects_to_key_error():
         raise AssertionError("expected KeyError for missing object head")
 
 
+def test_get_json_many_returns_values_and_tolerates_missing_keys():
+    store = build_store()
+    store.put_json("a.json", {"n": 1})
+    store.put_json("b.json", {"n": 2})
+
+    result = store.get_json_many(["a.json", "missing.json", "b.json"])
+
+    assert result == {
+        "a.json": {"n": 1},
+        "missing.json": None,
+        "b.json": {"n": 2},
+    }
+
+
+def test_get_json_many_empty_input_returns_empty_dict():
+    store = build_store()
+
+    assert store.get_json_many([]) == {}
+
+
 def raise_missing_object(key: str):
     if ClientError is None:
         raise KeyError(key)

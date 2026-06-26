@@ -49,8 +49,9 @@ class R2RunStore:
             if key.endswith("/manifest.json")
         ]
         runs = [
-            RunManifest.model_validate(self._store.get_json(key))
-            for key in keys
+            RunManifest.model_validate(data)
+            for data in self._store.get_json_many(keys).values()
+            if data is not None
         ]
         return sorted(runs, key=lambda item: item.updated_at, reverse=True)
 
@@ -83,7 +84,12 @@ class R2RunStore:
     def list_run_events(self, run_ref: RunRef) -> list[RunEvent]:
         prefix = f"users/{run_ref.user_id}/runs/{run_ref.run_id}/events/"
         keys = sorted(self._store.list_keys(prefix))
-        return [RunEvent.model_validate(self._store.get_json(key)) for key in keys]
+        raw = self._store.get_json_many(keys)
+        return [
+            RunEvent.model_validate(raw[key])
+            for key in keys
+            if raw.get(key) is not None
+        ]
 
     def list_latest_run_progress(self, run_ref: RunRef) -> dict[str, dict[str, Any]]:
         latest: dict[str, dict[str, Any]] = {}

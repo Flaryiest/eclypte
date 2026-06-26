@@ -12,9 +12,9 @@ import {
     formatDate,
     isAbortError,
     kindLabel,
-    useAbortableLoad,
     versionRef,
 } from "../dashboardCommon"
+import { useAssets } from "@/stores/dashboardResources"
 import styles from "../studio.module.css"
 import { downloadSignedUrl, safeDownloadFilename } from "@/services/downloadFile"
 import {
@@ -33,7 +33,6 @@ type LibraryTab = "source" | "derived" | "hidden"
 
 export default function AssetsPage() {
     const { isLoaded, isSignedIn, user } = useUser()
-    const [assets, setAssets] = useState<AssetSummary[]>([])
     const [activeTab, setActiveTab] = useState<LibraryTab>("source")
     const [file, setFile] = useState<File | null>(null)
     const [slot, setSlot] = useState<UploadSlot>("audio")
@@ -52,31 +51,17 @@ export default function AssetsPage() {
     const abortRef = useRef<AbortController | null>(null)
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
+    const assetsResource = useAssets(api, { includeArchived: true })
+    const assets = assetsResource.data ?? []
+    const setAssets = assetsResource.set
+    const loadAssets = assetsResource.revalidate
+    const loadError = assetsResource.error
     const sourceAssets = assets.filter((asset) => !asset.archived_at && isSourceKind(asset.kind))
     const derivedAssets = assets.filter((asset) => !asset.archived_at && !isSourceKind(asset.kind) && asset.kind !== "render_output")
     const hiddenAssets = assets.filter((asset) => Boolean(asset.archived_at))
     const visibleAssets = activeTab === "source" ? sourceAssets : activeTab === "derived" ? derivedAssets : hiddenAssets
     const isWorking = isUploading || isImporting
     const selectedAsset = selectedFileId ? visibleAssets.find((asset) => asset.file_id === selectedFileId) ?? null : null
-
-    const loadAssets = useAbortableLoad(async (signal) => {
-        if (!api) {
-            return
-        }
-        setError(null)
-        try {
-            setAssets(await api.listAssets({ includeArchived: true }, signal))
-        } catch (caught) {
-            if (isAbortError(caught)) {
-                return
-            }
-            setError(errorMessage(caught))
-        }
-    })
-
-    useEffect(() => {
-        loadAssets()
-    }, [api, loadAssets])
 
     useEffect(() => {
         return () => abortRef.current?.abort()
@@ -265,7 +250,7 @@ export default function AssetsPage() {
             }
             // Soft delete (archive): move it to the Hidden lane in place instead of
             // re-pulling the whole library.
-            setAssets((current) =>
+            setAssets((current = []) =>
                 current.map((item) =>
                     item.file_id === asset.file_id
                         ? {
@@ -293,7 +278,7 @@ export default function AssetsPage() {
             const restored = await api.restoreAsset(asset.file_id)
             setStatus(`${asset.display_name} restored`)
             setActiveTab(isSourceKind(asset.kind) ? "source" : "derived")
-            setAssets((current) =>
+            setAssets((current = []) =>
                 current.map((item) => (item.file_id === restored.file_id ? restored : item)),
             )
         } catch (caught) {
@@ -351,10 +336,10 @@ export default function AssetsPage() {
                 </>
             }
         >
-            {(error || status) && (
+            {(error || loadError || status) && (
                 <div className={styles.fieldStack}>
                     {status && <div className={styles.successBanner}>{status}</div>}
-                    {error && <div className={styles.errorBanner}>{error}</div>}
+                    {(error || loadError) && <div className={styles.errorBanner}>{error || loadError}</div>}
                 </div>
             )}
 

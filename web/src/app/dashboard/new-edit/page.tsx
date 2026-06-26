@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Download, Eye, Play, RefreshCw, RotateCcw, Trash2, WandSparkles, XCircle } from "lucide-react"
-import { DashboardPage, SkeletonList, StatusBadge, errorMessage, formatBytes, formatDate, isAbortError, kindLabel, useAbortableLoad, versionRef } from "../dashboardCommon"
+import { DashboardPage, SkeletonList, StatusBadge, errorMessage, formatBytes, formatDate, isAbortError, kindLabel, versionRef } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import { downloadSignedUrl, safeDownloadFilename } from "@/services/downloadFile"
 import {
@@ -15,6 +15,7 @@ import {
     PlanningMode,
     RunStreamMessage,
 } from "@/services/eclypteApi"
+import { useAssets, useEditJobs } from "@/stores/dashboardResources"
 import { useRunStream } from "../useRunStream"
 
 const MIN_TRIM_DURATION_SEC = 1
@@ -37,8 +38,6 @@ const ETA_SMOOTHING = 0.3 // EMA factor applied when a real progress update arri
 
 export default function NewEditPage() {
     const { isLoaded, isSignedIn, user } = useUser()
-    const [assets, setAssets] = useState<AssetSummary[]>([])
-    const [jobs, setJobs] = useState<EditJobStatus[]>([])
     const [audioId, setAudioId] = useState("")
     const [videoId, setVideoId] = useState("")
     const [planningMode, setPlanningMode] = useState<PlanningMode>("agent")
@@ -51,7 +50,6 @@ export default function NewEditPage() {
     const [title, setTitle] = useState("")
     const [error, setError] = useState<string | null>(null)
     const [mediaStatus, setMediaStatus] = useState<string | null>(null)
-    const [isLoading, setIsLoading] = useState(false)
     const [isCreating, setIsCreating] = useState(false)
     const [downloadingId, setDownloadingId] = useState<string | null>(null)
     const [cancelingId, setCancelingId] = useState<string | null>(null)
@@ -63,6 +61,19 @@ export default function NewEditPage() {
     const [sourcePreviewUrl, setSourcePreviewUrl] = useState<string | null>(null)
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
+    // Shares the cached library with /dashboard/assets (same includeArchived key); the
+    // computed song/video lists below already drop archived assets.
+    const assetsResource = useAssets(api, { includeArchived: true })
+    const assets = useMemo(() => assetsResource.data ?? [], [assetsResource.data])
+    const jobsResource = useEditJobs(api)
+    const jobs = useMemo(() => jobsResource.data ?? [], [jobsResource.data])
+    const setJobs = jobsResource.set
+    const isLoading = assetsResource.isLoading || jobsResource.isLoading
+    const loadError = assetsResource.error ?? jobsResource.error
+    const refreshDashboard = () => {
+        assetsResource.revalidate()
+        jobsResource.revalidate()
+    }
     const songs = assets.filter((asset) => asset.kind === "song_audio" && asset.current_version_id && !asset.archived_at)
     const videos = assets.filter((asset) => asset.kind === "source_video" && asset.current_version_id && !asset.archived_at)
     const selectedSong = songs.find((asset) => asset.file_id === audioId) ?? null
@@ -75,50 +86,20 @@ export default function NewEditPage() {
     const hasValidTrim = selectedDurationSec === null || selectedDurationSec >= MIN_TRIM_DURATION_SEC
     const canStart = Boolean(api && selectedSong && selectedVideo && !isCreating && hasValidTrim)
 
-    const loadDashboard = useAbortableLoad(async (signal) => {
-        if (!api) {
-            return
-        }
-        setIsLoading(true)
-        setError(null)
-        try {
-            const [nextAssets, nextJobs] = await Promise.all([
-                api.listAssets(undefined, signal),
-                api.listEditJobs(signal),
-            ])
-            setAssets(nextAssets)
-            setJobs(nextJobs)
-            setAudioId((current) => current || nextAssets.find((asset) => asset.kind === "song_audio")?.file_id || "")
-            setVideoId((current) => current || nextAssets.find((asset) => asset.kind === "source_video")?.file_id || "")
-        } catch (caught) {
-            if (isAbortError(caught)) {
-                return
-            }
-            setError(errorMessage(caught))
-        } finally {
-            if (!signal.aborted) {
-                setIsLoading(false)
-            }
-        }
-    })
-
-    const refreshJobs = useAbortableLoad(async (signal) => {
-        if (!api) {
-            return
-        }
-        try {
-            setJobs(await api.listEditJobs(signal))
-        } catch (caught) {
-            if (isAbortError(caught)) {
-                return
-            }
-            setError(errorMessage(caught))
-        }
-    })
-
+    // Default the song/video pickers to the first available asset once the cached
+    // library loads, without clobbering an explicit user choice.
+    const firstSongId = songs[0]?.file_id ?? ""
+    const firstVideoId = videos[0]?.file_id ?? ""
     useEffect(() => {
-        loadDashboard()
-    }, [api, loadDashboard])
+        if (firstSongId) {
+            setAudioId((current) => current || firstSongId)
+        }
+    }, [firstSongId])
+    useEffect(() => {
+        if (firstVideoId) {
+            setVideoId((current) => current || firstVideoId)
+        }
+    }, [firstVideoId])
 
     // Eagerly fetch the cheap poster image for completed jobs so the card shows an
     // instant "mock" of the render; the heavy MP4 only loads when the user hits play.
@@ -222,7 +203,7 @@ export default function NewEditPage() {
         api,
         enabled: hasActiveJobs,
         shouldRefresh: isEditPipelineUpdate,
-        refresh: refreshJobs,
+        refresh: jobsResource.revalidate,
     })
 
     const startEdit = async () => {
@@ -251,7 +232,7 @@ export default function NewEditPage() {
                     cropFocusX,
                 },
             })
-            setJobs((current) => [job, ...current.filter((item) => item.run_id !== job.run_id)])
+            setJobs((current = []) => [job, ...current.filter((item) => item.run_id !== job.run_id)])
             setTitle("")
             setCreativeBrief("")
         } catch (caught) {
@@ -301,7 +282,7 @@ export default function NewEditPage() {
         setError(null)
         try {
             const next = await api.cancelEditJob(job.run_id)
-            setJobs((current) => current.map((item) => item.run_id === next.run_id ? next : item))
+            setJobs((current = []) => current.map((item) => item.run_id === next.run_id ? next : item))
         } catch (caught) {
             setError(errorMessage(caught))
         } finally {
@@ -317,7 +298,7 @@ export default function NewEditPage() {
         setError(null)
         try {
             await api.deleteEditJob(job.run_id)
-            setJobs((current) => current.filter((item) => item.run_id !== job.run_id))
+            setJobs((current = []) => current.filter((item) => item.run_id !== job.run_id))
             setPreviewUrls((current) => {
                 const next = { ...current }
                 delete next[job.run_id]
@@ -338,7 +319,7 @@ export default function NewEditPage() {
         setError(null)
         try {
             const next = await api.redoEditJob(job.run_id)
-            setJobs((current) => [next, ...current])
+            setJobs((current = []) => [next, ...current])
         } catch (caught) {
             setError(errorMessage(caught))
         } finally {
@@ -389,7 +370,7 @@ export default function NewEditPage() {
             subtitle="Launch durable edit jobs from saved assets. Active jobs keep updating after refresh."
             action={
                 <>
-                    <button className={styles.secondaryButton} type="button" onClick={loadDashboard} disabled={isLoading || isCreating}>
+                    <button className={styles.secondaryButton} type="button" onClick={refreshDashboard} disabled={isLoading || isCreating}>
                         <RefreshCw size={16} /> Refresh
                     </button>
                     <button className={styles.primaryButton} type="button" onClick={startEdit} disabled={!canStart}>
@@ -406,7 +387,7 @@ export default function NewEditPage() {
                             <p>Use analyzed or uploaded songs and source videos.</p>
                         </div>
                     </div>
-                    {error && <div className={styles.errorBanner}>{error}</div>}
+                    {(error || loadError) && <div className={styles.errorBanner}>{error || loadError}</div>}
                     <div className={styles.fieldStack}>
                         <label className={styles.fieldLabel}>
                             Edit title

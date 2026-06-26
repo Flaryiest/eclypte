@@ -1,8 +1,14 @@
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import json
 from typing import Any, Protocol
 
 from .config import R2Config
+
+# Upper bound on concurrent R2 GETs when batch-reading many JSON objects. Bounded
+# so a large library can't open hundreds of sockets at once; boto3 clients are
+# thread-safe for operations, so sharing one client across the pool is fine.
+_GET_MANY_MAX_WORKERS = 32
 
 
 @dataclass(frozen=True)
@@ -27,6 +33,7 @@ class ObjectStore(Protocol):
     def get_bytes(self, key: str) -> bytes: ...
     def put_json(self, key: str, data: dict[str, Any]) -> None: ...
     def get_json(self, key: str) -> dict[str, Any]: ...
+    def get_json_many(self, keys: list[str]) -> dict[str, dict[str, Any] | None]: ...
     def head(self, key: str) -> ObjectHead: ...
     def delete(self, key: str) -> None: ...
     def list_keys(self, prefix: str) -> list[str]: ...
@@ -94,6 +101,26 @@ class R2ObjectStore:
 
     def get_json(self, key: str) -> dict[str, Any]:
         return json.loads(self.get_bytes(key).decode("utf-8"))
+
+    def _get_json_optional(self, key: str) -> dict[str, Any] | None:
+        try:
+            return self.get_json(key)
+        except KeyError:
+            return None
+
+    def get_json_many(self, keys: list[str]) -> dict[str, dict[str, Any] | None]:
+        """Fetch many JSON objects concurrently, returning a {key: parsed} map.
+
+        A key that has gone missing (e.g. raced deletion) maps to ``None`` instead
+        of raising, so a single vanished object can't fail an entire list. Callers
+        index the result by key; iteration order is not significant.
+        """
+        if not keys:
+            return {}
+        max_workers = min(_GET_MANY_MAX_WORKERS, len(keys))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            values = executor.map(self._get_json_optional, keys)
+            return dict(zip(keys, values))
 
     def head(self, key: str) -> ObjectHead:
         try:
