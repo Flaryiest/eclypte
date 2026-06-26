@@ -27,6 +27,29 @@ type DashboardStoreState = {
     patch: (key: string, updater: ResourceUpdater) => void
 }
 
+const EMPTY_ENTRY: ResourceEntry = {
+    data: undefined,
+    status: "idle",
+    error: null,
+    lastFetchedMs: 0,
+    inFlight: null,
+    controller: null,
+}
+
+// Immutably merge `patch` onto the current entry for `key` (or a blank entry).
+// Fields absent from `patch` are carried over, so each write only states what it
+// changes — and replacing the entry object lets `Object.is` selectors re-render
+// only the subscribed key.
+function withEntry(
+    entries: Record<string, ResourceEntry>,
+    key: string,
+    patch: Partial<ResourceEntry>,
+): Pick<DashboardStoreState, "entries"> {
+    return {
+        entries: { ...entries, [key]: { ...(entries[key] ?? EMPTY_ENTRY), ...patch } },
+    }
+}
+
 function isAbortError(error: unknown): boolean {
     return error instanceof DOMException && error.name === "AbortError"
 }
@@ -63,58 +86,34 @@ export const useDashboardStore = create<DashboardStoreState>((set, get) => ({
                 if (get().entries[key]?.controller !== controller) {
                     return
                 }
-                set((state) => ({
-                    entries: {
-                        ...state.entries,
-                        [key]: {
-                            data,
-                            status: "success",
-                            error: null,
-                            lastFetchedMs: Date.now(),
-                            inFlight: null,
-                            controller: null,
-                        },
-                    },
-                }))
+                set((state) =>
+                    withEntry(state.entries, key, {
+                        data,
+                        status: "success",
+                        error: null,
+                        lastFetchedMs: Date.now(),
+                        inFlight: null,
+                        controller: null,
+                    }),
+                )
             } catch (error) {
                 if (isAbortError(error) || get().entries[key]?.controller !== controller) {
                     return
                 }
-                set((state) => {
-                    const current = state.entries[key]
-                    return {
-                        entries: {
-                            ...state.entries,
-                            [key]: {
-                                data: current?.data,
-                                status: "error",
-                                error: messageOf(error),
-                                lastFetchedMs: current?.lastFetchedMs ?? 0,
-                                inFlight: null,
-                                controller: null,
-                            },
-                        },
-                    }
-                })
+                // Keep the stale data; surface the error.
+                set((state) =>
+                    withEntry(state.entries, key, {
+                        status: "error",
+                        error: messageOf(error),
+                        inFlight: null,
+                        controller: null,
+                    }),
+                )
             }
         })()
 
-        set((state) => {
-            const current = state.entries[key]
-            return {
-                entries: {
-                    ...state.entries,
-                    [key]: {
-                        data: current?.data,
-                        status: "loading",
-                        error: current?.error ?? null,
-                        lastFetchedMs: current?.lastFetchedMs ?? 0,
-                        inFlight: run,
-                        controller,
-                    },
-                },
-            }
-        })
+        // Enter the loading state, preserving any cached data/error/timestamp.
+        set((state) => withEntry(state.entries, key, { status: "loading", inFlight: run, controller }))
 
         return run
     },
@@ -126,21 +125,14 @@ export const useDashboardStore = create<DashboardStoreState>((set, get) => ({
                 typeof updater === "function"
                     ? (updater as (prev: unknown) => unknown)(current?.data)
                     : updater
-            return {
-                entries: {
-                    ...state.entries,
-                    [key]: {
-                        data: nextData,
-                        status: "success",
-                        error: null,
-                        // Mark fresh so an in-flight background revalidate won't
-                        // immediately clobber this optimistic mutation.
-                        lastFetchedMs: Date.now(),
-                        inFlight: current?.inFlight ?? null,
-                        controller: current?.controller ?? null,
-                    },
-                },
-            }
+            // Mark fresh so an in-flight background revalidate won't immediately
+            // clobber this optimistic mutation; keep inFlight/controller as-is.
+            return withEntry(state.entries, key, {
+                data: nextData,
+                status: "success",
+                error: null,
+                lastFetchedMs: Date.now(),
+            })
         })
     },
 }))
