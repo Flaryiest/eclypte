@@ -24,6 +24,8 @@ from ..skills.base import RenderContext, ResolvedOverlay
 from ..synthesis.timeline_schema import OutputSpec, Shot, Timeline
 from ..synthesis.validators import validate_timeline
 from .effects import apply_effects
+from .ffmpeg_filtergraph import can_render_with_ffmpeg
+from .ffmpeg_run import render_with_ffmpeg
 from .geometry import cover_crop_offsets, cover_resize_size
 from .transitions import apply_transition
 
@@ -99,6 +101,25 @@ def render_timeline(
     validate_timeline(timeline)
 
     target_size, target_fps = _resolve_output(timeline.output, preview=preview)
+
+    # Fast path: a single native ffmpeg filtergraph (no per-frame Python pump).
+    # Covers the common montage (cuts/crossfade, no overlays/effects); anything
+    # else falls through to the MoviePy renderer below.
+    if can_render_with_ffmpeg(timeline):
+        render_with_ffmpeg(
+            timeline,
+            source=timeline.source.video,
+            audio=timeline.audio.path,
+            out_path=out_path,
+            preset=encode_preset,
+            threads=threads,
+            size=target_size,
+            fps=target_fps,
+            progress_callback=progress_callback,
+            poster_path=poster_path,
+        )
+        _log_timing("total render_timeline (ffmpeg)", total_started)
+        return out_path
 
     source = None
     audio = None

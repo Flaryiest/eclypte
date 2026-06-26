@@ -211,8 +211,10 @@ Subsystems:
 - `index/query.py`: `query_ranges` motion-statistics ranking used by the deterministic planner; an optional `time_window` biases candidates toward a source region.
 - `index/storage_modal.py`: R2-aware API CLIP app `eclypte-clip-index-r2`, with `build_index_r2` and `query_index_r2`. The build records per-frame `brightness`/`detail` in the index; `query_index_r2` ranks through `query.rank_with_content_filter`, which drops near-black and flat frames (black intros/outros, credits, title cards) so the agent can't select them. Bump `CLIP_INDEX_BUILD_STEP` in `api/workflows.py` (and reindex) when the index format changes; redeploy `eclypte-clip-index-r2` after changing this.
 - `reference/`: reference AMV download, metrics, ingest, consolidation, and prompt-weight parsing.
-- `render/renderer.py`: MoviePy v2 renderer. Reads timeline JSON + media only (not planner internals); composites `timeline.overlays` (skill layers) over the concatenated shots before attaching audio; also saves an RGB JPEG poster frame (taken after compositing, so overlays show) and reports real frame-encode progress through proglog's `frame_index` bar. Resolves the overlay font via `ECLYPTE_OVERLAY_FONT` → `/fonts/overlay.otf` → bundled DejaVu.
-- `render_storage_modal.py`: R2-aware API renderer `eclypte-render-r2` (uploads the rendered MP4 and the poster image).
+- `render/renderer.py`: `render_timeline` is the entry point. It validates, then **dispatches** (via `can_render_with_ffmpeg`): a timeline using only cuts/crossfade with no overlays/effects renders through a single native ffmpeg filtergraph — ~17× faster on the same hardware because pixels never leave ffmpeg (MoviePy's ~97% overhead was the per-frame Python decode→numpy→pipe pump, not the x264 encode). Anything else (overlays, `flash`/`freeze`/`punch_in`) falls back to the MoviePy v2 path in the same file. The MoviePy path reads timeline JSON + media only, composites `timeline.overlays` over the concatenated shots before attaching audio, saves an RGB JPEG poster (after compositing, so overlays show), reports progress via proglog's `frame_index` bar, and resolves the overlay font via `ECLYPTE_OVERLAY_FONT` → `/fonts/overlay.otf` → bundled DejaVu.
+- `render/ffmpeg_filtergraph.py`: **pure** builder — a validated `Timeline` → ffmpeg argv (per-shot seeked input → scale/letterbox-or-cover-crop → concat, with crossfades folded into chained `xfade` at cumulative offsets, audio trim/gain, and the same CRF 18 / `-tune animation` / yuv420p / 192k AAC encode). No subprocess/moviepy, so it is fully unit-tested (`test_ffmpeg_filtergraph.py`). `can_render_with_ffmpeg` lives here and gates the dispatch (Phase 1 = cuts/crossfade/whip, no overlays/effects).
+- `render/ffmpeg_run.py`: runs that argv as one process, parses `-progress` into the same `progress_callback` 0–100 contract, then extracts the JPEG poster. Resolves the ffmpeg binary via PATH → `imageio_ffmpeg`.
+- `render_storage_modal.py`: R2-aware API renderer `eclypte-render-r2` (uploads the rendered MP4 and the poster image). Its image already bundles `ffmpeg`; redeploy after changing the render package.
 
 Agent planning defaults:
 
@@ -227,12 +229,12 @@ Agent planning defaults:
 
 Rendering notes:
 
-- `render_timeline` depends on timeline JSON, source video, and song audio.
-- MoviePy v2 methods include `subclipped`, `with_duration`, `resized`, `concatenate_videoclips(method="compose")`, and `with_audio`.
-- Implemented effects/transitions: `flash` and `crossfade` transitions, `freeze` and `punch_in` effects (frame transforms that preserve duration/size). `whip`, `speed_ramp`, and `hold` are still no-op stubs. The agent opts in per shot via optional `transition_in`/`effect` fields on `finish_edit` items, mapped in `synthesis/adapter.py`.
+- `render_timeline` depends on timeline JSON, source video, and song audio, and auto-dispatches between the native ffmpeg path and the MoviePy fallback (see above). The native path is verified frame-parity with MoviePy on the same timeline (deep-in-shot frames pixel-near-identical; deviations of ≤~1 frame only at cut boundaries / high motion, within the ±0.15s beat-snap tolerance).
+- MoviePy v2 (fallback path) methods include `subclipped`, `with_duration`, `resized`, `concatenate_videoclips(method="compose")`, and `with_audio`.
+- Implemented effects/transitions: `flash` and `crossfade` transitions, `freeze` and `punch_in` effects (frame transforms that preserve duration/size). `whip`, `speed_ramp`, and `hold` are still no-op stubs. The agent opts in per shot via optional `transition_in`/`effect` fields on `finish_edit` items, mapped in `synthesis/adapter.py`. On the native ffmpeg path, cuts/crossfade are supported; the per-frame effects and `flash` still route to MoviePy until ported (Phase 2 also brings overlays in as PNG composites).
 - The adapter beat-snaps interior shot boundaries to the nearest beat within ±0.15s (`snap_shots_to_beats`), records them in `markers.beats_used_sec`, and never collapses a shot below 0.4s.
-- The encoder writes CRF 18 / `-tune animation` / yuv420p with 192k AAC so Instagram/YouTube re-encodes start from a high-quality source.
-- CPU/vCPU count is the current render dial; GPU does not help without a CUDA ffmpeg/NVENC path.
+- The encoder writes CRF 18 / `-tune animation` / yuv420p with 192k AAC so Instagram/YouTube re-encodes start from a high-quality source (identical flags on both paths).
+- The native ffmpeg path encodes on CPU in seconds; a GPU/NVENC path is unnecessary for the common montage and is not worth the CUDA-ffmpeg image cost. The MoviePy fallback remains CPU-pump-bound (vCPU count barely helps it).
 - Edit `progress_percent` is a weighted average by typical stage duration (`EDIT_STAGE_WEIGHTS` in `api/app.py`), and the render stage fills smoothly from the renderer's real encode progress. The dashboard shows the poster instantly and lazy-loads the heavy MP4 on play.
 
 ## Frontend
