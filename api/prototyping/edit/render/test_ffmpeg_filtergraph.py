@@ -41,14 +41,15 @@ def _shots(specs):
 
 
 def _timeline(specs, *, crop="letterbox", w=1080, h=1920, fps=30, focus_x=0.5,
-              audio_start=0.0, gain_db=0.0):
+              audio_start=0.0, gain_db=0.0, audio_fade=0.0, video_fade=0.0):
     shots = _shots(specs)
     total = sum(s.duration_sec for s in shots)
     return Timeline(
         source=SourceRef(video="SRC.mp4", audio="AUD.wav"),
         output=OutputSpec(width=w, height=h, fps=fps, duration_sec=total,
-                          crop=crop, crop_focus_x=focus_x),
-        audio=AudioSpec(path="AUD.wav", start_sec=audio_start, gain_db=gain_db),
+                          crop=crop, crop_focus_x=focus_x, fade_out_sec=video_fade),
+        audio=AudioSpec(path="AUD.wav", start_sec=audio_start, gain_db=gain_db,
+                        fade_out_sec=audio_fade),
         shots=shots,
     )
 
@@ -161,3 +162,20 @@ def test_phase1_rejects_effects():
 def test_phase1_rejects_flash_transition():
     tl = _timeline([(80.0, 2.0, 1.0, "cut"), (200.0, 3.0, 1.0, "flash")])
     assert can_render_with_ffmpeg(tl) is False
+
+
+def test_tail_fade_adds_afade_and_video_fade():
+    tl = _timeline([(80.0, 10.0, 1.0, "cut")], audio_fade=2.5, video_fade=2.5)
+    argv = build_command(tl, source="/s.mp4", audio="/a.wav", out_path="/o.mp4")
+    fc = _filter_complex(argv)
+    # 10s reel, 2.5s fade -> starts at 7.5
+    assert "afade=t=out:st=7.500:d=2.5" in fc
+    assert "fade=t=out:st=7.500:d=2.5" in fc
+    assert "[aout]" in argv
+
+
+def test_no_fade_when_zero():
+    tl = _timeline([(80.0, 10.0, 1.0, "cut")])
+    fc = _filter_complex(build_command(tl, source="/s.mp4", audio="/a.wav", out_path="/o.mp4"))
+    assert "afade" not in fc
+    assert "fade=t=out" not in fc

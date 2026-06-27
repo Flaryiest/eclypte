@@ -137,10 +137,22 @@ def build_command(
         for i, shot in enumerate(shots)
     ]
     video_label = _assemble_video(parts, shots)
+    fade_v = timeline.output.fade_out_sec
+    if fade_v and fade_v > 0:
+        st = max(0.0, timeline.output.duration_sec - fade_v)
+        parts.append(f"{video_label}fade=t=out:st={st:.3f}:d={fade_v:g}[vfade]")
+        video_label = "[vfade]"
 
+    audio_filters: list[str] = []
     gain_db = timeline.audio.gain_db
     if gain_db:
-        parts.append(f"[{n}:a]volume={gain_db}dB[aout]")
+        audio_filters.append(f"volume={gain_db}dB")
+    fade_a = timeline.audio.fade_out_sec
+    if fade_a and fade_a > 0:
+        st = max(0.0, timeline.output.duration_sec - fade_a)
+        audio_filters.append(f"afade=t=out:st={st:.3f}:d={fade_a:g}")
+    if audio_filters:
+        parts.append(f"[{n}:a]" + ",".join(audio_filters) + "[aout]")
         audio_label = "[aout]"
     else:
         audio_label = f"{n}:a"
