@@ -19,12 +19,12 @@ from api.storage.models import AutopilotItem, AutopilotState, RunManifest
 from api.storage.refs import FileVersionRef, RunRef
 from api.storage.repository import StorageRepository
 
-TRIM_TARGET_SEC = 18.0
-TRIM_MIN_SEC = 15.0
-TRIM_MAX_SEC = 22.0
+TRIM_TARGET_SEC = 25.0
+TRIM_MIN_SEC = 20.0
+TRIM_MAX_SEC = 30.0
 # Begin a section-anchored window this many seconds before the section starts, so a
 # chorus-anchored reel captures the build-in rather than cutting in on the downbeat.
-CHORUS_LEAD_IN_SEC = 2.5
+CHORUS_LEAD_IN_SEC = 5.0
 COMBO_WINDOW_BUCKET_SEC = 5
 MAX_CONSECUTIVE_FAILURES = 3
 MAX_FINISHED_ITEMS = 50

@@ -145,11 +145,10 @@ def test_select_trim_windows_prefers_high_energy_chorus():
 
     assert windows
     start, end = windows[0]
-    # Anchors on the chorus but begins ~CHORUS_LEAD_IN_SEC before it, so the reel
-    # captures the build-in instead of cutting in on the downbeat.
+    # Begins ~CHORUS_LEAD_IN_SEC (5s) before the chorus so the reel captures the build-in.
     assert start < 60.0
-    assert 56.0 <= start <= 58.5
-    assert 15.0 <= end - start <= 22.0
+    assert 54.0 <= start <= 56.5
+    assert 20.0 <= end - start <= 30.0
     assert end <= 120.0
 
 
@@ -206,8 +205,8 @@ def test_tick_uses_trim_window_from_music_analysis():
 
     _, kwargs = starts.edit_calls[0]
     options = kwargs["export_options"]
-    assert 55.0 <= options["audio_start_sec"] <= 65.0
-    assert 15.0 <= options["audio_end_sec"] - options["audio_start_sec"] <= 22.0
+    assert 50.0 <= options["audio_start_sec"] <= 60.0
+    assert 20.0 <= options["audio_end_sec"] - options["audio_start_sec"] <= 30.0
     item = state.items[0]
     assert item.audio_start_sec == options["audio_start_sec"]
 
@@ -266,7 +265,7 @@ def test_tick_advances_completed_import_to_edit():
     assert starts.analysis_calls == []
     _, kwargs = starts.edit_calls[0]
     options = kwargs["export_options"]
-    assert 15.0 <= options["audio_end_sec"] - options["audio_start_sec"] <= 22.0
+    assert 20.0 <= options["audio_end_sec"] - options["audio_start_sec"] <= 30.0
     updated = state.items[0]
     assert updated.status == "editing"
     assert updated.song_file_id == "file_song"
@@ -308,7 +307,7 @@ def test_tick_advances_completed_analysis_to_edit():
     _, kwargs = starts.edit_calls[0]
     options = kwargs["export_options"]
     assert options["format"] == "reels_cinematic"
-    assert 15.0 <= options["audio_end_sec"] - options["audio_start_sec"] <= 22.0
+    assert 20.0 <= options["audio_end_sec"] - options["audio_start_sec"] <= 30.0
     updated = state.items[0]
     assert updated.status == "editing"
     assert updated.edit_run_id == "run_edit_1"
