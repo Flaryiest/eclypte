@@ -179,3 +179,13 @@ def test_no_fade_when_zero():
     fc = _filter_complex(build_command(tl, source="/s.mp4", audio="/a.wav", out_path="/o.mp4"))
     assert "afade" not in fc
     assert "fade=t=out" not in fc
+
+
+def test_audio_gain_and_fade_chain_into_single_aout():
+    tl = _timeline([(80.0, 10.0, 1.0, "cut")], gain_db=-3.0, audio_fade=2.5)
+    argv = build_command(tl, source="/s.mp4", audio="/a.wav", out_path="/o.mp4")
+    fc = _filter_complex(argv)
+    # gain then fade, comma-chained into one [aout] entry (no ';' between them)
+    assert "volume=-3.0dB,afade=t=out:st=7.500:d=2.5[aout]" in fc
+    # exactly one [aout] label produced
+    assert fc.count("[aout]") == 1
