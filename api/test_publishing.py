@@ -613,3 +613,44 @@ def _publish_render(repo: StorageRepository, *, body=b"render"):
         input_file_version_ids=[],
     )
     return {"file_id": file_ref.file_id, "version_id": version_ref.version_id}
+
+
+def test_create_post_resolves_movie_and_song_names_from_render_lineage():
+    from api.storage.refs import FileRef, RunRef
+
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+
+    # Source video + song assets, named after their media.
+    video_ref = FileRef(user_id="user_123", file_id="file_video")
+    repo.create_file_manifest(file_ref=video_ref, kind="source_video", display_name="Spirited Away.mp4")
+    song_ref = FileRef(user_id="user_123", file_id="file_song")
+    repo.create_file_manifest(file_ref=song_ref, kind="song_audio", display_name="Unravel.wav")
+
+    # The render run that produced the output carries the source/song file IDs.
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="render",
+        inputs={"source_video_file_id": "file_video", "audio_file_id": "file_song"},
+        steps=["render"],
+    )
+
+    # Render output whose source_run_id points at that run.
+    render_ref = FileRef(user_id="user_123", file_id="file_render")
+    repo.create_file_manifest(
+        file_ref=render_ref, kind="render_output", display_name="run.mp4", source_run_id=run.run_id
+    )
+    version = repo.publish_bytes(
+        file_ref=render_ref, body=b"mp4", content_type="video/mp4",
+        original_filename="run.mp4", created_by_step="render",
+        derived_from_step="render", input_file_version_ids=[],
+    )
+
+    post = create_publish_post_for_render(
+        repo,
+        user_id="user_123",
+        render_output={"file_id": "file_render", "version_id": version.version_id},
+    )
+
+    assert post.source_name == "Spirited Away"
+    assert post.song_name == "Unravel"

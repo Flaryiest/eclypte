@@ -1611,6 +1611,8 @@ def create_app(
                 "timeline_version_id": request.timeline.version_id,
                 "audio_version_id": request.audio.version_id,
                 "source_video_version_id": request.source_video.version_id,
+                "audio_file_id": request.audio.file_id,
+                "source_video_file_id": request.source_video.file_id,
             },
             ["render", "publish_render"],
         )

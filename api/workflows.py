@@ -533,6 +533,8 @@ class DefaultWorkflowRunner:
                 "timeline_version_id": timeline["version_id"],
                 "audio_version_id": audio["version_id"],
                 "source_video_version_id": source_video["version_id"],
+                "audio_file_id": audio["file_id"],
+                "source_video_file_id": source_video["file_id"],
             },
             steps=["render", "publish_render"],
         )

@@ -11,7 +11,7 @@ from urllib.error import HTTPError, URLError
 
 from api.storage.models import PublishingPostRecord
 from api.storage.r2_client import ObjectStore
-from api.storage.refs import FileRef, FileVersionRef
+from api.storage.refs import FileRef, FileVersionRef, RunRef
 from api.storage.repository import StorageRepository
 
 BufferShareMode = Literal["addToQueue", "customScheduled"]
@@ -386,6 +386,46 @@ def _openai_client_from_env() -> Any | None:
     return OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 
+def resolve_edit_source_names(
+    repo: StorageRepository, *, user_id: str, render_manifest: Any
+) -> tuple[str, str]:
+    """(source_name, song_name) from the render's run lineage; ("", "") on any miss.
+
+    The render output's source_run_id points at the render run, whose inputs carry
+    the source-video and song *file IDs*; their file-manifest display names are the
+    movie/anime and song names (assets are named after their media).
+    """
+    run_id = getattr(render_manifest, "source_run_id", None)
+    if not run_id:
+        return "", ""
+    try:
+        run = repo.load_run_manifest(RunRef(user_id=user_id, run_id=run_id))
+    except Exception:
+        return "", ""
+    source_name = _display_name_for_file(repo, user_id, run.inputs.get("source_video_file_id"))
+    song_name = _display_name_for_file(repo, user_id, run.inputs.get("audio_file_id"))
+    return source_name, song_name
+
+
+def _display_name_for_file(repo: StorageRepository, user_id: str, file_id: str | None) -> str:
+    if not file_id:
+        return ""
+    try:
+        manifest = repo.load_file_manifest(FileRef(user_id=user_id, file_id=file_id))
+    except Exception:
+        return ""
+    return _strip_media_extension(manifest.display_name)
+
+
+def _strip_media_extension(name: str) -> str:
+    base = name.rsplit("/", 1)[-1].strip()
+    if "." in base:
+        stem, ext = base.rsplit(".", 1)
+        if 1 <= len(ext) <= 5 and ext.isalnum():
+            return stem.strip()
+    return base
+
+
 def create_publish_post_for_render(
     repo: StorageRepository,
     *,
@@ -413,9 +453,14 @@ def create_publish_post_for_render(
         )
     )
     resolved_collection = collection_slug or _collection_from_tags(manifest.tags)
+    source_name, song_name = resolve_edit_source_names(
+        repo, user_id=user_id, render_manifest=manifest
+    )
     draft = generate_caption_draft(
         render_name=manifest.display_name or meta.original_filename,
         collection_slug=resolved_collection,
+        source_name=source_name,
+        song_name=song_name,
     )
     now = _utc_now()
     record = PublishingPostRecord(
@@ -434,6 +479,8 @@ def create_publish_post_for_render(
         caption_error=draft.caption_error,
         auto_created=auto_created,
         source_run_id=manifest.source_run_id,
+        source_name=source_name,
+        song_name=song_name,
         created_at=now,
         updated_at=now,
     )
