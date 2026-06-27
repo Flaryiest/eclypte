@@ -22,6 +22,7 @@ from .timeline_schema import (
     SourceRef,
     Timeline,
     Transition,
+    tail_fade_for,
 )
 from .validators import validate_timeline
 
@@ -177,6 +178,7 @@ def plan(
             raise ValueError("max_duration_sec shorter than first shot")
         last_end = shots[-1].timeline_end_sec
 
+    fade = tail_fade_for(round(last_end, 3))
     timeline = Timeline(
         source=SourceRef(video=source_video_path, audio=audio_path),
         output=OutputSpec(
@@ -186,8 +188,9 @@ def plan(
             duration_sec=round(last_end, 3),
             crop=output_crop,
             crop_focus_x=crop_focus_x,
+            fade_out_sec=fade,
         ),
-        audio=AudioSpec(path=audio_path, start_sec=round(render_audio_start, 3)),
+        audio=AudioSpec(path=audio_path, start_sec=round(render_audio_start, 3), fade_out_sec=fade),
         shots=shots,
         markers={
             "beats_used_sec": beats_used,

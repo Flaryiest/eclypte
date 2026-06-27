@@ -416,3 +416,10 @@ def test_tail_fade_for_clamps_to_a_third_of_short_reels():
     assert tail_fade_for(30.0) == TAIL_FADE_SEC      # long reel -> full fade
     assert tail_fade_for(6.0) == 2.0                 # short reel -> clamped to dur/3
     assert tail_fade_for(0.0) == 0.0
+
+
+def test_adapt_sets_tail_fade_on_audio_and_output():
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH)
+    # _three_shots_contiguous totals 6.0s -> clamped fade of 2.0s on both streams.
+    assert tl.output.fade_out_sec == 2.0
+    assert tl.audio.fade_out_sec == 2.0
