@@ -31,14 +31,14 @@ class OutputSpec(BaseModel):
     duration_sec: float
     crop: CropMode = "letterbox"
     crop_focus_x: float = Field(default=0.5, ge=0, le=1)
-    fade_out_sec: float = 0.0
+    fade_out_sec: float = Field(default=0.0, ge=0)
 
 
 class AudioSpec(BaseModel):
     path: str
     start_sec: float = 0.0
     gain_db: float = 0.0
-    fade_out_sec: float = 0.0
+    fade_out_sec: float = Field(default=0.0, ge=0)
 
 
 class ShotSource(BaseModel):

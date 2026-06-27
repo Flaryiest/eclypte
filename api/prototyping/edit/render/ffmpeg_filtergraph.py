@@ -139,6 +139,10 @@ def build_command(
     video_label = _assemble_video(parts, shots)
     fade_v = timeline.output.fade_out_sec
     if fade_v and fade_v > 0:
+        # st uses the nominal duration_sec; if crossfades shrink the real video
+        # stream (xfade overlap), this fade-out start is slightly approximate.
+        # Cut-based reels (the autopilot default) are exact — revisit if
+        # crossfade+fade combinations become common.
         st = max(0.0, timeline.output.duration_sec - fade_v)
         parts.append(f"{video_label}fade=t=out:st={st:.3f}:d={fade_v:g}[vfade]")
         video_label = "[vfade]"

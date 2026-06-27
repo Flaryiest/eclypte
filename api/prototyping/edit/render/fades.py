@@ -24,7 +24,7 @@ def video_fade_out(clip, fade_sec: float):
         gain = max(0.0, (duration - t) / fade)
         return (frame.astype(np.float32) * gain).astype("uint8")
 
-    return clip.transform(dim)
+    return clip.transform(dim, keep_duration=True)
 
 
 def audio_fade_out(clip, fade_sec: float):
