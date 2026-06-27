@@ -408,3 +408,11 @@ def test_snap_records_boundary_already_on_beat():
     assert snapped[0].timeline_end_sec == pytest.approx(2.0)
     assert snapped[1].timeline_start_sec == pytest.approx(2.0)
     assert beats_used == [2.0]
+
+
+def test_tail_fade_for_clamps_to_a_third_of_short_reels():
+    from api.prototyping.edit.synthesis.timeline_schema import TAIL_FADE_SEC, tail_fade_for
+
+    assert tail_fade_for(30.0) == TAIL_FADE_SEC      # long reel -> full fade
+    assert tail_fade_for(6.0) == 2.0                 # short reel -> clamped to dur/3
+    assert tail_fade_for(0.0) == 0.0

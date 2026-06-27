@@ -4,6 +4,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 SCHEMA_VERSION = 1
 
+TAIL_FADE_SEC = 2.5
+
+
+def tail_fade_for(duration_sec: float) -> float:
+    """End-of-reel audio+video fade length, clamped so it never exceeds a third
+    of the reel (so very short edits still keep most of their content)."""
+    if duration_sec <= 0:
+        return 0.0
+    return round(min(TAIL_FADE_SEC, duration_sec / 3.0), 3)
+
 TransitionType = Literal["cut", "crossfade", "whip", "flash"]
 EffectType = Literal["freeze", "speed_ramp", "hold", "punch_in"]
 CropMode = Literal["letterbox", "center", "fill", "per_shot"]
@@ -21,12 +31,14 @@ class OutputSpec(BaseModel):
     duration_sec: float
     crop: CropMode = "letterbox"
     crop_focus_x: float = Field(default=0.5, ge=0, le=1)
+    fade_out_sec: float = 0.0
 
 
 class AudioSpec(BaseModel):
     path: str
     start_sec: float = 0.0
     gain_db: float = 0.0
+    fade_out_sec: float = 0.0
 
 
 class ShotSource(BaseModel):
