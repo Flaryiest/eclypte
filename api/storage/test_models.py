@@ -78,3 +78,24 @@ def test_run_event_is_append_only_record():
     )
 
     assert event.payload["step"] == "video_analysis"
+
+
+def test_publishing_post_record_carries_source_and_song_names():
+    from api.storage.models import PublishingPostRecord
+
+    record = PublishingPostRecord(
+        post_id="pub_1",
+        owner_user_id="u1",
+        status="ready",
+        render_file_id="f1",
+        render_version_id="v1",
+        render_display_name="My Edit.mp4",
+        source_name="Spirited Away",
+        song_name="Unravel",
+        created_at="2026-06-26T00:00:00Z",
+        updated_at="2026-06-26T00:00:00Z",
+    )
+    assert record.source_name == "Spirited Away"
+    assert record.song_name == "Unravel"
+    # round-trips through JSON (durable storage)
+    assert PublishingPostRecord.model_validate_json(record.model_dump_json()).song_name == "Unravel"

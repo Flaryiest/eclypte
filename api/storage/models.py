@@ -153,6 +153,8 @@ class PublishingPostRecord(BaseModel):
     render_file_id: str
     render_version_id: str
     render_display_name: str
+    source_name: str = ""
+    song_name: str = ""
     collection_slug: str = ""
     platform: str = "instagram"
     provider: str = "buffer"
