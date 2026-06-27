@@ -136,6 +136,34 @@ class NoopWorkflowRunner:
     def run_synthesis_consolidation(self, **kwargs): ...
 
 
+def test_caption_input_includes_source_and_song(monkeypatch):
+    client = FakeOpenAIClient()
+    generate_caption_draft(
+        render_name="run_1.mp4",
+        collection_slug="ghibli",
+        source_name="Spirited Away",
+        song_name="Unravel",
+        openai_client=client,
+        model="gpt-test",
+    )
+    sent = client.calls[0]["input"]
+    assert "Spirited Away" in sent
+    assert "Unravel" in sent
+
+
+def test_fallback_hashtags_are_derived_from_names(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    draft = generate_caption_draft(
+        render_name="run_1.mp4",
+        source_name="Spirited Away",
+        song_name="Unravel",
+    )
+    assert draft.caption_source == "fallback"
+    assert "#spirited_away" in draft.hashtags
+    assert "#unravel" in draft.hashtags
+    assert "#amv" in draft.hashtags
+
+
 def test_caption_draft_is_punchy_and_collection_aware(monkeypatch):
     # Force the deterministic fallback (no live OpenAI call) so the test is
     # not sensitive to OPENAI_API_KEY being present in the environment.

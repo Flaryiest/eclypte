@@ -234,10 +234,17 @@ def generate_caption_draft(
     *,
     render_name: str,
     collection_slug: str = "",
+    source_name: str = "",
+    song_name: str = "",
     openai_client: Any | None = None,
     model: str | None = None,
 ) -> CaptionDraft:
-    fallback = _fallback_caption_draft(render_name=render_name, collection_slug=collection_slug)
+    fallback = _fallback_caption_draft(
+        render_name=render_name,
+        collection_slug=collection_slug,
+        source_name=source_name,
+        song_name=song_name,
+    )
     try:
         client = openai_client or _openai_client_from_env()
         if client is None:
@@ -246,6 +253,8 @@ def generate_caption_draft(
             client=client,
             render_name=render_name,
             collection_slug=collection_slug,
+            source_name=source_name,
+            song_name=song_name,
             model=model or os.environ.get("ECLYPTE_CAPTION_MODEL", "gpt-5.4-mini"),
         )
         if not payload.caption.strip():
@@ -265,16 +274,21 @@ def _fallback_caption_draft(
     *,
     render_name: str,
     collection_slug: str = "",
+    source_name: str = "",
+    song_name: str = "",
 ) -> CaptionDraft:
-    caption = f"{_humanize(collection_slug)} edit fr 🔥" if collection_slug else "this one goes crazy fr 🔥"
+    label = source_name or _humanize(collection_slug)
+    caption = f"{label} edit fr 🔥" if label else "this one goes crazy fr 🔥"
     hashtags = _dedupe_hashtags(
         [
             "#amv",
             "#edit",
+            "#anime",
             "#animeedit",
-            "#reels",
+            "#fyp",
+            _hashtag(source_name) if source_name else "",
+            _hashtag(song_name) if song_name else "",
             _hashtag(collection_slug) if collection_slug else "",
-            _hashtag(render_name.rsplit(".", 1)[0]),
         ]
     )
     return CaptionDraft(
@@ -289,6 +303,8 @@ def _openai_caption_draft(
     client: Any,
     render_name: str,
     collection_slug: str,
+    source_name: str,
+    song_name: str,
     model: str,
 ) -> CaptionDraft:
     collection_label = collection_slug or "uncategorized"
@@ -310,13 +326,19 @@ def _openai_caption_draft(
             "'ok this one ate'; 'no bc why did this go so hard'; 'pov: you cant stop "
             "rewatching'; 'they really said cinema'; 'this is my roman empire fr'; "
             "'lowkey cooked'; 'hi yes one ticket to this please'.\n"
-            "Caption under 2200 characters (keep it short). hashtags = array of up to 12 "
-            "lowercase hashtag strings. notes = a brief internal note for the editor."
+            "Caption under 2200 characters (keep it short). "
+            "hashtags = 8-12 lowercase hashtag strings: include one for the "
+            "anime/source and one for the song/artist when they are known, plus a "
+            "few broad discovery tags (#amv #anime #edit #fyp). No spaces or "
+            "punctuation. notes = a brief internal note for the editor."
         ),
         input=(
-            "Make a caption for this anime edit (AMV) reel. "
-            f"Loose context you can riff on or completely ignore: source/collection = "
-            f"{collection_label}. Write ONE caption a real creator would actually post."
+            "Make a caption for this anime edit (AMV) reel.\n"
+            f"Anime/source: {source_name or 'unknown'}\n"
+            f"Song: {song_name or 'unknown'}\n"
+            f"Loose collection label (optional): {collection_label}.\n"
+            "Write ONE caption a real creator would actually post. You may "
+            "reference the anime or song naturally if it fits, but never force it."
         ),
         text={
             "format": {
