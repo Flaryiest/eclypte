@@ -127,6 +127,8 @@ export type PublishingPost = {
     last_error: string | null
     auto_created: boolean
     source_run_id: string | null
+    source_name?: string
+    song_name?: string
     created_at: string
     updated_at: string
 }
