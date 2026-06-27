@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi.testclient import TestClient
 
 from api.app import create_app
@@ -9,6 +11,7 @@ from api.publishing import (
     generate_caption_draft,
     prepare_public_media_copy,
 )
+from api.storage.models import PublishingPostRecord
 from api.storage.refs import FileRef
 from api.storage.repository import StorageRepository
 from api.storage.test_fakes import InMemoryObjectStore
@@ -654,3 +657,49 @@ def test_create_post_resolves_movie_and_song_names_from_render_lineage():
 
     assert post.source_name == "Spirited Away"
     assert post.song_name == "Unravel"
+
+
+def test_regenerate_caption_passes_persisted_names(monkeypatch):
+    """Regenerate-caption must forward the post's stored source/song names to the draft generator."""
+    captured = {}
+
+    def fake_generate(**kwargs):
+        captured.update(kwargs)
+        from api.publishing import CaptionDraft
+        return CaptionDraft(caption="ok", hashtags=["#amv"], notes="", caption_source="openai")
+
+    monkeypatch.setattr("api.app.generate_caption_draft", fake_generate)
+
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    client = TestClient(
+        create_app(
+            store=store,
+            workflow_runner=NoopWorkflowRunner(),
+            buffer_client=RecordingBufferClient(),
+        )
+    )
+
+    now = "2026-01-01T00:00:00Z"
+    post_id = f"post_{uuid.uuid4().hex[:8]}"
+    record = PublishingPostRecord(
+        post_id=post_id,
+        owner_user_id="user_123",
+        status="ready",
+        render_file_id="file_render",
+        render_version_id="ver_render",
+        render_display_name="run.mp4",
+        source_name="Spirited Away",
+        song_name="Unravel",
+        created_at=now,
+        updated_at=now,
+    )
+    repo.save_publishing_post(record)
+
+    resp = client.post(
+        f"/v1/publishing/posts/{post_id}/regenerate-caption",
+        headers={"X-User-Id": "user_123"},
+    )
+    assert resp.status_code == 200
+    assert captured.get("source_name") == "Spirited Away"
+    assert captured.get("song_name") == "Unravel"

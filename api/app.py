@@ -1180,6 +1180,8 @@ def create_app(
         draft = generate_caption_draft(
             render_name=post.render_display_name,
             collection_slug=post.collection_slug,
+            source_name=post.source_name,
+            song_name=post.song_name,
         )
         return repo.save_publishing_post(
             post.model_copy(
