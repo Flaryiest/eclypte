@@ -24,6 +24,7 @@ from ..skills.base import RenderContext, ResolvedOverlay
 from ..synthesis.timeline_schema import OutputSpec, Shot, Timeline
 from ..synthesis.validators import validate_timeline
 from .effects import apply_effects
+from .fades import audio_fade_out, video_fade_out
 from .ffmpeg_filtergraph import can_render_with_ffmpeg
 from .ffmpeg_run import render_with_ffmpeg
 from .geometry import cover_crop_offsets, cover_resize_size
@@ -152,7 +153,9 @@ def render_timeline(
             timeline.audio.start_sec,
             timeline.audio.start_sec + timeline.output.duration_sec,
         )
+        audio_slice = audio_fade_out(audio_slice, timeline.audio.fade_out_sec)
         final = composited.with_audio(audio_slice).with_duration(timeline.output.duration_sec)
+        final = video_fade_out(final, timeline.output.fade_out_sec)
         _log_timing("concat/compose", concat_started)
         _report(progress_callback, 45, "Composed timeline")
 
