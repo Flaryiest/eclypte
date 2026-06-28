@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Bot, Pause, Play, Plus, RefreshCw, Trash2, Zap } from "lucide-react"
-import { DashboardPage, StatusBadge, errorMessage, formatDate } from "../dashboardCommon"
+import { DashboardPage, Pager, StatusBadge, errorMessage, formatDate, humanizeLabel, usePagination } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import { useRunStream } from "../useRunStream"
 import {
@@ -32,6 +32,7 @@ export default function AutopilotPage() {
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
     const autopilotResource = useAutopilot(api)
     const autopilot = autopilotResource.data ?? null
+    const itemsPager = usePagination(autopilot?.items ?? [], 10)
     const setAutopilot = autopilotResource.set
     // Shares the cached library with assets/new-edit; archived assets are dropped below.
     const assetsResource = useAssets(api, { includeArchived: true })
@@ -322,8 +323,9 @@ export default function AutopilotPage() {
                             The backlog is empty. Add a video + song pair above to give autopilot something to make.
                         </div>
                     ) : (
+                        <>
                         <ul className={styles.referenceList}>
-                            {autopilot.items.map((item) => (
+                            {itemsPager.pageItems.map((item) => (
                                 <li className={styles.listCard} key={item.item_id}>
                                     <div className={styles.cardTop}>
                                         <div>
@@ -360,6 +362,13 @@ export default function AutopilotPage() {
                                 </li>
                             ))}
                         </ul>
+                        <Pager
+                            page={itemsPager.page}
+                            pageCount={itemsPager.pageCount}
+                            onPrev={itemsPager.prev}
+                            onNext={itemsPager.next}
+                        />
+                        </>
                     )}
                 </div>
             </section>
@@ -403,5 +412,5 @@ function itemDetail(item: AutopilotItem) {
     if (item.creative_brief) {
         return item.creative_brief
     }
-    return item.status
+    return humanizeLabel(item.status)
 }

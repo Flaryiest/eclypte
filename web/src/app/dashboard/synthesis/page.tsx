@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Link, RefreshCw, RotateCcw, Save, Sparkles } from "lucide-react"
-import { DashboardPage, StatusBadge, errorMessage, formatDate } from "../dashboardCommon"
+import { DashboardPage, Pager, StatusBadge, errorMessage, formatDate, humanizeLabel, usePagination } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import {
     EclypteApiClient,
@@ -43,6 +43,15 @@ export default function SynthesisPage() {
     const completedReferences = references.filter((reference) => reference.status === "completed")
     const activePrompt = promptState?.active_prompt
     const promptChanged = Boolean(activePrompt && promptText !== activePrompt.prompt_text)
+    const sortedVersions = promptState
+        ? [...promptState.versions].sort((a, b) => {
+            if (a.version_id === promptState.active_version_id) return -1
+            if (b.version_id === promptState.active_version_id) return 1
+            return 0
+        })
+        : []
+    const versionsPager = usePagination(sortedVersions, 10)
+    const referencesPager = usePagination(references, 10)
 
     // Reseed the user-owned prompt textarea from the cached prompt only when it isn't
     // dirty, so a background revalidate (or another tab's activation) never wipes
@@ -168,13 +177,6 @@ export default function SynthesisPage() {
         )
     }
 
-    const sortedVersions = promptState
-        ? [...promptState.versions].sort((a, b) => {
-            if (a.version_id === promptState.active_version_id) return -1
-            if (b.version_id === promptState.active_version_id) return 1
-            return 0
-        })
-        : []
 
     return (
         <DashboardPage
@@ -235,8 +237,9 @@ export default function SynthesisPage() {
                     {!promptState || sortedVersions.length === 0 ? (
                         <div className={styles.emptyState}>No prompt versions loaded.</div>
                     ) : (
+                        <>
                         <ul className={styles.versionList}>
-                            {sortedVersions.map((version) => {
+                            {versionsPager.pageItems.map((version) => {
                                 const isActive = version.version_id === promptState.active_version_id
                                 return (
                                     <li className={styles.listCard} key={version.version_id}>
@@ -247,7 +250,6 @@ export default function SynthesisPage() {
                                             </div>
                                             <StatusBadge label={isActive ? "active" : "saved"} tone={isActive ? "completed" : undefined} />
                                         </div>
-                                        <p className={styles.monoText}>{version.version_id}</p>
                                         {!isActive && (
                                             <div className={styles.cardActions}>
                                                 <button className={styles.secondaryButton} type="button" onClick={() => activateVersion(version.version_id)}>
@@ -259,6 +261,13 @@ export default function SynthesisPage() {
                                 )
                             })}
                         </ul>
+                        <Pager
+                            page={versionsPager.page}
+                            pageCount={versionsPager.pageCount}
+                            onPrev={versionsPager.prev}
+                            onNext={versionsPager.next}
+                        />
+                        </>
                     )}
                 </div>
 
@@ -312,8 +321,9 @@ export default function SynthesisPage() {
                                     {references.length === 0 ? (
                                         <div className={styles.emptyState}>No references submitted yet.</div>
                                     ) : (
+                                        <>
                                         <ul className={styles.referenceList}>
-                                            {references.map((reference) => (
+                                            {referencesPager.pageItems.map((reference) => (
                                                 <li className={styles.listCard} key={reference.reference_id}>
                                                     <div className={styles.cardTop}>
                                                         <div>
@@ -329,6 +339,13 @@ export default function SynthesisPage() {
                                                 </li>
                                             ))}
                                         </ul>
+                                        <Pager
+                                            page={referencesPager.page}
+                                            pageCount={referencesPager.pageCount}
+                                            onPrev={referencesPager.prev}
+                                            onNext={referencesPager.next}
+                                        />
+                                        </>
                                     )}
                                 </div>
 
@@ -359,5 +376,7 @@ function uniqueLines(value: string) {
 }
 
 function runDetail(run: RunManifest) {
-    return run.current_step ? `${run.status} - ${run.current_step}` : run.status
+    return run.current_step
+        ? `${humanizeLabel(run.status)} · ${humanizeLabel(run.current_step)}`
+        : humanizeLabel(run.status)
 }

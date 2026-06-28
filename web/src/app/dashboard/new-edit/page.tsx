@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Download, Eye, Play, RefreshCw, RotateCcw, Trash2, WandSparkles, XCircle } from "lucide-react"
-import { DashboardPage, SkeletonList, StatusBadge, errorMessage, formatBytes, formatDate, isAbortError, kindLabel, versionRef } from "../dashboardCommon"
+import { DashboardPage, Pager, SkeletonList, StatusBadge, errorMessage, formatBytes, formatDate, isAbortError, kindLabel, usePagination, versionRef } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import { downloadSignedUrl, safeDownloadFilename } from "@/services/downloadFile"
 import {
@@ -67,6 +67,7 @@ export default function NewEditPage() {
     const assets = useMemo(() => assetsResource.data ?? [], [assetsResource.data])
     const jobsResource = useEditJobs(api)
     const jobs = useMemo(() => jobsResource.data ?? [], [jobsResource.data])
+    const jobsPager = usePagination(jobs, 10)
     const setJobs = jobsResource.set
     const isLoading = assetsResource.isLoading || jobsResource.isLoading
     const loadError = assetsResource.error ?? jobsResource.error
@@ -618,7 +619,7 @@ export default function NewEditPage() {
                         <div className={styles.emptyState}>No edit jobs yet.</div>
                     ) : (
                         <div className={styles.jobList}>
-                            {jobs.map((job) => (
+                            {jobsPager.pageItems.map((job) => (
                                 <EditJobCard
                                     key={job.run_id}
                                     job={job}
@@ -635,6 +636,12 @@ export default function NewEditPage() {
                                     onRedo={() => redoJob(job)}
                                 />
                             ))}
+                            <Pager
+                                page={jobsPager.page}
+                                pageCount={jobsPager.pageCount}
+                                onPrev={jobsPager.prev}
+                                onNext={jobsPager.next}
+                            />
                         </div>
                     )}
                 </div>
@@ -684,7 +691,7 @@ function EditJobCard({
             <div className={styles.cardTop}>
                 <div>
                     <h3>{job.title}</h3>
-                    <p className={styles.smallText}>{job.run_id} - {formatDate(job.updated_at)}</p>
+                    <p className={styles.smallText}>{formatDate(job.updated_at)}</p>
                 </div>
                 <StatusBadge label={job.status} tone={job.status} />
             </div>

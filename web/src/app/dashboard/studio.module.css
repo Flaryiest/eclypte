@@ -113,7 +113,12 @@
 	display: flex;
 	align-items: flex-start;
 	gap: 0.85rem;
+	min-width: 0;
 	color: var(--ec-ink-2);
+}
+
+.settingCard > div {
+	min-width: 0;
 }
 
 .wide {
@@ -266,6 +271,7 @@
 .input,
 .textarea {
 	width: 100%;
+	box-sizing: border-box;
 	border: none;
 	border-bottom: 1px solid var(--ec-rule-strong);
 	border-radius: 0;
@@ -285,7 +291,6 @@
 
 .textarea {
 	min-height: 160px;
-	padding: 0.6rem 0;
 	resize: vertical;
 	line-height: 1.55;
 	border: 1px solid var(--ec-rule);
@@ -654,11 +659,83 @@
 
 .monoText {
 	display: block;
+	min-width: 0;
 	color: var(--ec-ink);
 	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 	font-size: 0.82rem;
 	overflow-wrap: anywhere;
 	line-height: 1.5;
+}
+
+.pager {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 1rem;
+	margin-top: 0.2rem;
+	padding-top: 1rem;
+	border-top: 1px solid var(--ec-rule);
+}
+
+.pagerStatus {
+	font-family: var(--font-neue), sans-serif;
+	font-size: 0.62rem;
+	font-weight: 600;
+	letter-spacing: 0.18em;
+	text-transform: uppercase;
+	color: var(--ec-ink-muted);
+	white-space: nowrap;
+}
+
+.pagerButton {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	min-height: 32px;
+	padding: 0.4rem 0.7rem;
+	border: 1px solid var(--ec-rule-strong);
+	border-radius: 0;
+	background: transparent;
+	color: var(--ec-ink);
+	font-family: var(--font-neue), sans-serif;
+	font-size: 0.68rem;
+	font-weight: 600;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	cursor: pointer;
+	transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, opacity 140ms ease;
+}
+
+.pagerButton:hover:not(:disabled) {
+	background: var(--ec-paper-sunk);
+	border-color: var(--ec-ink);
+}
+
+.pagerButton:disabled {
+	opacity: 0.35;
+	cursor: not-allowed;
+}
+
+.libraryFilters {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	padding-bottom: 1rem;
+}
+
+.libraryFilterLabel {
+	font-family: var(--font-neue), sans-serif;
+	font-size: 0.62rem;
+	font-weight: 600;
+	letter-spacing: 0.22em;
+	text-transform: uppercase;
+	color: var(--ec-ink-muted);
+}
+
+.libraryFilterSelect {
+	width: auto;
+	min-width: 130px;
+	min-height: 34px;
 }
 
 .cardTop {
@@ -860,6 +937,8 @@
 }
 
 .codeBlock {
+	width: 100%;
+	box-sizing: border-box;
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
 	max-height: 320px;
@@ -1437,18 +1516,6 @@
 	font-weight: 400;
 	letter-spacing: -0.005em;
 	text-transform: none;
-	color: var(--ec-ink);
-	overflow-wrap: anywhere;
-}
-
-/* Compound selector wins the tie against `.listCard h3` regardless of nesting. */
-h3.monoTitle {
-	margin: 0;
-	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-	font-size: 0.86rem;
-	font-weight: 400;
-	text-transform: none;
-	letter-spacing: 0;
 	color: var(--ec-ink);
 	overflow-wrap: anywhere;
 }

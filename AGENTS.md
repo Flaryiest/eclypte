@@ -63,7 +63,7 @@ Eclypte is an AMV creator monorepo. The product path is a Next.js dashboard back
 - Marketing routes are `/` (landing), `/pricing` (three-tier pricing + FAQ), and `/demo` ("Screening Room" demo with poster-first lazy video; `web/src/components/demo/demoPlayer.tsx`).
 - Dashboard routes are product code:
   - `/dashboard/new-edit`: saved asset selection, export controls, crop preview, edit creation, run streaming/poll fallback, stage progress, preview/download, cancel/delete/redo.
-  - `/dashboard/assets`: direct R2 uploads, cleanup, asset library with archived items, manual analysis, YouTube song import, preview/download, delete/restore.
+  - `/dashboard/assets`: direct R2 uploads, cleanup, asset library with archived items (Sources/Derived/Hidden tabs + a Songs/Sources kind filter, paginated), manual analysis, YouTube song import, preview/download, delete/restore.
   - `/dashboard/publish`: review-gated Instagram Reels publishing queue for Buffer, including setup diagnostics, caption editing/regeneration, queue/schedule actions, posted/error metadata, per-lane tab counts, live polling of in-flight posts against Buffer (interval + tab refocus) that auto-advances queued→posted and back-fills permalinks, and a manual "Refresh from Buffer" button to re-check on demand.
   - `/dashboard/synthesis`: reference queueing, consolidation, active prompt viewing/editing/version activation.
   - `/dashboard/renders`: render-output library and recent render runs.

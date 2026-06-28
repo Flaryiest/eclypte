@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, type ReactNode } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { ChevronLeft, ChevronRight } from "lucide-react"
 import styles from "./studio.module.css"
 import type { AssetState, AssetSummary, PublishingPostStatus, RunManifest, SynthesisReference } from "@/services/eclypteApi"
 
@@ -41,7 +42,7 @@ export function StatusBadge({
     return (
         <span className={className}>
             <span className={styles.badgeDot} aria-hidden />
-            {label}
+            {humanizeLabel(label)}
         </span>
     )
 }
@@ -109,8 +110,90 @@ export function versionRef(asset: AssetSummary) {
     }
 }
 
+// Turn a raw enum/identifier (snake_case, kebab-case, or lowercase) into a
+// human-readable Title Case label: "music_analysis" -> "Music Analysis",
+// "queued_scheduled" -> "Queued Scheduled", "needs setup" -> "Needs Setup".
+export function humanizeLabel(value: string) {
+    return value
+        .replace(/[_-]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .split(" ")
+        .map((word) => (word ? word[0].toUpperCase() + word.slice(1) : word))
+        .join(" ")
+}
+
 export function kindLabel(kind: string) {
-    return kind.replaceAll("_", " ")
+    return humanizeLabel(kind)
+}
+
+// Client-side pagination for dashboard lists. Renders one page of `pageSize`
+// items at a time; pass a `resetKey` (e.g. the active tab/filter) to jump back to
+// the first page when the underlying selection changes. The current page is kept
+// in range automatically when the list shrinks (delete, archive, revalidate).
+export function usePagination<T>(items: readonly T[], pageSize: number, resetKey?: unknown) {
+    const [page, setPage] = useState(0)
+    // Reset to the first page when the filter/tab identity changes. Adjusting state
+    // during render (React's recommended pattern) avoids an effect + extra paint.
+    const [seenResetKey, setSeenResetKey] = useState(resetKey)
+    if (seenResetKey !== resetKey) {
+        setSeenResetKey(resetKey)
+        setPage(0)
+    }
+    const pageCount = Math.max(1, Math.ceil(items.length / pageSize))
+    // Keep the shown page in range when the list shrinks, without persisting it; the
+    // prev/next handlers move relative to the clamped page so they self-correct.
+    const safePage = Math.min(page, pageCount - 1)
+    const start = safePage * pageSize
+    return {
+        page: safePage,
+        pageCount,
+        pageItems: items.slice(start, start + pageSize),
+        total: items.length,
+        prev: () => setPage(Math.max(0, safePage - 1)),
+        next: () => setPage(Math.min(pageCount - 1, safePage + 1)),
+    }
+}
+
+export function Pager({
+    page,
+    pageCount,
+    onPrev,
+    onNext,
+}: {
+    page: number
+    pageCount: number
+    onPrev: () => void
+    onNext: () => void
+}) {
+    if (pageCount <= 1) {
+        return null
+    }
+    return (
+        <div className={styles.pager}>
+            <button
+                type="button"
+                className={styles.pagerButton}
+                onClick={onPrev}
+                disabled={page === 0}
+                aria-label="Previous page"
+            >
+                <ChevronLeft size={15} /> Prev
+            </button>
+            <span className={styles.pagerStatus} aria-live="polite">
+                Page {page + 1} of {pageCount}
+            </span>
+            <button
+                type="button"
+                className={styles.pagerButton}
+                onClick={onNext}
+                disabled={page >= pageCount - 1}
+                aria-label="Next page"
+            >
+                Next <ChevronRight size={15} />
+            </button>
+        </div>
+    )
 }
 
 export function errorMessage(error: unknown) {

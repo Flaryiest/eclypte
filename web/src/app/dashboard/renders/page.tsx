@@ -6,11 +6,14 @@ import { useRouter } from "next/navigation"
 import { Download, RefreshCw, Send, Trash2 } from "lucide-react"
 import {
     DashboardPage,
+    Pager,
     SkeletonList,
     StatusBadge,
     errorMessage,
     formatBytes,
     formatDate,
+    humanizeLabel,
+    usePagination,
     versionRef,
 } from "../dashboardCommon"
 import styles from "../studio.module.css"
@@ -36,6 +39,7 @@ export default function RendersPage() {
     const setOutputs = outputsResource.set
     const runsResource = useRuns(api, { workflowType: "render" })
     const runs = runsResource.data ?? []
+    const runsPager = usePagination(runs, 10)
     const isLoading = outputsResource.isLoading || runsResource.isLoading
     const loadError = outputsResource.error ?? runsResource.error
     const hasActiveRuns = runs.some(isRunActive)
@@ -253,20 +257,28 @@ export default function RendersPage() {
                             {runs.length === 0 ? (
                                 <div className={styles.emptyState}>No render runs found.</div>
                             ) : (
-                                <ul className={styles.runList}>
-                                    {runs.map((run) => (
-                                        <li className={styles.listCard} key={run.run_id}>
-                                            <div className={styles.cardTop}>
-                                                <div>
-                                                    <h3 className={styles.monoTitle}>{run.run_id}</h3>
-                                                    <p className={styles.smallText}>{run.current_step || "render"} · {formatDate(run.updated_at)}</p>
+                                <>
+                                    <ul className={styles.runList}>
+                                        {runsPager.pageItems.map((run) => (
+                                            <li className={styles.listCard} key={run.run_id}>
+                                                <div className={styles.cardTop}>
+                                                    <div>
+                                                        <h3>Render</h3>
+                                                        <p className={styles.smallText}>{humanizeLabel(run.current_step || "render")} · {formatDate(run.updated_at)}</p>
+                                                    </div>
+                                                    <StatusBadge label={run.status} tone={run.status} />
                                                 </div>
-                                                <StatusBadge label={run.status} tone={run.status} />
-                                            </div>
-                                            {run.last_error && <div className={styles.errorBanner}>{run.last_error}</div>}
-                                        </li>
-                                    ))}
-                                </ul>
+                                                {run.last_error && <div className={styles.errorBanner}>{run.last_error}</div>}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                    <Pager
+                                        page={runsPager.page}
+                                        pageCount={runsPager.pageCount}
+                                        onPrev={runsPager.prev}
+                                        onNext={runsPager.next}
+                                    />
+                                </>
                             )}
                         </div>
                     </section>

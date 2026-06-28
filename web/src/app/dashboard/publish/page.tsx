@@ -15,10 +15,13 @@ import {
 } from "lucide-react"
 import {
     DashboardPage,
+    Pager,
     SkeletonList,
     StatusBadge,
     errorMessage,
     formatDate,
+    humanizeLabel,
+    usePagination,
 } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import {
@@ -66,6 +69,7 @@ export default function PublishPage() {
     const isLoading = postsResource.isLoading
     const loadError = postsResource.error ?? configResource.error
     const visiblePosts = useMemo(() => filterPosts(posts, tab), [posts, tab])
+    const postsPager = usePagination(visiblePosts, 10, tab)
     // Lane-aware: the detail panel always shows a post that lives in the active tab,
     // so switching tabs never strands the panel on a post hidden from the list.
     const selected = visiblePosts.find((post) => post.post_id === selectedId) ?? visiblePosts[0] ?? null
@@ -428,7 +432,7 @@ export default function PublishPage() {
                         <div className={styles.emptyState}>No posts in this lane.</div>
                     ) : (
                         <div className={styles.packageList}>
-                            {visiblePosts.map((post) => (
+                            {postsPager.pageItems.map((post) => (
                                 <button
                                     type="button"
                                     key={post.post_id}
@@ -443,13 +447,19 @@ export default function PublishPage() {
                                         <StatusBadge label={post.status} tone={post.status} />
                                     </span>
                                     <span className={styles.packageRowMeta}>
-                                        {post.collection_slug || "uncategorized"}
-                                        {post.auto_created ? " · autopilot" : ""}
+                                        {post.collection_slug ? humanizeLabel(post.collection_slug) : "Uncategorized"}
+                                        {post.auto_created ? " · Autopilot" : ""}
                                         {" · "}
                                         {formatDate(post.updated_at)}
                                     </span>
                                 </button>
                             ))}
+                            <Pager
+                                page={postsPager.page}
+                                pageCount={postsPager.pageCount}
+                                onPrev={postsPager.prev}
+                                onNext={postsPager.next}
+                            />
                         </div>
                     )}
                 </div>
@@ -463,7 +473,7 @@ export default function PublishPage() {
                                 <div>
                                     <h2 className={styles.heroCaptionTitle}>{selected.render_display_name}</h2>
                                     <p className={styles.heroCaptionMeta}>
-                                        {selected.collection_slug || "uncategorized"} - {formatDate(selected.updated_at)}
+                                        {selected.collection_slug ? humanizeLabel(selected.collection_slug) : "Uncategorized"} · {formatDate(selected.updated_at)}
                                     </p>
                                 </div>
                                 <StatusBadge label={selected.status} tone={selected.status} />
@@ -542,7 +552,7 @@ export default function PublishPage() {
 
                             <div className={styles.settingsGrid}>
                                 <PostDetail label="Buffer post" value={selected.buffer_post_id || "Not sent"} />
-                                <PostDetail label="Buffer status" value={selected.buffer_status || "Not sent"} />
+                                <PostDetail label="Buffer status" value={selected.buffer_status ? humanizeLabel(selected.buffer_status) : "Not sent"} />
                                 <PostDetail label="Caption source" value={captionSourceLabel(selected)} />
                                 <PostDetail label="Scheduled" value={formatDate(selected.scheduled_at)} />
                                 <PostDetail label="Public media" value={selected.public_media_url || "Not prepared"} href={selected.public_media_url} />

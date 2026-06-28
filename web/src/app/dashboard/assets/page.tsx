@@ -5,6 +5,7 @@ import { useUser } from "@clerk/nextjs"
 import { Activity, Download, Link2, RefreshCw, RotateCcw, Trash2, Upload } from "lucide-react"
 import {
     DashboardPage,
+    Pager,
     SkeletonList,
     StatusBadge,
     errorMessage,
@@ -12,6 +13,7 @@ import {
     formatDate,
     isAbortError,
     kindLabel,
+    usePagination,
     versionRef,
 } from "../dashboardCommon"
 import { useAssets } from "@/stores/dashboardResources"
@@ -30,10 +32,14 @@ type UploadSlot = "audio" | "video"
 type PreviewState = { asset: AssetSummary; url: string }
 type Disclosure = "upload" | "youtube" | null
 type LibraryTab = "source" | "derived" | "hidden"
+type KindFilter = "all" | "song" | "source"
+
+const LIBRARY_PAGE_SIZE = 24
 
 export default function AssetsPage() {
     const { isLoaded, isSignedIn, user } = useUser()
     const [activeTab, setActiveTab] = useState<LibraryTab>("source")
+    const [kindFilter, setKindFilter] = useState<KindFilter>("all")
     const [file, setFile] = useState<File | null>(null)
     const [slot, setSlot] = useState<UploadSlot>("audio")
     const [youtubeUrl, setYoutubeUrl] = useState("")
@@ -59,7 +65,14 @@ export default function AssetsPage() {
     const sourceAssets = assets.filter((asset) => !asset.archived_at && isSourceKind(asset.kind))
     const derivedAssets = assets.filter((asset) => !asset.archived_at && !isSourceKind(asset.kind) && asset.kind !== "render_output")
     const hiddenAssets = assets.filter((asset) => Boolean(asset.archived_at))
-    const visibleAssets = activeTab === "source" ? sourceAssets : activeTab === "derived" ? derivedAssets : hiddenAssets
+    const tabAssets = activeTab === "source" ? sourceAssets : activeTab === "derived" ? derivedAssets : hiddenAssets
+    // The Songs/Sources kind filter only applies to the Sources tab (where the two
+    // primary kinds live); Derived/Hidden ignore it.
+    const visibleAssets =
+        activeTab === "source" && kindFilter !== "all"
+            ? tabAssets.filter((asset) => asset.kind === (kindFilter === "song" ? "song_audio" : "source_video"))
+            : tabAssets
+    const assetPager = usePagination(visibleAssets, LIBRARY_PAGE_SIZE, `${activeTab}:${kindFilter}`)
     const isWorking = isUploading || isImporting
     const selectedAsset = selectedFileId ? visibleAssets.find((asset) => asset.file_id === selectedFileId) ?? null : null
 
@@ -447,6 +460,21 @@ export default function AssetsPage() {
                             </button>
                         </div>
                     </div>
+                    {activeTab === "source" && (
+                        <div className={styles.libraryFilters}>
+                            <span className={styles.libraryFilterLabel}>Kind</span>
+                            <select
+                                className={`${styles.select} ${styles.libraryFilterSelect}`}
+                                value={kindFilter}
+                                onChange={(event) => setKindFilter(event.target.value as KindFilter)}
+                                aria-label="Filter by kind"
+                            >
+                                <option value="all">All</option>
+                                <option value="song">Songs</option>
+                                <option value="source">Sources</option>
+                            </select>
+                        </div>
+                    )}
                     {visibleAssets.length === 0 ? (
                         <div className={styles.emptyState}>{emptyAssetMessage(activeTab)}</div>
                     ) : (
@@ -458,7 +486,7 @@ export default function AssetsPage() {
                                 <span>Updated</span>
                                 <span>Status</span>
                             </div>
-                            {visibleAssets.map((asset) => {
+                            {assetPager.pageItems.map((asset) => {
                                 const state = assetState(asset)
                                 const isSelected = selectedFileId === asset.file_id
                                 return (
@@ -470,7 +498,6 @@ export default function AssetsPage() {
                                     >
                                         <span className={styles.assetRowName}>
                                             <span className={styles.assetRowTitle}>{asset.display_name}</span>
-                                            <span className={styles.assetRowMeta}>{asset.file_id.slice(0, 12)}</span>
                                         </span>
                                         <span className={styles.assetRowCell}>{kindLabel(asset.kind)}</span>
                                         <span className={styles.assetRowCellNumeral}>{formatBytes(asset.current_version?.size_bytes)}</span>
@@ -479,6 +506,12 @@ export default function AssetsPage() {
                                     </button>
                                 )
                             })}
+                            <Pager
+                                page={assetPager.page}
+                                pageCount={assetPager.pageCount}
+                                onPrev={assetPager.prev}
+                                onNext={assetPager.next}
+                            />
                         </div>
                     )}
                 </div>
