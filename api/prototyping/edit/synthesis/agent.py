@@ -8,6 +8,7 @@ from openai import OpenAI
 
 from api.prototyping.edit import skills
 from api.prototyping.edit.index.query import query_clips
+from api.prototyping.edit.synthesis.system_prompt import SYSTEM_PROMPT
 
 _ENV_PATH = Path(__file__).resolve().parent / ".env"
 
@@ -16,29 +17,11 @@ REASONING_EFFORT = "high"
 VERBOSITY = "low"
 MAX_LOOPS = 10
 
-SYSTEM_PROMPT = """
-You are an expert AMV editor. You must construct a video timeline based on the user's instructions.
-You have access to a semantic search tool `query_clips` which lets you find timestamps in the source video matching text queries.
-
-Steps:
-1. Analyze the provided song metadata (duration, tempo, section structure) and the user's instructions.
-2. Use `query_clips` to find the best source timestamps for the moments you need.
-3. Construct the timeline by matching shots to the song's sections and pacing. The total timeline MUST span the full song duration.
-4. Call `finish_edit` with the final timeline.
-
-Editorial guidelines (baseline — follow unless the user's instructions override):
-- Fit the full song. The final shot's end_time MUST equal the song duration (within ~0.5s). Do not stop early.
-- Pace shots against the sections. Denser cuts in high-energy sections (chorus, drop); longer holds in low-energy sections (intro, verse, bridge).
-- The opening is the most important section. The first 1.5 seconds decide whether a viewer stays: open on the single most visually striking moment you can find (an impact frame, a burst of motion, an iconic character moment) — never a slow establishing shot — and land the first cut within ~1.5s. Invest the most creativity at the start; this is what hooks the viewer.
-- Each timeline item may optionally set "transition_in" ("cut" | "flash" | "crossfade") and "effect" ("freeze" | "punch_in"). "flash" renders a subtle brightness bloom (a gentle exposure lift, not a white strobe) — use it at most once per edit, only on the single hardest drop, and default to "cut" otherwise. Use punch_in to add life to a longer held shot, and freeze for a dramatic stop on a final hit. Use all of these sparingly, at musical moments.
-- After the opening, plain cut transitions are fine. You do not need to apply creative patterns to every shot — the rest of the edit should carry the story, not show off.
-- Span the full source from beginning to end regardless of song length: the edit must reach the end of the source's actual content (stop before any end-credits or black tail), not just a cluster of early or high-energy moments. A shorter song means fewer, more spread-out shots — not a smaller slice of the film. You may still dwell on or revisit a standout moment.
-- Never select dead frames: black frames, fades-to-black, solid-color frames, logos, title cards, or end credits. These usually sit in the first and last few seconds of the source — do not open or close the edit on them. Every shot must be real content (characters, action, scenery).
-- Pick shots mostly in chronological order from the source video. Small re-orderings for pacing are OK, but the overall progression should move forward through the source.
-- CRITICAL: every `source_timestamp` in your final `finish_edit` call MUST be DISTINCT from every other `source_timestamp` (differ by more than 1 second). The adapter will drop any duplicates — repeated shots will be silently removed, shortening your AMV. This is the most common failure mode; double-check before calling `finish_edit`.
-
-Your timeline MUST be continuous without overlapping clips.
-"""
+# SYSTEM_PROMPT is the canonical baseline prompt imported from system_prompt.py
+# (the single source of truth). It is the fallback used only when run_synthesis_loop
+# is called without an explicit system_prompt; production passes the active prompt
+# version's text. Re-export it here so existing `from ...agent import SYSTEM_PROMPT`
+# call sites keep working.
 
 REMINDER_TEXT = (
     "Reminder before your next turn: all `source_timestamp` values in your "
@@ -187,9 +170,17 @@ def _format_source_context(source_duration_sec: float) -> str:
         f"shots — NOT a smaller slice of the film. You may still dwell on or revisit a "
         f"standout moment (a climax, a key scene); coverage need not be even, but do not "
         f"leave the back half of the source unrepresented.\n"
-        f"IMPORTANT: the first and last few seconds are usually a black/logo intro or an "
-        f"end-credits roll. Do NOT anchor your opening or closing shot there — open and "
-        f"close on real content, and never pick black frames, title cards, or credits."
+        f"IMPORTANT — END CREDITS: the source's opening and closing stretches are usually a "
+        f"black/logo intro and an end-credits roll, and those credits OFTEN play over a "
+        f"COLORED (non-black) background, so they are NOT always auto-trimmed from the usable "
+        f"source. Any frame dominated by on-screen text — rolling names, cast/crew lists, a "
+        f"title card — is credits, not content, no matter how bright or colorful it is. Be "
+        f"especially careful with your CLOSING shot: keep its source_timestamp on unmistakable "
+        f"story content, pulled back from the very end of the source; if the tail might still "
+        f"be credits, choose an earlier moment. Better to close on a strong mid-content beat "
+        f"than to risk a credits frame. (Filling the song to its full duration is about the "
+        f"audio timeline; it does NOT require your final shot to come from the literal last "
+        f"seconds of the source.)"
     )
 
 
