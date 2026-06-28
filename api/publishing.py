@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import os
 import re
@@ -536,6 +536,32 @@ def format_post_text(caption: str, hashtags: list[str]) -> str:
 
 def queue_status_for_mode(mode: BufferShareMode) -> str:
     return "scheduled" if mode == "customScheduled" else "queued"
+
+
+# Default lead before an immediate "post now" is due, in seconds. Buffer rejects a
+# `dueAt` in the past ("dueAt must be in the future"), so we schedule slightly ahead to
+# absorb client/server clock skew + request latency; Buffer's automatic publisher then
+# sends it on its next cycle after that time (near-immediate, not literally instant).
+DEFAULT_POST_NOW_LEAD_SEC = 60
+
+
+def immediate_due_at(lead_seconds: int | None = None) -> str:
+    """A near-future ISO-8601 UTC ``dueAt`` for posting as soon as Buffer allows.
+
+    Used by "post now": send Buffer a ``customScheduled`` post due ``now + lead`` so it
+    bypasses the posting-schedule queue and publishes right away rather than waiting for
+    the next slot. The lead defaults to ``ECLYPTE_BUFFER_POST_NOW_LEAD_SEC``
+    (``DEFAULT_POST_NOW_LEAD_SEC``).
+    """
+    if lead_seconds is None:
+        raw = os.environ.get("ECLYPTE_BUFFER_POST_NOW_LEAD_SEC")
+        try:
+            lead_seconds = int(raw) if raw else DEFAULT_POST_NOW_LEAD_SEC
+        except ValueError:
+            lead_seconds = DEFAULT_POST_NOW_LEAD_SEC
+    lead_seconds = max(0, lead_seconds)
+    due = datetime.now(timezone.utc) + timedelta(seconds=lead_seconds)
+    return due.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # Buffer Post.status values that mean the post has gone live on the channel.

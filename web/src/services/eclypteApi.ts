@@ -425,7 +425,7 @@ export class EclypteApiClient {
 
     async sendPublishingPostToBuffer(
         postId: string,
-        input: { mode: "queue" | "schedule"; scheduledAt?: string | null },
+        input: { mode: "queue" | "schedule" | "now"; scheduledAt?: string | null },
         signal?: AbortSignal,
     ) {
         return this.request<PublishingPost>(

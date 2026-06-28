@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
@@ -335,6 +336,51 @@ def test_publishing_api_prepares_updates_and_queues_buffer_post(monkeypatch):
         }
     ]
     assert [item["post_id"] for item in listed.json()] == [post_id]
+
+
+def test_send_buffer_post_now_schedules_immediate_due_at(monkeypatch):
+    monkeypatch.setenv("BUFFER_INSTAGRAM_CHANNEL_ID", "channel_instagram")
+    monkeypatch.setenv("ECLYPTE_R2_PUBLIC_BASE_URL", "https://media.example.com")
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    render = _publish_render(repo, body=b"render-video")
+    buffer = RecordingBufferClient()
+    client = TestClient(
+        create_app(
+            store=store,
+            workflow_runner=NoopWorkflowRunner(),
+            buffer_client=buffer,
+        )
+    )
+
+    prepared = client.post(
+        "/v1/publishing/posts",
+        headers={"X-User-Id": "user_123"},
+        json={"render_output": render},
+    )
+    post_id = prepared.json()["post_id"]
+    # "post now" needs no scheduled_at — the server computes a near-future dueAt itself.
+    sent = client.post(
+        f"/v1/publishing/posts/{post_id}/send-buffer",
+        headers={"X-User-Id": "user_123"},
+        json={"mode": "now"},
+    )
+
+    assert sent.status_code == 200
+    assert sent.json()["status"] == "scheduled"
+    assert sent.json()["buffer_post_id"] == "buf_123"
+
+    assert len(buffer.calls) == 1
+    call = buffer.calls[0]
+    assert call["mode"] == "customScheduled"
+    # dueAt is a near-future UTC timestamp, not None and not in the past (Buffer rejects
+    # past times), so the post bypasses the queue slot and publishes right away.
+    assert call["due_at"]
+    due_at = datetime.strptime(call["due_at"], "%Y-%m-%dT%H:%M:%SZ").replace(
+        tzinfo=timezone.utc
+    )
+    assert due_at > datetime.now(timezone.utc)
+    assert sent.json()["scheduled_at"] == call["due_at"]
 
 
 def test_refresh_status_backfills_post_url_from_buffer(monkeypatch):

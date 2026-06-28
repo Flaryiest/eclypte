@@ -37,6 +37,7 @@ from api.publishing import (
     create_publish_post_for_render,
     format_post_text,
     generate_caption_draft,
+    immediate_due_at,
     optional_bool,
     optional_str,
     prepare_public_media_copy,
@@ -201,7 +202,7 @@ class PublishingPostUpdateRequest(BaseModel):
 
 
 class PublishingPostSendRequest(BaseModel):
-    mode: Literal["queue", "schedule"] = "queue"
+    mode: Literal["queue", "schedule", "now"] = "queue"
     scheduled_at: str | None = None
 
 
@@ -1215,10 +1216,22 @@ def create_app(
             raise HTTPException(status_code=400, detail="publishing post is canceled")
         channel_id = resolve_buffer_channel_id()
         public_base_url = resolve_public_media_base_url()
-        mode = "customScheduled" if request.mode == "schedule" else "addToQueue"
-        due_at = request.scheduled_at or post.scheduled_at
-        if mode == "customScheduled" and not due_at:
-            raise HTTPException(status_code=400, detail="scheduled_at is required for schedule mode")
+        if request.mode == "now":
+            # Post immediately: a customScheduled post due just ahead of now bypasses the
+            # posting-schedule queue. dueAt is computed server-side (Buffer rejects past
+            # times) and ignores any stored/requested schedule.
+            mode = "customScheduled"
+            due_at: str | None = immediate_due_at()
+        elif request.mode == "schedule":
+            mode = "customScheduled"
+            due_at = request.scheduled_at or post.scheduled_at
+            if not due_at:
+                raise HTTPException(
+                    status_code=400, detail="scheduled_at is required for schedule mode"
+                )
+        else:
+            mode = "addToQueue"
+            due_at = request.scheduled_at or post.scheduled_at
         prepared = prepare_public_media_copy(
             repo,
             store=resolved_store,

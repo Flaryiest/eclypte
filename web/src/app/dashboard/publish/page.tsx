@@ -11,6 +11,7 @@ import {
     Send,
     Sparkles,
     XCircle,
+    Zap,
 } from "lucide-react"
 import {
     DashboardPage,
@@ -261,7 +262,7 @@ export default function PublishPage() {
         }
     }
 
-    const handleSend = async (mode: "queue" | "schedule") => {
+    const handleSend = async (mode: "queue" | "schedule" | "now") => {
         if (!api || !selected) {
             return
         }
@@ -515,7 +516,10 @@ export default function PublishPage() {
                                 <button className={styles.secondaryButton} type="button" onClick={handleRegenerate} disabled={isWorking}>
                                     <Sparkles size={16} /> Regenerate
                                 </button>
-                                <button className={styles.primaryButton} type="button" onClick={() => handleSend("queue")} disabled={isWorking}>
+                                <button className={styles.primaryButton} type="button" onClick={() => handleSend("now")} disabled={isWorking}>
+                                    <Zap size={16} /> Post now
+                                </button>
+                                <button className={styles.secondaryButton} type="button" onClick={() => handleSend("queue")} disabled={isWorking}>
                                     <Send size={16} /> Queue
                                 </button>
                                 <button className={styles.secondaryButton} type="button" onClick={() => handleSend("schedule")} disabled={isWorking}>
