@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Bot, Pause, Play, Plus, RefreshCw, Trash2, Zap } from "lucide-react"
-import { DashboardPage, Pager, StatusBadge, errorMessage, formatDate, humanizeLabel, usePagination } from "../dashboardCommon"
+import { DashboardPage, EmptyState, Pager, StatusBadge, errorMessage, formatClock, formatDate, statusLabel, usePagination } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import { useRunStream } from "../useRunStream"
 import {
@@ -128,7 +128,7 @@ export default function AutopilotPage() {
         }
         setIsTicking(true)
         setError(null)
-        setStatus("Running autopilot tick")
+        setStatus("Working…")
         try {
             setAutopilot(await api.triggerAutopilotTick())
             setStatus("Tick complete")
@@ -156,15 +156,15 @@ export default function AutopilotPage() {
     return (
         <DashboardPage
             eyebrow="Autopilot"
-            title="Content autopilot"
-            subtitle="Stock the backlog; autopilot imports, edits, and packages reels for your approval on the publish page."
+            title="Auto-create reels"
+            subtitle="Add videos and songs, and reels get made for you automatically — ready to review before they post."
             action={
                 <>
                     <button className={styles.ghostButton} type="button" onClick={loadAutopilot}>
                         <RefreshCw size={16} /> Refresh
                     </button>
                     <button className={styles.secondaryButton} type="button" onClick={runTick} disabled={isTicking}>
-                        <Zap size={16} /> {isTicking ? "Ticking" : "Run tick now"}
+                        <Zap size={16} /> {isTicking ? "Working…" : "Run now"}
                     </button>
                 </>
             }
@@ -196,7 +196,7 @@ export default function AutopilotPage() {
                     <div className={styles.panelHeader}>
                         <div>
                             <h2>Status</h2>
-                            <p>Last tick: {autopilot?.last_tick_at ? formatDate(autopilot.last_tick_at) : "never"}</p>
+                            <p>Last run: {autopilot?.last_tick_at ? formatDate(autopilot.last_tick_at) : "never"}</p>
                         </div>
                         <StatusBadge
                             label={autopilot?.enabled ? "enabled" : "paused"}
@@ -205,8 +205,8 @@ export default function AutopilotPage() {
                     </div>
                     <div className={styles.fieldStack}>
                         <p className={styles.smallText}>
-                            Packaged today: {autopilot?.packaged_today ?? 0} / {autopilot?.daily_target ?? 3}
-                            {" · "}In flight: {autopilot?.in_flight ?? 0}
+                            Created today: {autopilot?.packaged_today ?? 0} / {autopilot?.daily_target ?? 3}
+                            {" · "}In progress: {autopilot?.in_flight ?? 0}
                             {" · "}Pending: {autopilot?.pending ?? 0}
                         </p>
                         <label className={styles.fieldLabel}>
@@ -231,8 +231,8 @@ export default function AutopilotPage() {
                         </button>
                         {!autopilot?.loop_configured && (
                             <p className={styles.smallText}>
-                                The API is not running the background loop (set ECLYPTE_AUTOPILOT=1 on the server).
-                                Until then, use Run tick now to advance the queue.
+                                Always-on creation isn&apos;t enabled for your account yet. Until it is, use
+                                {" "}Run now to make the next reel from your queue.
                             </p>
                         )}
                     </div>
@@ -241,8 +241,8 @@ export default function AutopilotPage() {
                 <div className={`${styles.panel} ${styles.wide}`}>
                     <div className={styles.panelHeader}>
                         <div>
-                            <h2>Add to backlog</h2>
-                            <p>Pair a saved video with a song asset or a YouTube link.</p>
+                            <h2>Add to queue</h2>
+                            <p>Pair a saved video with a song or a YouTube link.</p>
                         </div>
                     </div>
                     <div className={styles.fieldStack}>
@@ -319,9 +319,10 @@ export default function AutopilotPage() {
                         <Bot size={18} aria-hidden />
                     </div>
                     {!autopilot || autopilot.items.length === 0 ? (
-                        <div className={styles.emptyState}>
-                            The backlog is empty. Add a video + song pair above to give autopilot something to make.
-                        </div>
+                        <EmptyState
+                            title="Your queue is empty"
+                            hint="Add a video and a song above, and reels will start showing up here."
+                        />
                     ) : (
                         <>
                         <ul className={styles.referenceList}>
@@ -346,7 +347,7 @@ export default function AutopilotPage() {
                                     <div className={styles.cardActions}>
                                         {item.status === "packaged" && (
                                             <a className={styles.secondaryButton} href="/dashboard/publish">
-                                                Review on publish page
+                                                Review &amp; post
                                             </a>
                                         )}
                                         {(item.status === "pending" || item.status === "failed") && (
@@ -398,19 +399,19 @@ function itemTone(status: AutopilotItemStatus) {
 
 function itemDetail(item: AutopilotItem) {
     if (item.status === "editing" && item.audio_start_sec !== null && item.audio_end_sec !== null) {
-        return `editing ${item.audio_start_sec.toFixed(0)}s–${item.audio_end_sec.toFixed(0)}s window`
+        return `Cutting the ${formatClock(item.audio_start_sec)}–${formatClock(item.audio_end_sec)} highlight`
     }
     if (item.status === "packaged") {
-        return "package ready for review"
+        return "Ready to review"
     }
     if (item.status === "importing") {
-        return "importing song from YouTube"
+        return "Importing the song"
     }
     if (item.status === "analyzing") {
-        return "analyzing song audio"
+        return "Analyzing the song"
     }
     if (item.creative_brief) {
         return item.creative_brief
     }
-    return humanizeLabel(item.status)
+    return statusLabel(item.status)
 }

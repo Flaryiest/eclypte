@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
-import { ChevronLeft, ChevronRight } from "lucide-react"
+import { ChevronLeft, ChevronRight, Check, Copy } from "lucide-react"
 import styles from "./studio.module.css"
 import type { AssetState, AssetSummary, PublishingPostStatus, RunManifest, SynthesisReference } from "@/services/eclypteApi"
 
@@ -42,7 +42,7 @@ export function StatusBadge({
     return (
         <span className={className}>
             <span className={styles.badgeDot} aria-hidden />
-            {humanizeLabel(label)}
+            {statusLabel(label)}
         </span>
     )
 }
@@ -226,4 +226,162 @@ export function useAbortableLoad(load: (signal: AbortSignal) => Promise<void>) {
         controllerRef.current = controller
         void loadRef.current(controller.signal)
     }, [])
+}
+
+// Creator-facing names for the raw status enums that flow through every domain
+// (assets, runs, edit jobs, publishing posts, autopilot items, references). The
+// colored dot still comes from `tone`; this only maps the visible word. Unknown
+// values fall through to Title Case via humanizeLabel, so custom labels are safe.
+const STATUS_LABELS: Record<string, string> = {
+    created: "Queued",
+    pending: "Queued",
+    queued: "Queued",
+    queued_scheduled: "Scheduled",
+    running: "Working",
+    importing: "Importing",
+    analyzing: "Analyzing",
+    editing: "Editing",
+    rendering: "Rendering",
+    blocked: "Waiting",
+    uploaded: "Uploaded",
+    discovered: "Found",
+    available: "Ready",
+    imported: "Imported",
+    completed: "Done",
+    packaged: "Ready to review",
+    ready: "Ready to review",
+    approved: "Approved",
+    draft: "Draft",
+    scheduled: "Scheduled",
+    published: "Posted",
+    failed: "Failed",
+    rejected: "Rejected",
+    canceled: "Canceled",
+    cancelled: "Canceled",
+    archived: "Hidden",
+}
+
+export function statusLabel(value: string) {
+    return STATUS_LABELS[value.trim().toLowerCase()] ?? humanizeLabel(value)
+}
+
+// Friendly per-status sentences for progress detail. `stage.detail` from the API
+// can be a raw worker string or a bare status echo, so a bare token is replaced
+// with a human phrase; an already-human sentence is shown as-is.
+const STAGE_PHRASES: Record<string, string> = {
+    created: "Queued…",
+    pending: "Queued…",
+    queued: "Queued…",
+    running: "Working on it…",
+    importing: "Importing the song…",
+    analyzing: "Analyzing…",
+    editing: "Cutting your edit…",
+    rendering: "Rendering your edit…",
+    render: "Rendering your edit…",
+    encode: "Rendering your edit…",
+    upload: "Finishing up…",
+    poster: "Finishing up…",
+    plan: "Planning the cuts…",
+    timeline: "Planning the cuts…",
+    blocked: "Waiting…",
+    completed: "Done",
+    published: "Posted",
+    failed: "Something went wrong",
+    canceled: "Canceled",
+}
+
+export function humanizeStageDetail(detail: string | null | undefined, status?: string) {
+    const value = (detail ?? "").trim()
+    // A bare enum-like token (no spaces) is a status echo, not a human message.
+    const looksLikeEnum = value !== "" && /^[a-z0-9_-]+$/i.test(value)
+    if (value === "" || looksLikeEnum) {
+        const key = (looksLikeEnum ? value : status ?? "").trim().toLowerCase()
+        return STAGE_PHRASES[key] ?? "Working…"
+    }
+    return value
+}
+
+// mm:ss for timeline/clip positions; e.g. 75 -> "1:15".
+export function formatClock(totalSec: number | null | undefined) {
+    if (totalSec === null || totalSec === undefined || !Number.isFinite(totalSec)) {
+        return "—"
+    }
+    const s = Math.max(0, Math.round(totalSec))
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`
+}
+
+// Spoken duration; e.g. 25 -> "25s", 95 -> "1m 35s".
+export function formatDuration(totalSec: number | null | undefined) {
+    if (totalSec === null || totalSec === undefined || !Number.isFinite(totalSec)) {
+        return "—"
+    }
+    const s = Math.max(0, Math.round(totalSec))
+    if (s < 60) {
+        return `${s}s`
+    }
+    const minutes = Math.floor(s / 60)
+    const rem = s % 60
+    return rem ? `${minutes}m ${String(rem).padStart(2, "0")}s` : `${minutes}m`
+}
+
+// One consistent empty-state voice for every list, replacing the per-page ad-hoc copy.
+export function EmptyState({
+    title,
+    hint,
+    icon,
+    action,
+}: {
+    title: string
+    hint?: string
+    icon?: ReactNode
+    action?: ReactNode
+}) {
+    return (
+        <div className={styles.emptyState} role="status">
+            {icon && <span className={styles.emptyStateIcon} aria-hidden>{icon}</span>}
+            <p className={styles.emptyStateTitle}>{title}</p>
+            {hint && <p className={styles.emptyStateHint}>{hint}</p>}
+            {action && <div className={styles.emptyStateAction}>{action}</div>}
+        </div>
+    )
+}
+
+// Structured label/value list — replaces raw JSON.stringify dumps of metrics, etc.
+export function MetaList({ items }: { items: { label: string; value: ReactNode }[] }) {
+    if (items.length === 0) {
+        return null
+    }
+    return (
+        <dl className={styles.metaList}>
+            {items.map((item) => (
+                <div key={item.label} className={styles.metaRow}>
+                    <dt className={styles.metaKey}>{item.label}</dt>
+                    <dd className={styles.metaValue}>{item.value}</dd>
+                </div>
+            ))}
+        </dl>
+    )
+}
+
+// Hides a raw identifier behind a copy affordance for the rare case ops needs it,
+// instead of printing UUID walls into the UI.
+export function CopyableId({ value, label = "Copy ID" }: { value: string; label?: string }) {
+    const [copied, setCopied] = useState(false)
+    const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+    useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
+    return (
+        <button
+            type="button"
+            className={styles.copyId}
+            onClick={() => {
+                void navigator.clipboard?.writeText(value)
+                setCopied(true)
+                if (timer.current) clearTimeout(timer.current)
+                timer.current = setTimeout(() => setCopied(false), 1600)
+            }}
+        >
+            {copied ? <Check size={13} /> : <Copy size={13} />}
+            {copied ? "Copied" : label}
+        </button>
+    )
 }

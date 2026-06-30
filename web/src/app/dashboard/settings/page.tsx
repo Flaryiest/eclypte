@@ -6,7 +6,6 @@ import { RefreshCw } from "lucide-react"
 import { DashboardPage, StatusBadge, errorMessage, formatDate, isAbortError, useAbortableLoad } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import {
-    ECLYPTE_API_BASE_URL,
     EclypteApiClient,
     HealthResponse,
     SynthesisPromptState,
@@ -68,11 +67,11 @@ export default function SettingsPage() {
     return (
         <DashboardPage
             eyebrow="Settings"
-            title="Workspace settings"
-            subtitle="Current frontend and API wiring for this signed-in creator session."
+            title="Settings"
+            subtitle="Your account and connection status."
             action={
                 <button className={styles.secondaryButton} type="button" onClick={checkSettings} disabled={isChecking}>
-                    <RefreshCw size={16} /> {isChecking ? "Checking" : "Check health"}
+                    <RefreshCw size={16} /> {isChecking ? "Checking…" : "Refresh"}
                 </button>
             }
         >
@@ -81,46 +80,38 @@ export default function SettingsPage() {
             <div className={styles.settingsStack}>
                 <div className={styles.settingsGroup}>
                     <div className={styles.settingsGroupHeader}>
-                        <h2 className={styles.settingsGroupTitle}>API connection</h2>
+                        <h2 className={styles.settingsGroupTitle}>Connection</h2>
                         <StatusBadge
-                            label={health}
+                            label={health === "ok" ? "connected" : health === "failed" ? "offline" : health}
                             tone={health === "ok" ? "completed" : health === "failed" ? "failed" : undefined}
                         />
                     </div>
                     <div className={styles.settingsRow}>
-                        <span className={styles.settingsRowLabel}>Base URL</span>
-                        <span className={`${styles.settingsRowValue} ${styles.settingsRowMono}`}>{ECLYPTE_API_BASE_URL}</span>
+                        <span className={styles.settingsRowLabel}>Signed in as</span>
+                        <span className={styles.settingsRowValue}>{user.primaryEmailAddress?.emailAddress ?? user.username ?? "—"}</span>
                     </div>
                     <div className={styles.settingsRow}>
-                        <span className={styles.settingsRowLabel}>Signed-in as</span>
-                        <span className={`${styles.settingsRowValue} ${styles.settingsRowMono}`}>{user.id}</span>
+                        <span className={styles.settingsRowLabel}>YouTube access</span>
+                        <span className={styles.settingsRowValue}>{healthDetails?.youtube_cookies_configured ? "Connected" : "Not set up"}</span>
                     </div>
                     <div className={styles.settingsRow}>
-                        <span className={styles.settingsRowLabel}>YouTube cookies</span>
-                        <span className={styles.settingsRowValue}>{healthDetails?.youtube_cookies_configured ? "Configured" : "Not configured"}</span>
+                        <span className={styles.settingsRowLabel}>Live updates</span>
+                        <span className={styles.settingsRowValue}>{healthDetails?.realtime_streaming_configured ? "On" : "Standard"}</span>
                     </div>
                     <div className={styles.settingsRow}>
-                        <span className={styles.settingsRowLabel}>Realtime updates</span>
-                        <span className={styles.settingsRowValue}>{healthDetails?.realtime_streaming_configured ? "Redis (live)" : "Polling fallback"}</span>
-                    </div>
-                    <div className={styles.settingsRow}>
-                        <span className={styles.settingsRowLabel}>Worker progress</span>
-                        <span className={styles.settingsRowValue}>{healthDetails?.worker_progress_configured ? "Configured" : "R2-event fallback"}</span>
+                        <span className={styles.settingsRowLabel}>Live progress</span>
+                        <span className={styles.settingsRowValue}>{healthDetails?.worker_progress_configured ? "On" : "Standard"}</span>
                     </div>
                 </div>
 
                 <div className={styles.settingsGroup}>
                     <div className={styles.settingsGroupHeader}>
-                        <h2 className={styles.settingsGroupTitle}>Synthesis prompt</h2>
+                        <h2 className={styles.settingsGroupTitle}>Editing style</h2>
                     </div>
                     {promptState ? (
                         <>
                             <div className={styles.settingsRow}>
-                                <span className={styles.settingsRowLabel}>Active version</span>
-                                <span className={`${styles.settingsRowValue} ${styles.settingsRowMono}`}>{promptState.active_version_id}</span>
-                            </div>
-                            <div className={styles.settingsRow}>
-                                <span className={styles.settingsRowLabel}>Label</span>
+                                <span className={styles.settingsRowLabel}>Active</span>
                                 <span className={styles.settingsRowValue}>{promptState.active_prompt.label}</span>
                             </div>
                             <div className={styles.settingsRow}>
@@ -129,7 +120,7 @@ export default function SettingsPage() {
                             </div>
                         </>
                     ) : (
-                        <div className={styles.emptyState}>Prompt state has not loaded yet.</div>
+                        <div className={styles.emptyState}>Still loading…</div>
                     )}
                 </div>
             </div>

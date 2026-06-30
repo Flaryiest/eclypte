@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Download, Eye, Play, RefreshCw, RotateCcw, Trash2, WandSparkles, XCircle } from "lucide-react"
-import { DashboardPage, Pager, SkeletonList, StatusBadge, errorMessage, formatBytes, formatDate, isAbortError, kindLabel, usePagination, versionRef } from "../dashboardCommon"
+import { DashboardPage, Pager, SkeletonList, StatusBadge, errorMessage, formatBytes, formatDate, humanizeStageDetail, isAbortError, kindLabel, statusLabel, usePagination, versionRef } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import { downloadSignedUrl, safeDownloadFilename } from "@/services/downloadFile"
 import {
@@ -12,7 +12,6 @@ import {
     EditJobStage,
     EditJobStatus,
     ExportFormat,
-    PlanningMode,
     RunStreamMessage,
 } from "@/services/eclypteApi"
 import { useAssets, useEditJobs } from "@/stores/dashboardResources"
@@ -40,7 +39,6 @@ export default function NewEditPage() {
     const { isLoaded, isSignedIn, user } = useUser()
     const [audioId, setAudioId] = useState("")
     const [videoId, setVideoId] = useState("")
-    const [planningMode, setPlanningMode] = useState<PlanningMode>("agent")
     const [exportFormat, setExportFormat] = useState<ExportFormat>("reels_9_16")
     const [songDurationSec, setSongDurationSec] = useState<number | null>(null)
     const [audioStartSec, setAudioStartSec] = useState(0)
@@ -140,7 +138,7 @@ export default function NewEditPage() {
         }
         const controller = new AbortController()
         let audio: HTMLAudioElement | null = null
-        setMediaStatus("Loading song length")
+        setMediaStatus("Reading audio…")
         void api.getDownloadUrl(audioRef, controller.signal)
             .then((download) => {
                 if (controller.signal.aborted) {
@@ -150,7 +148,7 @@ export default function NewEditPage() {
                 audio.preload = "metadata"
                 audio.onloadedmetadata = () => {
                     if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) {
-                        setMediaStatus("Song length unavailable")
+                        setMediaStatus("Couldn't read the audio length")
                         return
                     }
                     const duration = roundTime(audio.duration)
@@ -159,13 +157,13 @@ export default function NewEditPage() {
                     setAudioEndSec(duration)
                     setMediaStatus(null)
                 }
-                audio.onerror = () => setMediaStatus("Song length unavailable")
+                audio.onerror = () => setMediaStatus("Couldn't read the audio length")
                 audio.src = download.download_url
                 audio.load()
             })
             .catch((caught) => {
                 if (!isAbortError(caught)) {
-                    setMediaStatus("Song length unavailable")
+                    setMediaStatus("Couldn't read the audio length")
                 }
             })
         return () => {
@@ -223,7 +221,6 @@ export default function NewEditPage() {
             const job = await api.createEditJob({
                 audio,
                 sourceVideo,
-                planningMode,
                 creativeBrief: creativeBrief.trim(),
                 title: title.trim() || `${selectedSong.display_name} x ${selectedVideo.display_name}`,
                 exportOptions: {
@@ -354,11 +351,11 @@ export default function NewEditPage() {
     }
 
     if (!isLoaded) {
-        return <DashboardPage eyebrow="New edit" title="Preparing studio"><div /></DashboardPage>
+        return <DashboardPage eyebrow="Compose" title="Preparing studio"><div /></DashboardPage>
     }
     if (!isSignedIn || !user) {
         return (
-            <DashboardPage eyebrow="New edit" title="Sign in required">
+            <DashboardPage eyebrow="Compose" title="Sign in required">
                 <div className={styles.emptyState}>Sign in from the homepage to create an AMV.</div>
             </DashboardPage>
         )
@@ -366,9 +363,9 @@ export default function NewEditPage() {
 
     return (
         <DashboardPage
-            eyebrow="New edit"
-            title="Create from assets"
-            subtitle="Launch durable edit jobs from saved assets. Active jobs keep updating after refresh."
+            eyebrow="Compose"
+            title="Start a new edit"
+            subtitle="Pick a song and a video, set the framing, and the editor cuts it to the beat for you."
             action={
                 <>
                     <button className={styles.secondaryButton} type="button" onClick={refreshDashboard} disabled={isLoading || isCreating}>
@@ -428,31 +425,10 @@ export default function NewEditPage() {
                             </select>
                             {selectedVideo && (
                                 <span className={`${styles.assetCaption} ${selectedVideo.analysis ? styles.assetCaptionOk : ""}`}>
-                                    {selectedVideo.analysis ? "✓ analyzed" : "○ awaiting analysis"} · {kindLabel(selectedVideo.kind)} · {formatBytes(selectedVideo.current_version?.size_bytes)}
+                                    {selectedVideo.analysis ? "Analyzed" : "Needs analysis"} · {kindLabel(selectedVideo.kind)} · {formatBytes(selectedVideo.current_version?.size_bytes)}
                                 </span>
                             )}
                         </label>
-                        <div className={styles.fieldLabel}>
-                            Planning mode
-                            <div className={styles.segmentedControl} role="group" aria-label="Planning mode">
-                                <button
-                                    className={planningMode === "agent" ? styles.segmentActive : styles.segmentButton}
-                                    type="button"
-                                    onClick={() => setPlanningMode("agent")}
-                                    disabled={isCreating}
-                                >
-                                    AI agent
-                                </button>
-                                <button
-                                    className={planningMode === "deterministic" ? styles.segmentActive : styles.segmentButton}
-                                    type="button"
-                                    onClick={() => setPlanningMode("deterministic")}
-                                    disabled={isCreating}
-                                >
-                                    Deterministic
-                                </button>
-                            </div>
-                        </div>
                         <div className={styles.exportSection}>
                             <div className={styles.exportHeader}>
                                 <span>Export</span>
@@ -519,7 +495,7 @@ export default function NewEditPage() {
                             </div>
                             <div className={styles.numberGrid}>
                                 <label className={styles.fieldLabel}>
-                                    Start sec
+                                    Start (seconds)
                                     <input
                                         className={styles.input}
                                         type="number"
@@ -532,7 +508,7 @@ export default function NewEditPage() {
                                     />
                                 </label>
                                 <label className={styles.fieldLabel}>
-                                    End sec
+                                    End (seconds)
                                     <input
                                         className={styles.input}
                                         type="number"
@@ -545,7 +521,7 @@ export default function NewEditPage() {
                                     />
                                 </label>
                                 <label className={styles.fieldLabel}>
-                                    Length sec
+                                    Clip length (seconds)
                                     <input
                                         className={styles.input}
                                         type="number"
@@ -591,18 +567,16 @@ export default function NewEditPage() {
                                 )}
                             </div>
                         </div>
-                        {planningMode === "agent" && (
-                            <label className={styles.fieldLabel}>
-                                Creative brief
-                                <textarea
-                                    className={`${styles.textarea} ${styles.compactTextarea}`}
-                                    value={creativeBrief}
-                                    onChange={(event) => setCreativeBrief(event.target.value)}
-                                    placeholder="Fast hook, cinematic pacing, follow the character arc."
-                                    disabled={isCreating}
-                                />
-                            </label>
-                        )}
+                        <label className={styles.fieldLabel}>
+                            Creative brief
+                            <textarea
+                                className={`${styles.textarea} ${styles.compactTextarea}`}
+                                value={creativeBrief}
+                                onChange={(event) => setCreativeBrief(event.target.value)}
+                                placeholder="Fast hook, cinematic pacing, follow the character arc."
+                                disabled={isCreating}
+                            />
+                        </label>
                     </div>
                 </div>
 
@@ -703,7 +677,7 @@ function EditJobCard({
                         {etaSec !== null ? ` · ~${formatElapsed(etaSec)} left` : ""}
                     </span>
                 ) : (
-                    <span>{job.status}</span>
+                    <span>{statusLabel(job.status)}</span>
                 )}
             </div>
             <div className={styles.progressTrack} aria-label={`${job.title} progress`}>
@@ -781,7 +755,7 @@ function StageProgress({ stage }: { stage: EditJobStage }) {
             <div className={styles.progressTrack}>
                 <div className={styles.progressFill} style={{ width: `${clampPercent(stage.percent)}%` }} />
             </div>
-            <span className={styles.stageDetail}>{stage.detail}</span>
+            <span className={styles.stageDetail}>{humanizeStageDetail(stage.detail, stage.status)}</span>
         </div>
     )
 }

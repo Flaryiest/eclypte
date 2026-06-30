@@ -2,7 +2,7 @@
 	display: flex;
 	flex-direction: column;
 	gap: 2.4rem;
-	color: var(--ec-ink);
+	color: var(--text-primary);
 	max-width: 1280px;
 	animation: pageEnter 480ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
@@ -24,13 +24,13 @@
 	justify-content: space-between;
 	gap: 2rem;
 	padding: 0 0 1.6rem;
-	border-bottom: 1px solid var(--ec-rule);
+	border-bottom: 1px solid var(--line);
 }
 
 .eyebrow {
 	margin: 0 0 1.1rem;
-	color: var(--ec-ember);
-	font-family: var(--font-neue), sans-serif;
+	color: var(--accent);
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.66rem;
 	font-weight: 600;
 	letter-spacing: 0.24em;
@@ -39,19 +39,19 @@
 
 .title {
 	margin: 0;
-	font-family: var(--font-eiko), var(--font-neue), serif;
+	font-family: var(--font-display), serif;
 	font-size: clamp(2.6rem, 5vw, 4.2rem);
 	font-weight: 400;
 	line-height: 0.92;
 	letter-spacing: -0.01em;
-	color: var(--ec-ink);
+	color: var(--text-primary);
 }
 
 .subtitle {
 	margin: 1rem 0 0;
 	max-width: 56ch;
-	color: var(--ec-ink-muted);
-	font-family: var(--font-neue), sans-serif;
+	color: var(--text-muted);
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.96rem;
 	line-height: 1.65;
 }
@@ -84,8 +84,8 @@
 }
 
 .panel {
-	border: 1px solid var(--ec-rule);
-	background: var(--ec-paper-2);
+	border: 1px solid var(--line);
+	background: var(--surface-raised);
 	padding: 1.6rem 1.8rem 1.8rem;
 	display: flex;
 	flex-direction: column;
@@ -97,8 +97,8 @@
 .runCard,
 .jobCard,
 .listCard {
-	border: 1px solid var(--ec-rule);
-	background: var(--ec-paper-2);
+	border: 1px solid var(--line);
+	background: var(--surface-raised);
 	padding: 1.05rem 1.15rem;
 	display: flex;
 	flex-direction: column;
@@ -114,7 +114,7 @@
 	align-items: flex-start;
 	gap: 0.85rem;
 	min-width: 0;
-	color: var(--ec-ink-2);
+	color: var(--text-secondary);
 }
 
 .settingCard > div {
@@ -140,7 +140,7 @@
 	gap: 1rem;
 	margin-bottom: 0.6rem;
 	padding-bottom: 0.85rem;
-	border-bottom: 1px solid var(--ec-rule);
+	border-bottom: 1px solid var(--line);
 }
 
 .panelHeader h2,
@@ -149,8 +149,8 @@
 .listCard h3,
 .jobCard h3 {
 	margin: 0;
-	color: var(--ec-ink);
-	font-family: var(--font-neue), sans-serif;
+	color: var(--text-primary);
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.72rem;
 	font-weight: 600;
 	letter-spacing: 0.18em;
@@ -161,7 +161,7 @@
 .runCard h3,
 .listCard h3,
 .jobCard h3 {
-	font-family: var(--font-eiko), var(--font-neue), serif;
+	font-family: var(--font-display), serif;
 	font-size: 1.08rem;
 	font-weight: 400;
 	letter-spacing: -0.005em;
@@ -182,8 +182,8 @@
 .muted,
 .smallText {
 	margin: 0.45rem 0 0;
-	color: var(--ec-ink-muted);
-	font-family: var(--font-neue), sans-serif;
+	color: var(--text-muted);
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.78rem;
 	line-height: 1.5;
 	overflow-wrap: anywhere;
@@ -203,9 +203,9 @@
 	gap: 0.5rem;
 	min-height: 38px;
 	padding: 0.55rem 1.05rem;
-	border-radius: 0;
+	border-radius: var(--radius);
 	border: 1px solid transparent;
-	font-family: var(--font-neue), sans-serif;
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.74rem;
 	font-weight: 600;
 	letter-spacing: 0.14em;
@@ -215,46 +215,47 @@
 }
 
 .primaryButton {
-	background: var(--ec-ink);
-	color: var(--ec-paper);
+	background: var(--accent);
+	border-color: var(--accent);
+	color: var(--accent-contrast);
 }
 
 .primaryButton:hover:not(:disabled) {
-	background: var(--ec-ember);
-	color: var(--ec-paper);
+	filter: brightness(1.12);
 }
 
 .secondaryButton {
 	background: transparent;
-	border-color: var(--ec-rule-strong);
-	color: var(--ec-ink);
+	border-color: var(--line-strong);
+	color: var(--text-primary);
 }
 
 .secondaryButton:hover:not(:disabled) {
-	background: var(--ec-paper-sunk);
-	border-color: var(--ec-ink);
+	background: var(--surface-sunk);
+	border-color: var(--text-primary);
 }
 
 .ghostButton {
 	background: transparent;
 	border-color: transparent;
-	color: var(--ec-ink-muted);
+	color: var(--text-muted);
 }
 
 .ghostButton:hover:not(:disabled) {
-	color: var(--ec-ink);
-	border-color: var(--ec-ink);
+	color: var(--text-primary);
+	border-color: var(--text-primary);
 }
 
 .dangerButton {
 	background: transparent;
-	border-color: var(--ec-ink);
-	color: var(--ec-ink);
+	border-color: var(--danger);
+	color: var(--danger);
 }
 
 .dangerButton:hover:not(:disabled) {
-	background: var(--ec-ink);
-	color: var(--ec-paper);
+	background: var(--danger);
+	border-color: var(--danger);
+	color: #fff;
 }
 
 .primaryButton:disabled,
@@ -267,17 +268,34 @@
 	opacity: 0.35;
 }
 
+/* Shared keyboard-focus ring — previously only inputs/.posterButton had focus
+   styling, leaving every button and clickable row without a visible focus state. */
+.primaryButton:focus-visible,
+.secondaryButton:focus-visible,
+.ghostButton:focus-visible,
+.dangerButton:focus-visible,
+.segmentButton:focus-visible,
+.segmentActive:focus-visible,
+.pagerButton:focus-visible,
+.disclosureToggle:focus-visible,
+.assetRow:focus-visible,
+.packageRow:focus-visible,
+.filmstripCard:focus-visible {
+	outline: 2px solid var(--focus-ring);
+	outline-offset: 2px;
+}
+
 .select,
 .input,
 .textarea {
 	width: 100%;
 	box-sizing: border-box;
 	border: none;
-	border-bottom: 1px solid var(--ec-rule-strong);
-	border-radius: 0;
+	border-bottom: 1px solid var(--line-strong);
+	border-radius: var(--radius);
 	background: transparent;
-	color: var(--ec-ink);
-	font-family: var(--font-neue), sans-serif;
+	color: var(--text-primary);
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.95rem;
 	outline: none;
 	transition: border-color 140ms ease;
@@ -293,8 +311,8 @@
 	min-height: 160px;
 	resize: vertical;
 	line-height: 1.55;
-	border: 1px solid var(--ec-rule);
-	background: var(--ec-paper-sunk);
+	border: 1px solid var(--line);
+	background: var(--surface-sunk);
 	padding: 0.85rem 1rem;
 }
 
@@ -304,27 +322,27 @@
 
 .promptTextarea {
 	min-height: 60vh;
-	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+	font-family: var(--font-mono);
 	font-size: 0.84rem;
 	line-height: 1.65;
-	background: var(--ec-paper-sunk);
-	border: 1px solid var(--ec-rule);
+	background: var(--surface-sunk);
+	border: 1px solid var(--line);
 	padding: 1.2rem 1.4rem;
 }
 
 .select:focus,
 .input:focus {
-	border-bottom-color: var(--ec-ember);
+	border-bottom-color: var(--accent);
 }
 
 .textarea:focus,
 .promptTextarea:focus {
-	border-color: var(--ec-ember);
+	border-color: var(--accent);
 	box-shadow: none;
 }
 
 .filePicker:focus-within {
-	border-color: var(--ec-ember);
+	border-color: var(--accent);
 }
 
 .fieldStack {
@@ -337,8 +355,8 @@
 	display: flex;
 	flex-direction: column;
 	gap: 0.5rem;
-	color: var(--ec-ink-muted);
-	font-family: var(--font-neue), sans-serif;
+	color: var(--text-muted);
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.66rem;
 	font-weight: 600;
 	letter-spacing: 0.18em;
@@ -350,7 +368,7 @@
 	gap: 1.4rem;
 	padding: 0;
 	border: none;
-	border-bottom: 1px solid var(--ec-rule);
+	border-bottom: 1px solid var(--line);
 	background: transparent;
 	margin-top: 0.4rem;
 }
@@ -361,9 +379,9 @@
 	padding: 0 0 0.5rem;
 	border: none;
 	border-bottom: 2px solid transparent;
-	border-radius: 0;
+	border-radius: var(--radius);
 	background: transparent;
-	font-family: var(--font-neue), sans-serif;
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.74rem;
 	font-weight: 600;
 	letter-spacing: 0.14em;
@@ -374,16 +392,16 @@
 }
 
 .segmentButton {
-	color: var(--ec-ink-muted);
+	color: var(--text-muted);
 }
 
 .segmentButton:hover:not(:disabled) {
-	color: var(--ec-ink);
+	color: var(--text-primary);
 }
 
 .segmentActive {
-	color: var(--ec-ink);
-	border-bottom-color: var(--ec-ember);
+	color: var(--text-primary);
+	border-bottom-color: var(--accent);
 }
 
 .exportSection {
@@ -391,7 +409,7 @@
 	flex-direction: column;
 	gap: 1rem;
 	padding-top: 1.2rem;
-	border-top: 1px solid var(--ec-rule);
+	border-top: 1px solid var(--line);
 }
 
 .exportHeader,
@@ -399,8 +417,8 @@
 	display: flex;
 	justify-content: space-between;
 	gap: 1rem;
-	color: var(--ec-ink-muted);
-	font-family: var(--font-neue), sans-serif;
+	color: var(--text-muted);
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.72rem;
 	font-weight: 600;
 	letter-spacing: 0.12em;
@@ -408,13 +426,13 @@
 }
 
 .exportHeader > :first-child {
-	color: var(--ec-ink);
+	color: var(--text-primary);
 }
 
 .trimSummary {
 	padding: 0.2rem 0 0.4rem;
-	border-bottom: 1px solid var(--ec-rule);
-	color: var(--ec-ink);
+	border-bottom: 1px solid var(--line);
+	color: var(--text-primary);
 }
 
 .rangeGrid {
@@ -427,8 +445,8 @@
 	display: flex;
 	flex-direction: column;
 	gap: 0.55rem;
-	color: var(--ec-ink-muted);
-	font-family: var(--font-neue), sans-serif;
+	color: var(--text-muted);
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.66rem;
 	font-weight: 600;
 	letter-spacing: 0.18em;
@@ -437,7 +455,7 @@
 
 .rangeInput {
 	width: 100%;
-	accent-color: var(--ec-ember);
+	accent-color: var(--accent);
 	cursor: pointer;
 }
 
@@ -458,8 +476,8 @@
 	place-items: center;
 	overflow: hidden;
 	width: min(100%, 360px);
-	border: 1px solid var(--ec-rule);
-	background: var(--ec-ink);
+	border: 1px solid var(--line);
+	background: var(--surface-sunk);
 }
 
 .cropPreviewVertical {
@@ -474,13 +492,13 @@
 .cropPreviewMedia {
 	width: 100%;
 	height: 100%;
-	background: var(--ec-ink);
+	background: var(--surface-sunk);
 }
 
 .cropPreviewEmpty {
 	padding: 1.4rem;
-	color: var(--ec-paper);
-	font-family: var(--font-eiko), var(--font-neue), serif;
+	color: var(--text-muted);
+	font-family: var(--font-display), serif;
 	font-size: 0.95rem;
 	font-style: italic;
 	text-align: center;
@@ -493,15 +511,15 @@
 	gap: 0.5rem;
 	min-height: 132px;
 	padding: 1.4rem 1.2rem;
-	border: 1px solid var(--ec-rule-strong);
-	border-radius: 0;
-	background: var(--ec-paper-sunk);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius);
+	background: var(--surface-sunk);
 	cursor: pointer;
 	transition: border-color 140ms ease, background-color 140ms ease;
 }
 
 .filePicker:hover {
-	border-color: var(--ec-ink);
+	border-color: var(--text-primary);
 }
 
 .filePicker input {
@@ -514,8 +532,8 @@
 }
 
 .fileName {
-	color: var(--ec-ink);
-	font-family: var(--font-eiko), var(--font-neue), serif;
+	color: var(--text-primary);
+	font-family: var(--font-display), serif;
 	font-size: 1.05rem;
 	font-weight: 400;
 	overflow-wrap: anywhere;
@@ -526,22 +544,22 @@
 .successBanner {
 	border: 1px solid transparent;
 	border-left-width: 2px;
-	border-radius: 0;
+	border-radius: var(--radius);
 	padding: 0.85rem 1rem;
-	font-family: var(--font-neue), sans-serif;
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.86rem;
 	line-height: 1.55;
-	color: var(--ec-ink);
+	color: var(--text-primary);
 }
 
 .errorBanner {
-	border-left-color: var(--ec-ember);
-	background: var(--ec-ember-soft);
+	border-left-color: var(--danger);
+	background: var(--danger-soft);
 }
 
 .successBanner {
-	border-left-color: var(--ec-sage);
-	background: var(--ec-sage-soft);
+	border-left-color: var(--ok);
+	background: var(--ok-soft);
 }
 
 .stageList,
@@ -563,9 +581,9 @@
 	gap: 0.7rem;
 	align-items: start;
 	padding: 0.85rem 1rem;
-	border: 1px solid var(--ec-rule);
-	border-radius: 0;
-	background: var(--ec-paper-2);
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+	background: var(--surface-raised);
 }
 
 .stageDot {
@@ -573,7 +591,7 @@
 	height: 8px;
 	margin-top: 0.4rem;
 	border-radius: 999px;
-	background: var(--ec-ink-muted);
+	background: var(--text-muted);
 }
 
 .activeStage .stageDot,
@@ -581,8 +599,8 @@
 .running .badgeDot,
 .queued .badgeDot,
 .scheduled .badgeDot {
-	background: var(--ec-ember);
-	box-shadow: 0 0 0 3px var(--ec-ember-soft);
+	background: var(--accent);
+	box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .completeStage .stageDot,
@@ -592,36 +610,35 @@
 .approved .badgeDot,
 .imported .badgeDot,
 .published .badgeDot {
-	background: var(--ec-sage);
-	box-shadow: 0 0 0 3px var(--ec-sage-soft);
+	background: var(--ok);
+	box-shadow: 0 0 0 3px var(--ok-soft);
 }
 
 .failedStage .stageDot,
 .failed .badgeDot,
 .rejected .badgeDot {
-	background: var(--ec-paper);
-	border: 1px solid var(--ec-ink);
-	box-shadow: 0 0 0 3px rgba(22, 20, 18, 0.06);
+	background: var(--danger);
+	box-shadow: 0 0 0 3px var(--danger-soft);
 }
 
 .canceled .badgeDot,
 .archived .badgeDot {
-	background: var(--ec-ink-muted);
-	box-shadow: 0 0 0 3px rgba(22, 20, 18, 0.06);
+	background: var(--text-muted);
+	box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.05);
 }
 
 .uploaded .badgeDot,
 .discovered .badgeDot,
 .created .badgeDot,
 .blocked .badgeDot {
-	background: var(--ec-paper);
-	border: 1px solid var(--ec-ink-muted);
+	background: transparent;
+	border: 1px solid var(--text-muted);
 }
 
 .stageLabel {
 	display: block;
-	color: var(--ec-ink);
-	font-family: var(--font-neue), sans-serif;
+	color: var(--text-primary);
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.84rem;
 	font-weight: 600;
 }
@@ -629,8 +646,8 @@
 .stageDetail {
 	display: block;
 	margin-top: 0.25rem;
-	color: var(--ec-ink-muted);
-	font-family: var(--font-neue), sans-serif;
+	color: var(--text-muted);
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.78rem;
 }
 
@@ -649,22 +666,12 @@
 .settingLabel {
 	display: block;
 	margin-bottom: 0.45rem;
-	color: var(--ec-ink-muted);
-	font-family: var(--font-neue), sans-serif;
+	color: var(--text-muted);
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.62rem;
 	font-weight: 600;
 	letter-spacing: 0.22em;
 	text-transform: uppercase;
-}
-
-.monoText {
-	display: block;
-	min-width: 0;
-	color: var(--ec-ink);
-	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-	font-size: 0.82rem;
-	overflow-wrap: anywhere;
-	line-height: 1.5;
 }
 
 .pager {
@@ -674,16 +681,16 @@
 	gap: 1rem;
 	margin-top: 0.2rem;
 	padding-top: 1rem;
-	border-top: 1px solid var(--ec-rule);
+	border-top: 1px solid var(--line);
 }
 
 .pagerStatus {
-	font-family: var(--font-neue), sans-serif;
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.62rem;
 	font-weight: 600;
 	letter-spacing: 0.18em;
 	text-transform: uppercase;
-	color: var(--ec-ink-muted);
+	color: var(--text-muted);
 	white-space: nowrap;
 }
 
@@ -693,11 +700,11 @@
 	gap: 0.35rem;
 	min-height: 32px;
 	padding: 0.4rem 0.7rem;
-	border: 1px solid var(--ec-rule-strong);
-	border-radius: 0;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius);
 	background: transparent;
-	color: var(--ec-ink);
-	font-family: var(--font-neue), sans-serif;
+	color: var(--text-primary);
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.68rem;
 	font-weight: 600;
 	letter-spacing: 0.12em;
@@ -707,8 +714,8 @@
 }
 
 .pagerButton:hover:not(:disabled) {
-	background: var(--ec-paper-sunk);
-	border-color: var(--ec-ink);
+	background: var(--surface-sunk);
+	border-color: var(--text-primary);
 }
 
 .pagerButton:disabled {
@@ -724,12 +731,12 @@
 }
 
 .libraryFilterLabel {
-	font-family: var(--font-neue), sans-serif;
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.62rem;
 	font-weight: 600;
 	letter-spacing: 0.22em;
 	text-transform: uppercase;
-	color: var(--ec-ink-muted);
+	color: var(--text-muted);
 }
 
 .libraryFilterSelect {
@@ -749,12 +756,12 @@
 	display: inline-flex;
 	align-items: center;
 	gap: 0.4rem;
-	border: 1px solid var(--ec-rule-strong);
-	border-radius: 0;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius);
 	padding: 0.22rem 0.55rem;
-	color: var(--ec-ink);
+	color: var(--text-primary);
 	background: transparent;
-	font-family: var(--font-neue), sans-serif;
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.62rem;
 	font-weight: 600;
 	text-transform: uppercase;
@@ -766,7 +773,7 @@
 	width: 7px;
 	height: 7px;
 	border-radius: 999px;
-	background: var(--ec-ink-muted);
+	background: var(--text-muted);
 }
 
 .cardActions {
@@ -789,8 +796,8 @@
 	align-items: center;
 	justify-content: space-between;
 	gap: 0.65rem;
-	color: var(--ec-ink);
-	font-family: var(--font-neue), sans-serif;
+	color: var(--text-primary);
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.78rem;
 	font-weight: 500;
 	letter-spacing: 0.04em;
@@ -801,14 +808,14 @@
 	width: 100%;
 	height: 2px;
 	overflow: hidden;
-	border-radius: 0;
-	background: var(--ec-rule);
+	border-radius: var(--radius);
+	background: var(--line);
 }
 
 .progressFill {
 	height: 100%;
-	border-radius: 0;
-	background: var(--ec-ember);
+	border-radius: var(--radius);
+	background: var(--energy);
 	transition: width 240ms ease;
 }
 
@@ -823,29 +830,29 @@
 	flex-direction: column;
 	gap: 0.4rem;
 	padding: 0.75rem 0.9rem;
-	border: 1px solid var(--ec-rule);
-	border-radius: 0;
-	background: var(--ec-paper);
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+	background: var(--surface-base);
 }
 
 .completeStage .progressFill {
-	background: var(--ec-sage);
+	background: var(--ok);
 }
 
 .failedStage .progressFill {
-	background: var(--ec-ink);
+	background: var(--danger);
 }
 
 .activeStage .progressFill {
-	background: var(--ec-ember);
+	background: var(--energy);
 }
 
 .previewMedia {
 	width: 100%;
 	max-height: 480px;
-	border-radius: 0;
-	background: var(--ec-ink);
-	border: 1px solid var(--ec-rule);
+	border-radius: var(--radius);
+	background: var(--surface-sunk);
+	border: 1px solid var(--line);
 }
 
 .posterButton {
@@ -868,14 +875,14 @@
 	inset: 0;
 	display: grid;
 	place-items: center;
-	color: var(--ec-paper);
-	background: rgba(15, 15, 15, 0.28);
+	color: #fff;
+	background: rgba(5, 7, 10, 0.42);
 	transition: background 160ms ease;
 }
 
 .posterButton:hover .posterPlayIcon,
 .posterButton:focus-visible .posterPlayIcon {
-	background: rgba(15, 15, 15, 0.45);
+	background: rgba(5, 7, 10, 0.62);
 }
 
 .skeletonList {
@@ -885,8 +892,8 @@
 }
 
 .skeletonCard {
-	border: 1px solid var(--ec-rule);
-	background: var(--ec-paper-2);
+	border: 1px solid var(--line);
+	background: var(--surface-raised);
 	padding: 1.05rem 1.15rem;
 	display: flex;
 	flex-direction: column;
@@ -897,12 +904,12 @@
 	display: block;
 	height: 0.8rem;
 	width: 100%;
-	border-radius: 0;
+	border-radius: var(--radius);
 	background: linear-gradient(
 		90deg,
-		var(--ec-paper-sunk) 0%,
-		var(--ec-rule) 50%,
-		var(--ec-paper-sunk) 100%
+		var(--surface-sunk) 0%,
+		var(--surface-raised) 50%,
+		var(--surface-sunk) 100%
 	);
 	background-size: 200% 100%;
 	animation: skeletonShimmer 1.4s ease-in-out infinite;
@@ -936,43 +943,144 @@
 	}
 }
 
-.codeBlock {
-	width: 100%;
-	box-sizing: border-box;
-	white-space: pre-wrap;
-	overflow-wrap: anywhere;
-	max-height: 320px;
-	overflow: auto;
-	padding: 0.95rem 1.05rem;
-	border: 1px solid var(--ec-rule);
-	border-left: 2px solid var(--ec-ink);
-	border-radius: 0;
-	background: var(--ec-paper-sunk);
-	color: var(--ec-ink-2);
-	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-	font-size: 0.78rem;
-	line-height: 1.55;
-}
-
 .emptyState {
-	padding: 2rem 1.4rem;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.55rem;
+	padding: 2.6rem 1.4rem;
 	border: none;
-	border-top: 1px solid var(--ec-rule);
-	border-bottom: 1px solid var(--ec-rule);
-	color: var(--ec-ink-muted);
-	font-family: var(--font-eiko), var(--font-neue), serif;
+	border-top: 1px solid var(--line);
+	border-bottom: 1px solid var(--line);
+	color: var(--text-muted);
+	font-family: var(--font-display), serif;
 	font-style: italic;
 	font-size: 1.05rem;
 	text-align: center;
 	letter-spacing: 0.005em;
 }
 
+.emptyStateIcon {
+	display: inline-flex;
+	color: var(--text-muted);
+	opacity: 0.8;
+	margin-bottom: 0.2rem;
+}
+
+.emptyStateTitle {
+	margin: 0;
+	color: var(--text-secondary);
+	font-size: 1.1rem;
+}
+
+.emptyStateHint {
+	margin: 0;
+	max-width: 42ch;
+	font-family: var(--font-ui), sans-serif;
+	font-style: normal;
+	font-size: 0.82rem;
+	line-height: 1.55;
+	letter-spacing: 0.01em;
+	color: var(--text-muted);
+}
+
+.emptyStateAction {
+	margin-top: 0.7rem;
+	font-style: normal;
+}
+
+.metaList {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: 0.55rem;
+	margin: 0;
+}
+
+.metaRow {
+	display: grid;
+	grid-template-columns: minmax(120px, 0.7fr) 1fr;
+	gap: 1rem;
+	align-items: baseline;
+	padding: 0.55rem 0;
+	border-bottom: 1px solid var(--line);
+}
+
+.metaKey {
+	color: var(--text-muted);
+	font-family: var(--font-ui), sans-serif;
+	font-size: 0.62rem;
+	font-weight: 600;
+	letter-spacing: 0.16em;
+	text-transform: uppercase;
+}
+
+.metaValue {
+	margin: 0;
+	color: var(--text-primary);
+	font-family: var(--font-ui), sans-serif;
+	font-size: 0.92rem;
+	overflow-wrap: anywhere;
+}
+
+.copyId {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	padding: 0.3rem 0.6rem;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius);
+	background: transparent;
+	color: var(--text-muted);
+	font-family: var(--font-ui), sans-serif;
+	font-size: 0.66rem;
+	font-weight: 600;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	cursor: pointer;
+	transition: color 140ms ease, border-color 140ms ease;
+}
+
+.copyId:hover {
+	color: var(--text-primary);
+	border-color: var(--text-primary);
+}
+
+.copyId:focus-visible {
+	outline: 2px solid var(--focus-ring);
+	outline-offset: 2px;
+}
+
+.detailLink {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	color: var(--accent);
+	font-family: var(--font-ui), sans-serif;
+	font-size: 0.92rem;
+	overflow-wrap: anywhere;
+	transition: filter 140ms ease;
+}
+
+.detailLink:hover {
+	filter: brightness(1.15);
+}
+
+.proseText {
+	margin: 0;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	color: var(--text-secondary);
+	font-family: var(--font-ui), sans-serif;
+	font-size: 0.92rem;
+	line-height: 1.7;
+}
+
 .numeral {
-	font-family: var(--font-eiko), var(--font-neue), serif;
+	font-family: var(--font-display), serif;
 	font-weight: 400;
 	font-size: 1.05em;
 	letter-spacing: -0.01em;
-	color: var(--ec-ink);
+	color: var(--text-primary);
 }
 
 .assetTable {
@@ -985,9 +1093,9 @@
 	grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1fr);
 	gap: 1rem;
 	padding: 0 0 0.7rem;
-	border-bottom: 1px solid var(--ec-rule);
-	color: var(--ec-ink-muted);
-	font-family: var(--font-neue), sans-serif;
+	border-bottom: 1px solid var(--line);
+	color: var(--text-muted);
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.62rem;
 	font-weight: 600;
 	letter-spacing: 0.22em;
@@ -1000,7 +1108,7 @@
 	gap: 1rem;
 	align-items: center;
 	padding: 1.1rem 0;
-	border-bottom: 1px solid var(--ec-rule);
+	border-bottom: 1px solid var(--line);
 	cursor: pointer;
 	background: transparent;
 	border-left: none;
@@ -1009,16 +1117,16 @@
 	width: 100%;
 	text-align: left;
 	font-family: inherit;
-	color: var(--ec-ink);
+	color: var(--text-primary);
 	transition: background-color 140ms ease, color 140ms ease;
 }
 
 .assetRow:hover {
-	background: var(--ec-paper-sunk);
+	background: var(--surface-sunk);
 }
 
 .assetRowSelected {
-	background: var(--ec-paper-sunk);
+	background: var(--surface-sunk);
 }
 
 .assetRowSelected::before {
@@ -1026,7 +1134,7 @@
 	display: inline-block;
 	width: 4px;
 	margin-right: -0.4rem;
-	background: var(--ec-ember);
+	background: var(--accent);
 	align-self: stretch;
 }
 
@@ -1038,10 +1146,10 @@
 }
 
 .assetRowTitle {
-	font-family: var(--font-eiko), var(--font-neue), serif;
+	font-family: var(--font-display), serif;
 	font-size: 1.1rem;
 	font-weight: 400;
-	color: var(--ec-ink);
+	color: var(--text-primary);
 	letter-spacing: -0.005em;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -1049,30 +1157,30 @@
 }
 
 .assetRowMeta {
-	font-family: var(--font-neue), sans-serif;
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.74rem;
-	color: var(--ec-ink-muted);
+	color: var(--text-muted);
 	letter-spacing: 0.06em;
 	text-transform: uppercase;
 }
 
 .assetRowCell {
-	font-family: var(--font-neue), sans-serif;
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.86rem;
-	color: var(--ec-ink-2);
+	color: var(--text-secondary);
 }
 
 .assetRowCellNumeral {
-	font-family: var(--font-eiko), var(--font-neue), serif;
+	font-family: var(--font-display), serif;
 	font-size: 1.02rem;
 	font-weight: 400;
-	color: var(--ec-ink);
+	color: var(--text-primary);
 	letter-spacing: -0.005em;
 }
 
 .detailPanel {
-	border: 1px solid var(--ec-rule);
-	background: var(--ec-paper-2);
+	border: 1px solid var(--line);
+	background: var(--surface-raised);
 	padding: 1.6rem 1.8rem;
 	display: flex;
 	flex-direction: column;
@@ -1084,8 +1192,8 @@
 	border: none;
 	background: transparent;
 	padding: 2.4rem 1.4rem;
-	color: var(--ec-ink-muted);
-	font-family: var(--font-eiko), var(--font-neue), serif;
+	color: var(--text-muted);
+	font-family: var(--font-display), serif;
 	font-style: italic;
 	text-align: center;
 	font-size: 1rem;
@@ -1103,10 +1211,10 @@
 	gap: 1rem;
 	padding: 1.2rem 0;
 	border: none;
-	border-bottom: 1px solid var(--ec-rule);
+	border-bottom: 1px solid var(--line);
 	background: transparent;
-	color: var(--ec-ink);
-	font-family: var(--font-neue), sans-serif;
+	color: var(--text-primary);
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.66rem;
 	font-weight: 600;
 	letter-spacing: 0.22em;
@@ -1117,12 +1225,12 @@
 }
 
 .disclosureToggle:hover {
-	color: var(--ec-ember);
+	color: var(--accent);
 }
 
 .disclosureCaret {
 	display: inline-block;
-	font-family: var(--font-eiko), var(--font-neue), serif;
+	font-family: var(--font-display), serif;
 	font-size: 1.4rem;
 	line-height: 1;
 	transition: transform 200ms ease;
@@ -1153,8 +1261,8 @@
 	flex-direction: column;
 	gap: 0.65rem;
 	padding: 0.85rem;
-	border: 1px solid var(--ec-rule);
-	background: var(--ec-paper-2);
+	border: 1px solid var(--line);
+	background: var(--surface-raised);
 	cursor: pointer;
 	scroll-snap-align: start;
 	transition: border-color 140ms ease, background-color 140ms ease;
@@ -1162,23 +1270,23 @@
 }
 
 .filmstripCard:hover {
-	border-color: var(--ec-ink);
+	border-color: var(--text-primary);
 }
 
 .filmstripActive {
-	border-color: var(--ec-ember);
-	background: var(--ec-paper-sunk);
+	border-color: var(--accent);
+	background: var(--surface-sunk);
 }
 
 .filmstripFrame {
 	width: 100%;
 	height: 130px;
-	background: var(--ec-ink);
-	color: var(--ec-paper);
+	background: var(--surface-sunk);
+	color: var(--text-muted);
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	font-family: var(--font-eiko), var(--font-neue), serif;
+	font-family: var(--font-display), serif;
 	font-size: 0.95rem;
 	font-weight: 400;
 	letter-spacing: 0.04em;
@@ -1208,18 +1316,18 @@
 
 .heroCaptionTitle {
 	margin: 0;
-	font-family: var(--font-eiko), var(--font-neue), serif;
+	font-family: var(--font-display), serif;
 	font-size: clamp(1.4rem, 2vw, 1.85rem);
 	font-weight: 400;
 	letter-spacing: -0.005em;
-	color: var(--ec-ink);
+	color: var(--text-primary);
 	overflow-wrap: anywhere;
 }
 
 .heroCaptionMeta {
 	margin: 0.4rem 0 0;
-	color: var(--ec-ink-muted);
-	font-family: var(--font-neue), sans-serif;
+	color: var(--text-muted);
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.78rem;
 	letter-spacing: 0.06em;
 	text-transform: uppercase;
@@ -1237,7 +1345,7 @@
 	flex-direction: column;
 	gap: 1.4rem;
 	padding: 2rem 0;
-	border-bottom: 1px solid var(--ec-rule);
+	border-bottom: 1px solid var(--line);
 }
 
 .settingsGroupHeader {
@@ -1250,12 +1358,12 @@
 
 .settingsGroupTitle {
 	margin: 0;
-	font-family: var(--font-neue), sans-serif;
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.7rem;
 	font-weight: 600;
 	letter-spacing: 0.22em;
 	text-transform: uppercase;
-	color: var(--ec-ink);
+	color: var(--text-primary);
 }
 
 .settingsRow {
@@ -1267,8 +1375,8 @@
 }
 
 .settingsRowLabel {
-	color: var(--ec-ink-muted);
-	font-family: var(--font-neue), sans-serif;
+	color: var(--text-muted);
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.66rem;
 	font-weight: 600;
 	letter-spacing: 0.22em;
@@ -1276,16 +1384,10 @@
 }
 
 .settingsRowValue {
-	color: var(--ec-ink);
-	font-family: var(--font-eiko), var(--font-neue), serif;
+	color: var(--text-primary);
+	font-family: var(--font-display), serif;
 	font-size: 1.02rem;
 	overflow-wrap: anywhere;
-}
-
-.settingsRowMono {
-	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-	font-size: 0.82rem;
-	color: var(--ec-ink);
 }
 
 .queueStrip {
@@ -1300,18 +1402,18 @@
 	gap: 0.85rem;
 	align-items: baseline;
 	padding: 0.7rem 0;
-	border-bottom: 1px solid var(--ec-rule);
-	font-family: var(--font-neue), sans-serif;
+	border-bottom: 1px solid var(--line);
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.86rem;
-	color: var(--ec-ink-2);
+	color: var(--text-secondary);
 	min-width: 0;
 }
 
 .queueLineNumeral {
-	font-family: var(--font-eiko), var(--font-neue), serif;
+	font-family: var(--font-display), serif;
 	font-size: 1.1rem;
 	font-weight: 400;
-	color: var(--ec-ink);
+	color: var(--text-primary);
 	letter-spacing: -0.005em;
 }
 
@@ -1319,11 +1421,11 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: var(--ec-ink);
+	color: var(--text-primary);
 }
 
 .queueLineMeta {
-	color: var(--ec-ink-muted);
+	color: var(--text-muted);
 	font-size: 0.76rem;
 	letter-spacing: 0.06em;
 	text-transform: uppercase;
@@ -1332,14 +1434,14 @@
 
 .assetCaption {
 	margin: 0.55rem 0 0;
-	color: var(--ec-ink-muted);
-	font-family: var(--font-neue), sans-serif;
+	color: var(--text-muted);
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.78rem;
 	letter-spacing: 0.04em;
 }
 
 .assetCaptionOk {
-	color: var(--ec-sage);
+	color: var(--ok);
 }
 
 @media (max-width: 980px) {
@@ -1459,9 +1561,9 @@
 	width: 100%;
 	padding: 1rem 0.2rem 1rem 0.6rem;
 	border: none;
-	border-bottom: 1px solid var(--ec-rule);
+	border-bottom: 1px solid var(--line);
 	background: transparent;
-	color: var(--ec-ink);
+	color: var(--text-primary);
 	font-family: inherit;
 	text-align: left;
 	cursor: pointer;
@@ -1469,12 +1571,12 @@
 }
 
 .packageRow:hover {
-	background: var(--ec-paper-sunk);
+	background: var(--surface-sunk);
 }
 
 .packageRowSelected {
-	background: var(--ec-paper-sunk);
-	box-shadow: inset 3px 0 0 var(--ec-ember);
+	background: var(--surface-sunk);
+	box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .packageRowHead {
@@ -1490,33 +1592,33 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	font-family: var(--font-eiko), var(--font-neue), serif;
+	font-family: var(--font-display), serif;
 	font-size: 1.02rem;
 	font-weight: 400;
 	letter-spacing: -0.005em;
-	color: var(--ec-ink);
+	color: var(--text-primary);
 }
 
 .packageRowMeta {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	font-family: var(--font-neue), sans-serif;
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.72rem;
 	letter-spacing: 0.06em;
 	text-transform: uppercase;
-	color: var(--ec-ink-muted);
+	color: var(--text-muted);
 }
 
 /* --- Detail/run headings (replace ad-hoc inline styles) --- */
 .detailTitle {
 	margin: 0;
-	font-family: var(--font-eiko), var(--font-neue), serif;
+	font-family: var(--font-display), serif;
 	font-size: 1.4rem;
 	font-weight: 400;
 	letter-spacing: -0.005em;
 	text-transform: none;
-	color: var(--ec-ink);
+	color: var(--text-primary);
 	overflow-wrap: anywhere;
 }
 

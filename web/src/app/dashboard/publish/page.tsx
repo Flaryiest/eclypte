@@ -15,6 +15,7 @@ import {
 } from "lucide-react"
 import {
     DashboardPage,
+    EmptyState,
     Pager,
     SkeletonList,
     StatusBadge,
@@ -175,7 +176,7 @@ export default function PublishPage() {
     // Live reconciliation: while posts are in flight, refresh them against Buffer on an
     // interval and immediately when the tab regains focus, so queued posts auto-advance
     // to Posted and permalinks fill in without a manual refresh. Background errors are
-    // swallowed (the manual "Refresh from Buffer" button surfaces them); merges are by
+    // swallowed (the manual "Re-check status" button surfaces them); merges are by
     // id so the selected post's editor and unrelated rows are untouched.
     useEffect(() => {
         if (!api || !hasPollable) {
@@ -367,7 +368,7 @@ export default function PublishPage() {
         <DashboardPage
             eyebrow="Publish"
             title="Reels queue"
-            subtitle="Review generated post packages, edit captions, and send approved renders to Buffer."
+            subtitle="Review your reels, polish the captions, and post them to Instagram."
             action={
                 <button className={styles.secondaryButton} type="button" onClick={handleManualRefresh} disabled={isLoading}>
                     <RefreshCw size={16} /> Refresh
@@ -382,7 +383,7 @@ export default function PublishPage() {
                         <div className={styles.panelHeader}>
                             <div>
                                 <h2>Publishing setup</h2>
-                                <p>Buffer, public media, and caption generation status.</p>
+                                <p>Your Instagram connection and caption settings.</p>
                             </div>
                             <StatusBadge
                                 label={publishingConfigReady(config) ? "ready" : "needs setup"}
@@ -390,10 +391,10 @@ export default function PublishPage() {
                             />
                         </div>
                         <div className={styles.settingsGrid}>
-                            <PostDetail label="Buffer API key" value={configuredLabel(config.buffer_api_key_configured)} />
-                            <PostDetail label="Instagram channel" value={channelLabel(config)} href={config.buffer_channel?.external_link} />
-                            <PostDetail label="Public R2 media" value={configuredLabel(config.public_media_base_url_configured)} />
-                            <PostDetail label="Caption model" value={config.openai_api_key_configured ? config.caption_model : "Fallback captions"} />
+                            <PostDetail label="Instagram connection" value={configuredLabel(config.buffer_api_key_configured)} />
+                            <PostDetail label="Instagram account" value={channelLabel(config)} href={config.buffer_channel?.external_link} />
+                            <PostDetail label="Media hosting" value={configuredLabel(config.public_media_base_url_configured)} />
+                            <PostDetail label="Smart captions" value={config.openai_api_key_configured ? "On" : "Backup captions"} />
                         </div>
                         {config.buffer_channel?.last_error && (
                             <div className={styles.errorBanner}>{config.buffer_channel.last_error}</div>
@@ -422,14 +423,14 @@ export default function PublishPage() {
                 <div className={`${styles.panel} ${styles.side}`}>
                     <div className={styles.panelHeader}>
                         <div>
-                            <h2>Packages</h2>
+                            <h2>Posts</h2>
                             <p>{visiblePosts.length} post{visiblePosts.length === 1 ? "" : "s"}</p>
                         </div>
                     </div>
                     {isLoading && visiblePosts.length === 0 ? (
                         <SkeletonList count={3} />
                     ) : visiblePosts.length === 0 ? (
-                        <div className={styles.emptyState}>No posts in this lane.</div>
+                        <EmptyState title="Nothing here yet" hint="Reels you create show up here, ready to caption and post." />
                     ) : (
                         <div className={styles.packageList}>
                             {postsPager.pageItems.map((post) => (
@@ -466,7 +467,7 @@ export default function PublishPage() {
 
                 <div className={`${styles.detailPanel} ${styles.wide}`}>
                     {!selected ? (
-                        <div className={styles.detailEmpty}>No publishing package selected.</div>
+                        <div className={styles.detailEmpty}>Pick a reel to review.</div>
                     ) : (
                         <>
                             <div className={styles.cardTop}>
@@ -530,14 +531,14 @@ export default function PublishPage() {
                                     <Zap size={16} /> Post now
                                 </button>
                                 <button className={styles.secondaryButton} type="button" onClick={() => handleSend("queue")} disabled={isWorking}>
-                                    <Send size={16} /> Queue
+                                    <Send size={16} /> Add to queue
                                 </button>
                                 <button className={styles.secondaryButton} type="button" onClick={() => handleSend("schedule")} disabled={isWorking}>
                                     <CalendarClock size={16} /> Schedule
                                 </button>
                                 {selected.buffer_post_id && (
                                     <button className={styles.secondaryButton} type="button" onClick={handleRefreshFromBuffer} disabled={isWorking}>
-                                        <RefreshCw size={16} /> Refresh from Buffer
+                                        <RefreshCw size={16} /> Re-check status
                                     </button>
                                 )}
                                 {(selected.status === "queued" || selected.status === "scheduled") && (
@@ -551,12 +552,13 @@ export default function PublishPage() {
                             </div>
 
                             <div className={styles.settingsGrid}>
-                                <PostDetail label="Buffer post" value={selected.buffer_post_id || "Not sent"} />
-                                <PostDetail label="Buffer status" value={selected.buffer_status ? humanizeLabel(selected.buffer_status) : "Not sent"} />
-                                <PostDetail label="Caption source" value={captionSourceLabel(selected)} />
-                                <PostDetail label="Scheduled" value={formatDate(selected.scheduled_at)} />
-                                <PostDetail label="Public media" value={selected.public_media_url || "Not prepared"} href={selected.public_media_url} />
-                                <PostDetail label="Post URL" value={selected.post_url || "Not available"} href={selected.post_url} />
+                                <PostDetail label="Caption" value={captionSourceLabel(selected)} />
+                                {selected.scheduled_at && (
+                                    <PostDetail label="Scheduled" value={formatDate(selected.scheduled_at)} />
+                                )}
+                                {selected.post_url && (
+                                    <PostDetail label="View post" value="Open on Instagram" href={selected.post_url} />
+                                )}
                             </div>
 
                             {selected.caption_error && <div className={styles.errorBanner}>{selected.caption_error}</div>}
@@ -575,11 +577,11 @@ function PostDetail({ label, value, href }: { label: string; value: string; href
             <div>
                 <span className={styles.settingLabel}>{label}</span>
                 {href ? (
-                    <a className={styles.monoText} href={href} target="_blank" rel="noreferrer">
+                    <a className={styles.detailLink} href={href} target="_blank" rel="noreferrer">
                         {value} <ExternalLink size={13} aria-hidden />
                     </a>
                 ) : (
-                    <span className={styles.monoText}>{value}</span>
+                    <span className={styles.metaValue}>{value}</span>
                 )}
             </div>
         </div>
@@ -598,15 +600,15 @@ function publishingConfigReady(config: PublishingConfig) {
 }
 
 function configuredLabel(value: boolean) {
-    return value ? "Configured" : "Missing"
+    return value ? "Connected" : "Not set up"
 }
 
 function channelLabel(config: PublishingConfig) {
     if (!config.buffer_channel_id_configured) {
-        return "Missing"
+        return "Not set up"
     }
     if (!config.buffer_channel) {
-        return "Configured"
+        return "Connected"
     }
     const name = config.buffer_channel.display_name || config.buffer_channel.name || config.buffer_channel.id
     if (config.buffer_channel.is_disconnected) {
@@ -620,12 +622,12 @@ function channelLabel(config: PublishingConfig) {
 
 function captionSourceLabel(post: PublishingPost) {
     if (post.caption_source === "openai") {
-        return "OpenAI"
+        return "AI-written"
     }
     if (post.caption_error) {
-        return "Fallback after model error"
+        return "Backup caption (AI was unavailable)"
     }
-    return "Fallback"
+    return "Backup caption"
 }
 
 function filterPosts(posts: PublishingPost[], tab: PublishTab) {

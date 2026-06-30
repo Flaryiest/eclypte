@@ -6,13 +6,14 @@ import { useRouter } from "next/navigation"
 import { Download, RefreshCw, Send, Trash2 } from "lucide-react"
 import {
     DashboardPage,
+    EmptyState,
     Pager,
     SkeletonList,
     StatusBadge,
     errorMessage,
     formatBytes,
     formatDate,
-    humanizeLabel,
+    humanizeStageDetail,
     usePagination,
     versionRef,
 } from "../dashboardCommon"
@@ -149,14 +150,14 @@ export default function RendersPage() {
 
     if (!isLoaded) {
         return (
-            <DashboardPage eyebrow="Renders" title="Loading renders">
+            <DashboardPage eyebrow="Reels" title="Loading renders">
                 <SkeletonList count={3} />
             </DashboardPage>
         )
     }
     if (!isSignedIn || !user) {
         return (
-            <DashboardPage eyebrow="Renders" title="Sign in required">
+            <DashboardPage eyebrow="Reels" title="Sign in required">
                 <div className={styles.emptyState}>Sign in from the homepage to view renders.</div>
             </DashboardPage>
         )
@@ -164,9 +165,9 @@ export default function RendersPage() {
 
     return (
         <DashboardPage
-            eyebrow="Renders"
-            title="Render library"
-            subtitle="Review completed MP4 outputs and recent render runs."
+            eyebrow="Reels"
+            title="Your reels"
+            subtitle="Watch and download your finished edits."
             action={
                 <button className={styles.secondaryButton} type="button" onClick={loadRenders} disabled={isLoading}>
                     <RefreshCw size={16} /> Refresh
@@ -178,7 +179,7 @@ export default function RendersPage() {
             {isLoading && outputs.length === 0 ? (
                 <SkeletonList count={3} />
             ) : outputs.length === 0 ? (
-                <div className={styles.emptyState}>No renders yet. Create one from New Edit.</div>
+                <EmptyState title="No reels yet" hint="Head to Compose to make your first edit." />
             ) : (
                 <>
                     {preview && (
@@ -250,12 +251,12 @@ export default function RendersPage() {
                         <div className={`${styles.panel} ${styles.side}`}>
                             <div className={styles.panelHeader}>
                                 <div>
-                                    <h2>Render runs</h2>
-                                    <p>{runs.length} tracked run{runs.length === 1 ? "" : "s"}</p>
+                                    <h2>Recent activity</h2>
+                                    <p>{runs.length} recent</p>
                                 </div>
                             </div>
                             {runs.length === 0 ? (
-                                <div className={styles.emptyState}>No render runs found.</div>
+                                <div className={styles.emptyState}>Nothing recent.</div>
                             ) : (
                                 <>
                                     <ul className={styles.runList}>
@@ -263,8 +264,8 @@ export default function RendersPage() {
                                             <li className={styles.listCard} key={run.run_id}>
                                                 <div className={styles.cardTop}>
                                                     <div>
-                                                        <h3>Render</h3>
-                                                        <p className={styles.smallText}>{humanizeLabel(run.current_step || "render")} · {formatDate(run.updated_at)}</p>
+                                                        <h3>Reel</h3>
+                                                        <p className={styles.smallText}>{humanizeStageDetail(run.current_step, run.status)} · {formatDate(run.updated_at)}</p>
                                                     </div>
                                                     <StatusBadge label={run.status} tone={run.status} />
                                                 </div>

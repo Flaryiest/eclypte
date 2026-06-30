@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Link, RefreshCw, RotateCcw, Save, Sparkles } from "lucide-react"
-import { DashboardPage, Pager, StatusBadge, errorMessage, formatDate, humanizeLabel, usePagination } from "../dashboardCommon"
+import { DashboardPage, EmptyState, MetaList, Pager, StatusBadge, errorMessage, formatDate, humanizeLabel, humanizeStageDetail, usePagination } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import {
     EclypteApiClient,
@@ -86,11 +86,11 @@ export default function SynthesisPage() {
         }
         setIsSubmitting(true)
         setError(null)
-        setStatus("Submitting references")
+        setStatus("Adding references…")
         try {
             await api.createSynthesisReferences(urls)
             setUrlInput("")
-            setStatus(`${urls.length} reference${urls.length === 1 ? "" : "s"} queued`)
+            setStatus(`Added ${urls.length} reference${urls.length === 1 ? "" : "s"}`)
             loadSynthesis()
         } catch (caught) {
             setError(errorMessage(caught))
@@ -105,7 +105,7 @@ export default function SynthesisPage() {
         }
         setIsConsolidating(true)
         setError(null)
-        setStatus("Starting synthesis consolidation")
+        setStatus("Studying your references…")
         try {
             const run = await api.createSynthesisConsolidation()
             const completed = await waitForRunCompletion(api, run, {
@@ -115,7 +115,7 @@ export default function SynthesisPage() {
                 },
             })
             setActiveRun(completed)
-            setStatus("Prompt guidance updated")
+            setStatus("Updated your editor's style")
             loadSynthesis()
         } catch (caught) {
             setError(errorMessage(caught))
@@ -180,9 +180,9 @@ export default function SynthesisPage() {
 
     return (
         <DashboardPage
-            eyebrow="Synthesis"
-            title="Reference learning"
-            subtitle="Edit the active system prompt directly. Queue Instagram Reel references below to teach new patterns."
+            eyebrow="Style training"
+            title="Teach your editor"
+            subtitle="Shape how your AI editor cuts. Paste reels you admire below and it learns the patterns."
             action={
                 <>
                     <button className={styles.ghostButton} type="button" onClick={loadSynthesis}>
@@ -205,8 +205,8 @@ export default function SynthesisPage() {
                 <div className={`${styles.panel} ${styles.wide}`}>
                     <div className={styles.panelHeader}>
                         <div>
-                            <h2>Effective system prompt</h2>
-                            <p>Active version: {promptState?.active_version_id || "loading"}</p>
+                            <h2>Editing style guide</h2>
+                            <p>Active: {activePrompt?.label || "—"}{activePrompt ? ` · ${formatDate(activePrompt.created_at)}` : ""}</p>
                         </div>
                         <StatusBadge label={promptChanged ? "edited" : "active"} tone={promptChanged ? "queued" : "completed"} />
                     </div>
@@ -279,7 +279,7 @@ export default function SynthesisPage() {
                             onClick={() => setRefsOpen((current) => !current)}
                             aria-expanded={refsOpen}
                         >
-                            <span>References &amp; guidance · {completedReferences.length} of {references.length} complete</span>
+                            <span>References &amp; what it&apos;s learned · {completedReferences.length} of {references.length} ready</span>
                             <span className={styles.disclosureCaret} aria-hidden>+</span>
                         </button>
                         {refsOpen && (
@@ -287,8 +287,8 @@ export default function SynthesisPage() {
                                 <div className={`${styles.panel} ${styles.side}`}>
                                     <div className={styles.panelHeader}>
                                         <div>
-                                            <h2>Reel intake</h2>
-                                            <p>One URL per line.</p>
+                                            <h2>Add references</h2>
+                                            <p>Paste Instagram Reel links, one per line.</p>
                                         </div>
                                     </div>
                                     <div className={styles.fieldStack}>
@@ -302,10 +302,10 @@ export default function SynthesisPage() {
                                             />
                                         </label>
                                         <button className={styles.primaryButton} type="button" onClick={submitReferences} disabled={isSubmitting}>
-                                            <Link size={16} /> {isSubmitting ? "Queueing" : "Queue references"}
+                                            <Link size={16} /> {isSubmitting ? "Adding…" : "Add references"}
                                         </button>
                                         <button className={styles.secondaryButton} type="button" onClick={consolidateReferences} disabled={isConsolidating || completedReferences.length === 0}>
-                                            <Sparkles size={16} /> {isConsolidating ? "Consolidating" : "Consolidate"}
+                                            <Sparkles size={16} /> {isConsolidating ? "Learning…" : "Learn from references"}
                                         </button>
                                     </div>
                                 </div>
@@ -313,13 +313,13 @@ export default function SynthesisPage() {
                                 <div className={`${styles.panel} ${styles.wide}`}>
                                     <div className={styles.panelHeader}>
                                         <div>
-                                            <h2>Reference queue</h2>
-                                            <p>{completedReferences.length} complete of {references.length} total</p>
+                                            <h2>References</h2>
+                                            <p>{completedReferences.length} ready of {references.length} total</p>
                                         </div>
                                         {activeRun && <StatusBadge label={activeRun.status} tone={activeRun.status} />}
                                     </div>
                                     {references.length === 0 ? (
-                                        <div className={styles.emptyState}>No references submitted yet.</div>
+                                        <EmptyState title="No references yet" hint="Paste a few Reel links to start teaching your editor a style." />
                                     ) : (
                                         <>
                                         <ul className={styles.referenceList}>
@@ -333,9 +333,7 @@ export default function SynthesisPage() {
                                                         <StatusBadge label={reference.status} tone={reference.status} />
                                                     </div>
                                                     {reference.last_error && <div className={styles.errorBanner}>{reference.last_error}</div>}
-                                                    {Object.keys(reference.metrics).length > 0 && (
-                                                        <pre className={styles.codeBlock}>{JSON.stringify(reference.metrics, null, 2)}</pre>
-                                                    )}
+                                                    <MetaList items={metricItems(reference.metrics)} />
                                                 </li>
                                             ))}
                                         </ul>
@@ -352,14 +350,14 @@ export default function SynthesisPage() {
                                 <div className={`${styles.panel} ${styles.full}`}>
                                     <div className={styles.panelHeader}>
                                         <div>
-                                            <h2>Generated guidance</h2>
-                                            <p>Latest consolidated learning from completed references.</p>
+                                            <h2>What it&apos;s learned</h2>
+                                            <p>The notes your editor uses, distilled from your references.</p>
                                         </div>
                                     </div>
                                     {activePrompt?.generated_guidance ? (
-                                        <pre className={styles.codeBlock}>{activePrompt.generated_guidance}</pre>
+                                        <p className={styles.proseText}>{activePrompt.generated_guidance}</p>
                                     ) : (
-                                        <div className={styles.emptyState}>Run consolidation after references complete to generate guidance.</div>
+                                        <EmptyState title="Nothing learned yet" hint="Add a few references and run “Learn from references” to build a style." />
                                     )}
                                 </div>
                             </div>
@@ -376,7 +374,22 @@ function uniqueLines(value: string) {
 }
 
 function runDetail(run: RunManifest) {
-    return run.current_step
-        ? `${humanizeLabel(run.status)} · ${humanizeLabel(run.current_step)}`
-        : humanizeLabel(run.status)
+    return humanizeStageDetail(run.current_step, run.status)
+}
+
+// Turn a reference's raw metrics map into a readable label/value list, keeping
+// only the scalar entries (nested objects/arrays are internal detail).
+function metricItems(metrics: Record<string, unknown>) {
+    return Object.entries(metrics)
+        .filter(([, value]) => typeof value === "number" || typeof value === "string")
+        .slice(0, 8)
+        .map(([key, value]) => ({
+            label: humanizeLabel(key),
+            value:
+                typeof value === "number"
+                    ? Number.isInteger(value)
+                        ? String(value)
+                        : value.toFixed(2)
+                    : String(value),
+        }))
 }

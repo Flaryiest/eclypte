@@ -4,14 +4,14 @@
 	width: 100%;
 	min-height: 100dvh;
 	position: relative;
-	background-color: var(--ec-paper, #f4efe6);
-	color: var(--ec-ink, #161412);
+	background-color: var(--surface-base, #0e1116);
+	color: var(--text-primary, #eceff4);
 }
 
 .dashboard {
 	min-width: 0;
 	padding: 2.4rem 3rem 4rem;
-	border-left: 1px solid var(--ec-rule, rgba(22, 20, 18, 0.08));
+	border-left: 1px solid var(--line, rgba(255, 255, 255, 0.08));
 }
 
 .mobileToggle {
@@ -20,11 +20,11 @@
 	gap: 0.5rem;
 	padding: 0.55rem 0.85rem;
 	margin-bottom: 1.4rem;
-	border: 1px solid var(--ec-rule, rgba(22, 20, 18, 0.18));
-	border-radius: 0;
+	border: 1px solid var(--line, rgba(255, 255, 255, 0.18));
+	border-radius: var(--radius, 3px);
 	background: transparent;
-	color: var(--ec-ink, #161412);
-	font-family: var(--font-neue), sans-serif;
+	color: var(--text-primary, #eceff4);
+	font-family: var(--font-ui), sans-serif;
 	font-size: 0.74rem;
 	font-weight: 600;
 	letter-spacing: 0.14em;
@@ -33,19 +33,19 @@
 }
 
 .mobileToggle:hover {
-	background: var(--ec-paper-2, #ece5d6);
-	border-color: var(--ec-rule-strong, rgba(22, 20, 18, 0.28));
+	background: var(--surface-raised, #161b22);
+	border-color: var(--line-strong, rgba(255, 255, 255, 0.28));
 }
 
 .mobileToggle:focus-visible {
-	outline: 1px solid var(--ec-ember, #c2410c);
+	outline: 2px solid var(--focus-ring, #8e80ff);
 	outline-offset: 2px;
 }
 
 .backdrop {
 	display: none;
 	border: none;
-	background: rgba(22, 20, 18, 0.32);
+	background: var(--surface-overlay, rgba(8, 10, 14, 0.66));
 	position: fixed;
 	inset: 0;
 	z-index: 10900;

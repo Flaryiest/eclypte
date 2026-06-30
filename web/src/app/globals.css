@@ -145,33 +145,57 @@ table {
   --color-subtitle: #f0f0f0;
 }
 
-[data-surface="cream"] {
-  --color-background: #f4efe6;
-  --color-primary: #161412;
-  --color-secondary: #3c3833;
-  --color-subtitle: #6f655a;
-  --color-highlight: #c2410c;
+/* ----------------------------------------------------------------------------
+   "Edit Bay" — the dashboard's dark, video-first identity. Gated entirely on
+   [data-surface="studio"] (set on the dashboard container), so the marketing
+   site (which uses --color-* / [data-theme="dark"]) is untouched. Tokens are
+   semantic (role-based); the dashboard CSS modules consume them directly.
+---------------------------------------------------------------------------- */
+[data-surface="studio"] {
+  color-scheme: dark;
 
-  --ec-paper: #f4efe6;
-  --ec-paper-2: #ece5d6;
-  --ec-paper-sunk: #e7dec9;
-  --ec-ink: #161412;
-  --ec-ink-2: #3c3833;
-  --ec-ink-muted: #6f655a;
-  --ec-rule: rgba(22, 20, 18, 0.12);
-  --ec-rule-strong: rgba(22, 20, 18, 0.28);
-  --ec-ember: #c2410c;
-  --ec-ember-soft: rgba(194, 65, 12, 0.10);
-  --ec-sage: #3a6b4f;
-  --ec-sage-soft: rgba(58, 107, 79, 0.10);
-  --ec-mark: #161412;
+  /* Surfaces (depth ladder) */
+  --surface-base: #0e1116;
+  --surface-raised: #161b22;
+  --surface-sunk: #0a0d11;
+  --surface-overlay: rgba(8, 10, 14, 0.66);
 
-  background-color: var(--ec-paper);
+  /* Text */
+  --text-primary: #eceff4;
+  --text-secondary: #aeb7c6;
+  --text-muted: #7e8799;
+
+  /* Lines */
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
+
+  /* Accent — the spectral energy ribbon */
+  --accent: #7b6cff;
+  --accent-soft: rgba(123, 108, 255, 0.14);
+  --accent-contrast: #f7f8ff;
+  --energy: linear-gradient(90deg, #5b6cff 0%, #9b5bff 50%, #ff5c7a 100%);
+
+  /* Status */
+  --ok: #36d399;
+  --ok-soft: rgba(54, 211, 153, 0.14);
+  --danger: #ff5c5c;
+  --danger-soft: rgba(255, 92, 92, 0.14);
+
+  /* Effects */
+  --focus-ring: #8e80ff;
+  --radius: 3px;
+
+  /* Dashboard type */
+  --font-display: var(--font-space-grotesk), var(--font-inter-tight), system-ui, sans-serif;
+  --font-ui: var(--font-neue), var(--font-inter-tight), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+
+  background-color: var(--surface-base);
   background-image:
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='paper'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23paper)' opacity='0.06'/></svg>");
-  background-size: 200px 200px;
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/></svg>");
+  background-size: 180px 180px;
   background-attachment: fixed;
-  color: var(--ec-ink);
+  color: var(--text-primary);
 }
 
 body {

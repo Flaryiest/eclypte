@@ -307,14 +307,14 @@ export default function AssetsPage() {
 
     if (!isLoaded) {
         return (
-            <DashboardPage eyebrow="Assets" title="Loading assets">
+            <DashboardPage eyebrow="Library" title="Loading assets">
                 <SkeletonList count={3} />
             </DashboardPage>
         )
     }
     if (!isSignedIn || !user) {
         return (
-            <DashboardPage eyebrow="Assets" title="Sign in required">
+            <DashboardPage eyebrow="Library" title="Sign in required">
                 <div className={styles.emptyState}>Sign in from the homepage to manage assets.</div>
             </DashboardPage>
         )
@@ -322,9 +322,9 @@ export default function AssetsPage() {
 
     return (
         <DashboardPage
-            eyebrow="Assets"
-            title="Asset library"
-            subtitle="Upload reusable WAV songs and MP4 source videos, then analyze them once for future edits."
+            eyebrow="Library"
+            title="Your library"
+            subtitle="Upload songs and source videos once, then reuse them across every edit."
             action={
                 <>
                     <button
@@ -360,21 +360,21 @@ export default function AssetsPage() {
                 <div className={`${styles.panel} ${styles.full}`}>
                     <div className={styles.panelHeader}>
                         <div>
-                            <h2>Upload asset</h2>
-                            <p>Assets persist in R2 and can be reused after refresh.</p>
+                            <h2>Upload</h2>
+                            <p>Your uploads are saved to your library for reuse.</p>
                         </div>
                     </div>
                     <div className={styles.fieldStack}>
                         <label className={styles.fieldLabel}>
                             Asset type
                             <select className={styles.select} value={slot} onChange={(event) => onSlotChange(event.target.value as UploadSlot)}>
-                                <option value="audio">Song (WAV/MP3/…)</option>
-                                <option value="video">MP4 source video</option>
+                                <option value="audio">Song</option>
+                                <option value="video">Source video</option>
                             </select>
                         </label>
                         <label className={styles.filePicker}>
                             <span className={styles.fileName}>{file ? file.name : "Choose a file"}</span>
-                            <span className={styles.muted}>{slot === "audio" ? "WAV, MP3, M4A, FLAC… (auto-converted to WAV)" : "video/mp4"}</span>
+                            <span className={styles.muted}>{slot === "audio" ? "Any common audio file works (WAV, MP3, M4A, FLAC…)" : "MP4 video"}</span>
                             {file && <span className={styles.smallText}>{formatBytes(file.size)}</span>}
                             <input type="file" accept={slot === "audio" ? AUDIO_UPLOAD_ACCEPT : "video/mp4,.mp4"} onChange={onFileChange} />
                         </label>
@@ -390,7 +390,7 @@ export default function AssetsPage() {
                     <div className={styles.panelHeader}>
                         <div>
                             <h2>Import from YouTube</h2>
-                            <p>Backend downloads the audio, transcodes to WAV, and runs music analysis.</p>
+                            <p>We&apos;ll grab the audio and analyze it for you automatically.</p>
                         </div>
                     </div>
                     <div className={styles.fieldStack}>
@@ -427,7 +427,7 @@ export default function AssetsPage() {
                             <h2>Library</h2>
                             <p>{visibleAssets.length} asset{visibleAssets.length === 1 ? "" : "s"}</p>
                         </div>
-                        <div className={styles.segmentedControl} role="tablist" aria-label="Asset library">
+                        <div className={styles.segmentedControl} role="tablist" aria-label="Library">
                             <button
                                 className={activeTab === "source" ? styles.segmentActive : styles.segmentButton}
                                 type="button"
@@ -446,7 +446,7 @@ export default function AssetsPage() {
                                     setSelectedFileId(null)
                                 }}
                             >
-                                Derived ({derivedAssets.length})
+                                Generated ({derivedAssets.length})
                             </button>
                             <button
                                 className={activeTab === "hidden" ? styles.segmentActive : styles.segmentButton}
@@ -589,7 +589,7 @@ function AssetDetail({
                     {isAudio && <audio className={styles.previewMedia} controls src={preview.url} />}
                     {isVideo && <video className={styles.previewMedia} controls src={preview.url} />}
                     {!isAudio && !isVideo && (
-                        <div className={styles.emptyState}>Downloadable, no inline preview available.</div>
+                        <div className={styles.emptyState}>No preview — download to view.</div>
                     )}
                     <p className={styles.smallText}>Presigned URLs expire; refresh preview if playback stops.</p>
                 </>
@@ -657,12 +657,12 @@ function isSourceKind(kind: ArtifactKind) {
 
 function emptyAssetMessage(tab: LibraryTab) {
     if (tab === "source") {
-        return "No source uploads yet."
+        return "No songs or videos yet — upload one to get started."
     }
     if (tab === "derived") {
-        return "No derived analysis or timeline files yet."
+        return "Nothing generated yet. Analyses and timelines show up here as you make edits."
     }
-    return "No hidden assets."
+    return "Nothing hidden."
 }
 
 function validateYouTubeUrl(value: string) {

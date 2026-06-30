@@ -1,8 +1,8 @@
 .sidebar {
 	height: 100dvh;
 	width: 96px;
-	background: var(--ec-paper-2, #ece5d6);
-	border-right: 1px solid var(--ec-rule, rgba(22, 20, 18, 0.12));
+	background: var(--surface-raised, #161b22);
+	border-right: 1px solid var(--line, rgba(255, 255, 255, 0.08));
 	display: flex;
 	flex-direction: column;
 	position: sticky;
@@ -20,11 +20,11 @@
 }
 
 .brandText {
-	font-family: var(--font-eiko), var(--font-neue), serif;
+	font-family: var(--font-display), serif;
 	font-size: 0.92rem;
 	font-weight: 400;
 	letter-spacing: 0.18em;
-	color: var(--ec-ink-muted, #6f655a);
+	color: var(--text-muted, #7e8799);
 	text-transform: uppercase;
 }
 
@@ -59,10 +59,10 @@
 	padding: 0.4rem 0.5rem 0.55rem;
 	border: none;
 	background: transparent;
-	color: var(--ec-ink, #161412);
+	color: var(--text-primary, #eceff4);
 	cursor: pointer;
 	text-decoration: none;
-	font-family: var(--font-neue), sans-serif;
+	font-family: var(--font-ui), sans-serif;
 	border-radius: 0;
 	position: relative;
 	width: 64px;
@@ -70,12 +70,12 @@
 }
 
 .navLetter {
-	font-family: var(--font-eiko), var(--font-neue), serif;
+	font-family: var(--font-display), serif;
 	font-size: 1.55rem;
 	font-weight: 400;
 	letter-spacing: 0.04em;
 	line-height: 1;
-	color: var(--ec-ink, #161412);
+	color: var(--text-primary, #eceff4);
 	position: relative;
 }
 
@@ -86,14 +86,14 @@
 	bottom: -8px;
 	width: 0;
 	height: 2px;
-	background: var(--ec-ember, #c2410c);
+	background: var(--energy, #7b6cff);
 	transform: translateX(-50%);
 	transition: width 220ms ease;
 }
 
 .navItem:hover .navLetter::after {
 	width: 16px;
-	background: var(--ec-rule-strong, rgba(22, 20, 18, 0.4));
+	background: var(--line-strong, rgba(255, 255, 255, 0.4));
 }
 
 .navLabel {
@@ -101,7 +101,7 @@
 	font-weight: 600;
 	letter-spacing: 0.18em;
 	text-transform: uppercase;
-	color: var(--ec-ink-muted, #6f655a);
+	color: var(--text-muted, #7e8799);
 	white-space: nowrap;
 	text-align: center;
 	line-height: 1.15;
@@ -116,11 +116,11 @@
 
 .active .navLetter::after {
 	width: 22px;
-	background: var(--ec-ember, #c2410c);
+	background: var(--energy, #7b6cff);
 }
 
 .active .navLabel {
-	color: var(--ec-ink, #161412);
+	color: var(--text-primary, #eceff4);
 }
 
 .icon,
@@ -134,7 +134,7 @@
 	flex-direction: column;
 	align-items: center;
 	gap: 0.85rem;
-	border-top: 1px solid var(--ec-rule, rgba(22, 20, 18, 0.12));
+	border-top: 1px solid var(--line, rgba(22, 20, 18, 0.12));
 }
 
 .statusRow {
@@ -147,8 +147,8 @@
 	width: 7px;
 	height: 7px;
 	border-radius: 999px;
-	background: var(--ec-sage, #3a6b4f);
-	box-shadow: 0 0 0 3px var(--ec-sage-soft, rgba(58, 107, 79, 0.10));
+	background: var(--ok, #36d399);
+	box-shadow: 0 0 0 3px var(--ok-soft, rgba(54, 211, 153, 0.10));
 }
 
 .statusText {
@@ -160,8 +160,8 @@
 	height: 44px;
 	background: transparent;
 	border: 1px solid transparent;
-	color: var(--ec-ink-muted, #6f655a);
-	border-radius: 0;
+	color: var(--text-muted, #7e8799);
+	border-radius: var(--radius, 3px);
 	padding: 0;
 	display: flex;
 	align-items: center;
@@ -171,12 +171,12 @@
 }
 
 .logoutButton:hover {
-	color: var(--ec-ink, #161412);
-	border-color: var(--ec-ink, #161412);
+	color: var(--text-primary, #eceff4);
+	border-color: var(--text-primary, #eceff4);
 }
 
 .logoutButton:focus-visible {
-	outline: 1px solid var(--ec-ember, #c2410c);
+	outline: 2px solid var(--focus-ring, #8e80ff);
 	outline-offset: 2px;
 }
 
@@ -199,7 +199,7 @@
 }
 
 .nav::-webkit-scrollbar-thumb {
-	background: var(--ec-rule, rgba(22, 20, 18, 0.12));
+	background: var(--line, rgba(255, 255, 255, 0.12));
 }
 
 @media (max-width: 768px) {
@@ -208,7 +208,7 @@
 		left: 0;
 		top: 0;
 		width: 240px;
-		box-shadow: 12px 0 32px rgba(22, 20, 18, 0.18);
+		box-shadow: 12px 0 32px rgba(0, 0, 0, 0.5);
 		transform: translateX(-100%);
 	}
 
@@ -264,15 +264,15 @@
 		letter-spacing: 0.12em;
 		max-width: none;
 		text-align: left;
-		color: var(--ec-ink, #161412);
+		color: var(--text-primary, #eceff4);
 	}
 
 	.active {
-		background: var(--ec-paper-sunk, #e7dec9);
+		background: var(--surface-sunk, #0a0d11);
 	}
 
 	.active .navLabel {
-		color: var(--ec-ember, #c2410c);
+		color: var(--accent, #7b6cff);
 	}
 
 	.footer {
@@ -284,8 +284,8 @@
 	.statusText {
 		display: inline;
 		margin-left: 0.5rem;
-		color: var(--ec-ink-muted, #6f655a);
-		font-family: var(--font-neue), sans-serif;
+		color: var(--text-muted, #7e8799);
+		font-family: var(--font-ui), sans-serif;
 		font-size: 0.74rem;
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
@@ -296,12 +296,12 @@
 		height: auto;
 		padding: 0.55rem 0.85rem;
 		gap: 0.5rem;
-		border: 1px solid var(--ec-rule-strong, rgba(22, 20, 18, 0.28));
+		border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.28));
 	}
 
 	.logoutLabel {
 		display: inline;
-		font-family: var(--font-neue), sans-serif;
+		font-family: var(--font-ui), sans-serif;
 		font-size: 0.72rem;
 		font-weight: 600;
 		letter-spacing: 0.14em;

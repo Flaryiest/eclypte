@@ -19,12 +19,12 @@ type SidebarItem = {
 }
 
 const sidebarItems: SidebarItem[] = [
-    { id: "new-edit", letter: "A", label: "New edit", href: "/dashboard/new-edit" },
-    { id: "assets", letter: "B", label: "Assets", href: "/dashboard/assets" },
+    { id: "new-edit", letter: "A", label: "Compose", href: "/dashboard/new-edit" },
+    { id: "assets", letter: "B", label: "Library", href: "/dashboard/assets" },
     { id: "autopilot", letter: "C", label: "Autopilot", href: "/dashboard/autopilot" },
     { id: "publish", letter: "D", label: "Publish", href: "/dashboard/publish" },
-    { id: "synthesis", letter: "E", label: "Synthesis", href: "/dashboard/synthesis" },
-    { id: "renders", letter: "F", label: "Renders", href: "/dashboard/renders" },
+    { id: "synthesis", letter: "E", label: "Style", href: "/dashboard/synthesis" },
+    { id: "renders", letter: "F", label: "Reels", href: "/dashboard/renders" },
     { id: "settings", letter: "G", label: "Settings", href: "/dashboard/settings" },
 ]
 
