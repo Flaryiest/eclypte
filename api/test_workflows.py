@@ -30,7 +30,6 @@ def _create_timeline_agent_run(repo: StorageRepository):
             "source_video_version_id": "ver_video",
             "music_analysis_version_id": "ver_music",
             "video_analysis_version_id": "ver_video_analysis",
-            "planning_mode": "agent",
         },
         steps=["ensure_clip_index", "agent_plan_timeline", "publish_timeline"],
     )
@@ -382,9 +381,7 @@ def test_agent_timeline_reuses_existing_clip_index_and_active_prompt(monkeypatch
         audio=audio,
         source_video=source_video,
         music_analysis=music_analysis,
-        video_analysis=video_analysis,
-        planning_mode="agent",
-        creative_brief="Make it cinematic.",
+        video_analysis=video_analysis,        creative_brief="Make it cinematic.",
     )
 
     completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=run.run_id))
@@ -442,9 +439,7 @@ def test_agent_timeline_emits_parent_progress_milestones(monkeypatch):
         audio=audio,
         source_video=source_video,
         music_analysis=music_analysis,
-        video_analysis=video_analysis,
-        planning_mode="agent",
-        creative_brief="Use strong moments.",
+        video_analysis=video_analysis,        creative_brief="Use strong moments.",
         progress_context={
             "user_id": "user_123",
             "run_id": parent.run_id,
@@ -504,9 +499,7 @@ def test_agent_timeline_builds_missing_clip_index(monkeypatch):
         audio=audio,
         source_video=source_video,
         music_analysis=music_analysis,
-        video_analysis=video_analysis,
-        planning_mode="agent",
-        creative_brief="",
+        video_analysis=video_analysis,        creative_brief="",
     )
 
     completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=run.run_id))
@@ -517,7 +510,7 @@ def test_agent_timeline_builds_missing_clip_index(monkeypatch):
     assert built["source_key"].endswith(f"/versions/{source_video['version_id']}/blob")
 
 
-def test_agent_timeline_failure_does_not_fallback_to_deterministic(monkeypatch):
+def test_agent_timeline_failure_is_visible(monkeypatch):
     store = InMemoryObjectStore()
     repo = StorageRepository(store)
     audio, source_video, music_analysis, video_analysis = _publish_timeline_inputs(repo)
@@ -544,9 +537,7 @@ def test_agent_timeline_failure_does_not_fallback_to_deterministic(monkeypatch):
         audio=audio,
         source_video=source_video,
         music_analysis=music_analysis,
-        video_analysis=video_analysis,
-        planning_mode="agent",
-        creative_brief="",
+        video_analysis=video_analysis,        creative_brief="",
     )
 
     completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=run.run_id))
@@ -598,9 +589,7 @@ def test_edit_pipeline_reuses_existing_analyses_and_publishes_render(monkeypatch
             "audio_file_id": audio["file_id"],
             "audio_version_id": audio["version_id"],
             "source_video_file_id": source_video["file_id"],
-            "source_video_version_id": source_video["version_id"],
-            "planning_mode": "agent",
-            "creative_brief": "",
+            "source_video_version_id": source_video["version_id"],            "creative_brief": "",
         },
         steps=["assets", "music", "video", "timeline", "render", "result"],
     )
@@ -613,9 +602,7 @@ def test_edit_pipeline_reuses_existing_analyses_and_publishes_render(monkeypatch
         user_id="user_123",
         run_id=parent.run_id,
         audio=audio,
-        source_video=source_video,
-        planning_mode="agent",
-        creative_brief="",
+        source_video=source_video,        creative_brief="",
         title="Reuse edit",
     )
 
@@ -644,7 +631,6 @@ def test_edit_pipeline_creates_missing_analysis_child_runs(monkeypatch):
             "audio_version_id": audio["version_id"],
             "source_video_file_id": source_video["file_id"],
             "source_video_version_id": source_video["version_id"],
-            "planning_mode": "deterministic",
             "creative_brief": "",
         },
         steps=["assets", "music", "video", "timeline", "render", "result"],
@@ -682,7 +668,6 @@ def test_edit_pipeline_creates_missing_analysis_child_runs(monkeypatch):
         run_id=parent.run_id,
         audio=audio,
         source_video=source_video,
-        planning_mode="deterministic",
         creative_brief="",
         title="Fresh edit",
     )
@@ -708,9 +693,7 @@ def test_edit_pipeline_fails_parent_when_child_run_fails(monkeypatch):
             "audio_file_id": audio["file_id"],
             "audio_version_id": audio["version_id"],
             "source_video_file_id": source_video["file_id"],
-            "source_video_version_id": source_video["version_id"],
-            "planning_mode": "agent",
-            "creative_brief": "",
+            "source_video_version_id": source_video["version_id"],            "creative_brief": "",
         },
         steps=["assets", "music", "video", "timeline", "render", "result"],
     )
@@ -728,9 +711,7 @@ def test_edit_pipeline_fails_parent_when_child_run_fails(monkeypatch):
         user_id="user_123",
         run_id=parent.run_id,
         audio=audio,
-        source_video=source_video,
-        planning_mode="agent",
-        creative_brief="",
+        source_video=source_video,        creative_brief="",
         title="Broken edit",
     )
 

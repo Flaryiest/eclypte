@@ -386,7 +386,6 @@ def test_timeline_endpoint_defaults_to_agent_planning_and_accepts_creative_brief
         "publish_timeline",
     ]
     assert runner.calls[-1][0] == "timeline"
-    assert runner.calls[-1][1]["planning_mode"] == "agent"
     assert runner.calls[-1][1]["creative_brief"] == "Open with the strongest action beat."
 
 
@@ -454,64 +453,6 @@ def test_timeline_endpoint_forwards_export_options_and_legacy_duration():
     assert runner.calls[-1][1]["export_options"]["crop_focus_x"] == 0.25
 
 
-def test_timeline_endpoint_supports_deterministic_opt_out():
-    client, store, runner = build_client()
-    repo = StorageRepository(store)
-    audio = publish_artifact(
-        repo,
-        user_id="user_123",
-        file_id="file_audio",
-        kind="song_audio",
-        filename="song.wav",
-        content_type="audio/wav",
-    )
-    video = publish_artifact(
-        repo,
-        user_id="user_123",
-        file_id="file_video",
-        kind="source_video",
-        filename="source.mp4",
-        content_type="video/mp4",
-    )
-    music_analysis = publish_artifact(
-        repo,
-        user_id="user_123",
-        file_id="file_music_analysis",
-        kind="music_analysis",
-        filename="song.json",
-        content_type="application/json",
-    )
-    video_analysis = publish_artifact(
-        repo,
-        user_id="user_123",
-        file_id="file_video_analysis",
-        kind="video_analysis",
-        filename="source.json",
-        content_type="application/json",
-    )
-
-    response = client.post(
-        "/v1/timelines",
-        headers={"X-User-Id": "user_123"},
-        json={
-            "audio": audio,
-            "source_video": video,
-            "music_analysis": music_analysis,
-            "video_analysis": video_analysis,
-            "planning_mode": "deterministic",
-            "creative_brief": "Ignored in deterministic mode.",
-        },
-    )
-
-    assert response.status_code == 202
-    assert response.json()["workflow_type"] == "timeline_plan"
-    assert [step["name"] for step in response.json()["steps"]] == [
-        "plan_timeline",
-        "publish_timeline",
-    ]
-    assert runner.calls[-1][1]["planning_mode"] == "deterministic"
-
-
 def test_edit_job_endpoint_creates_parent_run_and_schedules_pipeline():
     client, store, runner = build_client()
     repo = StorageRepository(store)
@@ -537,9 +478,7 @@ def test_edit_job_endpoint_creates_parent_run_and_schedules_pipeline():
         headers={"X-User-Id": "user_123"},
         json={
             "audio": audio,
-            "source_video": video,
-            "planning_mode": "agent",
-            "creative_brief": "Cut fast on the hook.",
+            "source_video": video,            "creative_brief": "Cut fast on the hook.",
             "title": "Hook edit",
         },
     )
@@ -587,9 +526,7 @@ def test_edit_job_endpoint_stores_and_forwards_export_options():
         headers={"X-User-Id": "user_123"},
         json={
             "audio": audio,
-            "source_video": video,
-            "planning_mode": "agent",
-            "export_options": {
+            "source_video": video,            "export_options": {
                 "format": "reels_9_16",
                 "audio_start_sec": 2.0,
                 "audio_end_sec": 14.0,
@@ -626,9 +563,7 @@ def test_edit_jobs_list_recovers_multiple_jobs_and_progress_from_r2_events():
             "audio_file_id": "file_audio_a",
             "audio_version_id": "ver_audio_a",
             "source_video_file_id": "file_video_a",
-            "source_video_version_id": "ver_video_a",
-            "planning_mode": "agent",
-        },
+            "source_video_version_id": "ver_video_a",        },
         steps=["assets", "music", "video", "timeline", "render", "result"],
     )
     second = repo.create_run(
@@ -639,9 +574,7 @@ def test_edit_jobs_list_recovers_multiple_jobs_and_progress_from_r2_events():
             "audio_file_id": "file_audio_b",
             "audio_version_id": "ver_audio_b",
             "source_video_file_id": "file_video_b",
-            "source_video_version_id": "ver_video_b",
-            "planning_mode": "deterministic",
-        },
+            "source_video_version_id": "ver_video_b",        },
         steps=["assets", "music", "video", "timeline", "render", "result"],
     )
     repo.append_run_progress(
@@ -685,9 +618,7 @@ def test_edit_job_status_reads_latest_progress_without_scanning_events():
             "audio_file_id": "file_audio",
             "audio_version_id": "ver_audio",
             "source_video_file_id": "file_video",
-            "source_video_version_id": "ver_video",
-            "planning_mode": "agent",
-        },
+            "source_video_version_id": "ver_video",        },
         steps=["assets", "music", "video", "timeline", "render", "result"],
     )
     run_store.latest_progress[("user_123", run.run_id)] = {
@@ -760,9 +691,7 @@ def test_internal_progress_endpoint_records_latest_stage_progress(monkeypatch):
             "audio_file_id": "file_audio",
             "audio_version_id": "ver_audio",
             "source_video_file_id": "file_video",
-            "source_video_version_id": "ver_video",
-            "planning_mode": "agent",
-        },
+            "source_video_version_id": "ver_video",        },
         steps=["assets", "music", "video", "timeline", "render", "result"],
     )
 
@@ -799,9 +728,7 @@ def test_edit_job_detail_includes_final_render_ref_and_download_status():
             "audio_file_id": "file_audio",
             "audio_version_id": "ver_audio",
             "source_video_file_id": "file_video",
-            "source_video_version_id": "ver_video",
-            "planning_mode": "agent",
-        },
+            "source_video_version_id": "ver_video",        },
         steps=["assets", "music", "video", "timeline", "render", "result"],
     )
     completed = repo.update_run_status(
@@ -842,9 +769,7 @@ def test_cancel_edit_job_is_idempotent_and_blocks_late_completion():
             "audio_file_id": "file_audio",
             "audio_version_id": "ver_audio",
             "source_video_file_id": "file_video",
-            "source_video_version_id": "ver_video",
-            "planning_mode": "agent",
-        },
+            "source_video_version_id": "ver_video",        },
         steps=["assets", "music", "video", "timeline", "render", "result"],
     )
 
@@ -884,9 +809,7 @@ def test_delete_edit_job_hides_it_from_edit_list():
             "audio_file_id": "file_audio",
             "audio_version_id": "ver_audio",
             "source_video_file_id": "file_video",
-            "source_video_version_id": "ver_video",
-            "planning_mode": "agent",
-        },
+            "source_video_version_id": "ver_video",        },
         steps=["assets", "music", "video", "timeline", "render", "result"],
     )
 
@@ -933,7 +856,6 @@ def test_redo_edit_job_creates_new_job_from_original_inputs():
             "audio_version_id": audio["version_id"],
             "source_video_file_id": video["file_id"],
             "source_video_version_id": video["version_id"],
-            "planning_mode": "deterministic",
             "creative_brief": "Retry this.",
         },
         steps=["assets", "music", "video", "timeline", "render", "result"],
@@ -955,7 +877,6 @@ def test_redo_edit_job_creates_new_job_from_original_inputs():
     assert body["run_id"] != run.run_id
     assert body["title"] == "Redo me"
     assert runner.calls[-1][0] == "edit_pipeline"
-    assert runner.calls[-1][1]["planning_mode"] == "deterministic"
     assert runner.calls[-1][1]["creative_brief"] == "Retry this."
 
 
@@ -986,9 +907,7 @@ def test_redo_edit_job_preserves_export_options():
             "audio_file_id": audio["file_id"],
             "audio_version_id": audio["version_id"],
             "source_video_file_id": video["file_id"],
-            "source_video_version_id": video["version_id"],
-            "planning_mode": "agent",
-            "creative_brief": "",
+            "source_video_version_id": video["version_id"],            "creative_brief": "",
             "export_format": "reels_9_16",
             "audio_start_sec": "3.000",
             "audio_end_sec": "18.000",

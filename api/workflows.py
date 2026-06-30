@@ -140,7 +140,6 @@ class DefaultWorkflowRunner:
         run_id = kwargs["run_id"]
         audio = kwargs["audio"]
         source_video = kwargs["source_video"]
-        planning_mode = kwargs.get("planning_mode", "agent")
         creative_brief = kwargs.get("creative_brief", "")
         export_options = kwargs.get("export_options")
         parent_ref = RunRef(user_id=user_id, run_id=run_id)
@@ -174,12 +173,8 @@ class DefaultWorkflowRunner:
                 source_video=source_video,
                 music_analysis=music_analysis,
                 video_analysis=video_analysis,
-                planning_mode=planning_mode,
                 creative_brief=creative_brief,
                 export_options=export_options,
-                allow_deterministic_fallback=bool(
-                    kwargs.get("allow_deterministic_timeline_fallback", False)
-                ),
             )
 
             current_stage = "render"
@@ -420,55 +415,24 @@ class DefaultWorkflowRunner:
         source_video: dict,
         music_analysis: dict,
         video_analysis: dict,
-        planning_mode: str,
         creative_brief: str,
         export_options: dict | None,
-        allow_deterministic_fallback: bool = False,
     ) -> dict[str, str]:
         resolved_export = resolve_export_options(export_options, max_duration_sec=None)
 
-        def create_timeline_child(mode: str):
-            steps = (
-                ["ensure_clip_index", "agent_plan_timeline", "publish_timeline"]
-                if mode == "agent"
-                else ["plan_timeline", "publish_timeline"]
-            )
-            workflow_type = "timeline_agent_plan" if mode == "agent" else "timeline_plan"
-            return self._create_child_run(
-                repo,
-                user_id=user_id,
-                workflow_type=workflow_type,
-                inputs={
-                    "audio_version_id": audio["version_id"],
-                    "source_video_version_id": source_video["version_id"],
-                    "music_analysis_version_id": music_analysis["version_id"],
-                    "video_analysis_version_id": video_analysis["version_id"],
-                    "planning_mode": mode,
-                    **resolved_export.as_run_inputs(),
-                },
-                steps=steps,
-            )
-
-        def run_child(child_run, mode: str) -> None:
-            self.run_timeline_plan(
-                user_id=user_id,
-                run_id=child_run.run_id,
-                audio=audio,
-                source_video=source_video,
-                music_analysis=music_analysis,
-                video_analysis=video_analysis,
-                planning_mode=mode,
-                creative_brief=creative_brief,
-                max_duration_sec=None,
-                export_options=resolved_export.as_payload(),
-                progress_context=self._progress_context(
-                    user_id=user_id,
-                    run_id=parent_ref.run_id,
-                    stage="timeline",
-                ),
-            )
-
-        child = create_timeline_child(planning_mode)
+        child = self._create_child_run(
+            repo,
+            user_id=user_id,
+            workflow_type="timeline_agent_plan",
+            inputs={
+                "audio_version_id": audio["version_id"],
+                "source_video_version_id": source_video["version_id"],
+                "music_analysis_version_id": music_analysis["version_id"],
+                "video_analysis_version_id": video_analysis["version_id"],
+                **resolved_export.as_run_inputs(),
+            },
+            steps=["ensure_clip_index", "agent_plan_timeline", "publish_timeline"],
+        )
         self._set_edit_progress(
             repo,
             parent_ref,
@@ -477,30 +441,23 @@ class DefaultWorkflowRunner:
             "Starting timeline plan",
             outputs={"timeline_run_id": child.run_id},
         )
-        run_child(child, planning_mode)
-        try:
-            completed = _require_completed_run(repo, user_id, child.run_id)
-        except RuntimeError as exc:
-            if not (
-                allow_deterministic_fallback
-                and planning_mode == "agent"
-                and _is_short_agent_timeline_error(str(exc))
-            ):
-                raise
-            fallback = create_timeline_child("deterministic")
-            self._set_edit_progress(
-                repo,
-                parent_ref,
-                "timeline",
-                35,
-                "Agent timeline was too short; retrying deterministic plan",
-                outputs={
-                    "agent_timeline_run_id": child.run_id,
-                    "timeline_run_id": fallback.run_id,
-                },
-            )
-            run_child(fallback, "deterministic")
-            completed = _require_completed_run(repo, user_id, fallback.run_id)
+        self.run_timeline_plan(
+            user_id=user_id,
+            run_id=child.run_id,
+            audio=audio,
+            source_video=source_video,
+            music_analysis=music_analysis,
+            video_analysis=video_analysis,
+            creative_brief=creative_brief,
+            max_duration_sec=None,
+            export_options=resolved_export.as_payload(),
+            progress_context=self._progress_context(
+                user_id=user_id,
+                run_id=parent_ref.run_id,
+                stage="timeline",
+            ),
+        )
+        completed = _require_completed_run(repo, user_id, child.run_id)
         timeline = _output_ref(completed, "timeline_file_id", "timeline_version_id")
         self._set_edit_progress(
             repo,
@@ -880,11 +837,7 @@ class DefaultWorkflowRunner:
         user_id = kwargs["user_id"]
         run_id = kwargs["run_id"]
         try:
-            planning_mode = kwargs.get("planning_mode", "agent")
-            if planning_mode == "deterministic":
-                self._run_deterministic_timeline_plan(repo, user_id, run_id, kwargs)
-            else:
-                self._run_agent_timeline_plan(repo, user_id, run_id, kwargs)
+            self._run_agent_timeline_plan(repo, user_id, run_id, kwargs)
         except Exception as exc:
             self._mark_failed(repo, user_id, run_id, exc)
 
@@ -918,58 +871,6 @@ class DefaultWorkflowRunner:
             version_id=source_video["version_id"],
         )
         return music_ref, video_ref, audio_ref, source_ref
-
-    def _run_deterministic_timeline_plan(
-        self,
-        repo: StorageRepository,
-        user_id: str,
-        run_id: str,
-        kwargs: dict,
-    ) -> None:
-        from api.prototyping.edit.synthesis.planner import plan
-
-        progress_context = kwargs.get("progress_context")
-        export_options = resolve_export_options(
-            kwargs.get("export_options"),
-            max_duration_sec=kwargs.get("max_duration_sec"),
-        )
-        self._append_progress_context(repo, progress_context, 10, "Loading timeline inputs")
-        music_ref, video_ref, audio_ref, source_ref = self._timeline_refs(user_id, kwargs)
-        song = trim_song_analysis(
-            _read_json_version(repo, music_ref),
-            start_sec=export_options.audio_start_sec,
-            end_sec=export_options.audio_end_sec,
-        )
-        video = _read_json_version(repo, video_ref)
-        source_meta = repo.load_file_version_meta(source_ref)
-        audio_meta = repo.load_file_version_meta(audio_ref)
-        self._append_progress_context(repo, progress_context, 45, "Running deterministic timeline planner")
-        timeline = plan(
-            song=song,
-            video=video,
-            source_video_path=source_meta.original_filename,
-            audio_path=audio_meta.original_filename,
-            output_size=export_options.output_size,
-            output_crop=export_options.crop,
-            crop_focus_x=export_options.crop_focus_x,
-            audio_start_sec=export_options.audio_start_sec if export_options.explicit else None,
-            max_duration_sec=None,
-        )
-        self._append_progress_context(repo, progress_context, 90, "Publishing timeline")
-        self._publish_timeline(
-            repo=repo,
-            user_id=user_id,
-            run_id=run_id,
-            timeline=timeline,
-            created_by_step="plan_timeline",
-            input_version_ids=[
-                audio_ref.version_id,
-                source_ref.version_id,
-                music_ref.version_id,
-                video_ref.version_id,
-            ],
-            outputs={},
-        )
 
     def _run_agent_timeline_plan(
         self,
@@ -1361,13 +1262,6 @@ class DefaultWorkflowRunner:
             )
         except Exception as exc:
             self._mark_failed(repo, user_id, run_id, exc)
-
-
-def _is_short_agent_timeline_error(message: str) -> bool:
-    return (
-        "agent timeline duration" in message
-        and "is shorter than song duration" in message
-    )
 
 
 def _synthesis_guidance(references) -> str:

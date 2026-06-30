@@ -160,7 +160,6 @@ class TimelineRequest(BaseModel):
     source_video: FileVersionInput
     music_analysis: FileVersionInput
     video_analysis: FileVersionInput
-    planning_mode: Literal["agent", "deterministic"] = "agent"
     creative_brief: str = ""
     max_duration_sec: float | None = Field(default=None, gt=0)
     export_options: ExportOptionsInput | None = None
@@ -175,7 +174,6 @@ class RenderRequest(BaseModel):
 class EditJobRequest(BaseModel):
     audio: FileVersionInput
     source_video: FileVersionInput
-    planning_mode: Literal["agent", "deterministic"] = "agent"
     creative_brief: str = ""
     title: str | None = None
     export_options: ExportOptionsInput | None = None
@@ -722,7 +720,6 @@ def create_app(
                 "audio_version_id": request.audio.version_id,
                 "source_video_file_id": request.source_video.file_id,
                 "source_video_version_id": request.source_video.version_id,
-                "planning_mode": request.planning_mode,
                 "creative_brief": request.creative_brief,
                 **export_options.as_run_inputs(),
             },
@@ -734,7 +731,6 @@ def create_app(
             run_id=run.run_id,
             audio=request.audio.model_dump(),
             source_video=request.source_video.model_dump(),
-            planning_mode=request.planning_mode,
             creative_brief=request.creative_brief,
             title=title,
             export_options=export_options.as_payload(),
@@ -808,7 +804,6 @@ def create_app(
             request = EditJobRequest(
                 audio=FileVersionInput(**audio),
                 source_video=FileVersionInput(**source_video),
-                planning_mode="agent",
                 creative_brief=creative_brief,
                 title=title,
                 export_options=(
@@ -1565,7 +1560,6 @@ def create_app(
         load_version(repo, uid, request.source_video, "source_video")
         load_version(repo, uid, request.music_analysis, "music_analysis")
         load_version(repo, uid, request.video_analysis, "video_analysis")
-        planning_mode = request.planning_mode
         try:
             export_options = resolve_export_options(
                 request.export_options,
@@ -1573,25 +1567,18 @@ def create_app(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        steps = (
-            ["ensure_clip_index", "agent_plan_timeline", "publish_timeline"]
-            if planning_mode == "agent"
-            else ["plan_timeline", "publish_timeline"]
-        )
-        workflow_type = "timeline_agent_plan" if planning_mode == "agent" else "timeline_plan"
         run = create_workflow_run(
             repo,
             uid,
-            workflow_type,
+            "timeline_agent_plan",
             {
                 "audio_version_id": request.audio.version_id,
                 "source_video_version_id": request.source_video.version_id,
                 "music_analysis_version_id": request.music_analysis.version_id,
                 "video_analysis_version_id": request.video_analysis.version_id,
-                "planning_mode": planning_mode,
                 **export_options.as_run_inputs(),
             },
-            steps,
+            ["ensure_clip_index", "agent_plan_timeline", "publish_timeline"],
         )
         background_tasks.add_task(
             runner.run_timeline_plan,
@@ -1601,7 +1588,6 @@ def create_app(
             source_video=request.source_video.model_dump(),
             music_analysis=request.music_analysis.model_dump(),
             video_analysis=request.video_analysis.model_dump(),
-            planning_mode=planning_mode,
             creative_brief=request.creative_brief,
             max_duration_sec=request.max_duration_sec,
             export_options=export_options.as_payload(),
@@ -1755,7 +1741,6 @@ def create_app(
                     file_id=str(source_video_file_id),
                     version_id=str(source_video_version_id),
                 ),
-                planning_mode=run.inputs.get("planning_mode", "agent"),
                 creative_brief=run.inputs.get("creative_brief", ""),
                 title=run.inputs.get("title"),
                 export_options=ExportOptionsInput(**export_options) if export_options else None,

@@ -48,7 +48,7 @@ The Railway-ready FastAPI app lives in `api/app.py` and is exposed by
 stored in Postgres; otherwise the app falls back to the original R2 JSON run
 store. When `REDIS_URL` is set, run updates are also published to a realtime
 stream for dashboard UX; Redis is not durable state. Workflow endpoints return
-immediately while background tasks call Modal or the local deterministic planner.
+immediately while background tasks call Modal for analysis, planning, and rendering.
 
 Required storage env for real `/v1/*` calls:
 

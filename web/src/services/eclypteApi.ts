@@ -45,7 +45,6 @@ export type FileVersionMeta = {
 }
 
 export type RunStatus = "created" | "running" | "blocked" | "failed" | "completed" | "canceled"
-export type PlanningMode = "agent" | "deterministic"
 export type ExportFormat = "reels_9_16" | "reels_cinematic" | "youtube_16_9"
 
 export type ExportOptions = {
@@ -279,7 +278,6 @@ export type EditJobStatus = {
 export type EditJobRequest = {
     audio: FileVersionInput
     sourceVideo: FileVersionInput
-    planningMode?: PlanningMode
     creativeBrief?: string
     title?: string
     exportOptions?: ExportOptions
@@ -583,7 +581,6 @@ export class EclypteApiClient {
             sourceVideo: FileVersionInput
             musicAnalysis: FileVersionInput
             videoAnalysis: FileVersionInput
-            planningMode?: PlanningMode
             creativeBrief?: string
             exportOptions?: ExportOptions
         },
@@ -596,7 +593,6 @@ export class EclypteApiClient {
                 source_video: input.sourceVideo,
                 music_analysis: input.musicAnalysis,
                 video_analysis: input.videoAnalysis,
-                planning_mode: input.planningMode,
                 creative_brief: input.creativeBrief,
                 export_options: serializeExportOptions(input.exportOptions),
             }),
@@ -629,7 +625,6 @@ export class EclypteApiClient {
             body: JSON.stringify({
                 audio: input.audio,
                 source_video: input.sourceVideo,
-                planning_mode: input.planningMode,
                 creative_brief: input.creativeBrief,
                 title: input.title,
                 export_options: serializeExportOptions(input.exportOptions),
