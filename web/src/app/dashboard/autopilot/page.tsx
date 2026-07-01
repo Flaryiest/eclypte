@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Bot, Pause, Play, Plus, RefreshCw, Trash2, Zap } from "lucide-react"
-import { DashboardPage, EmptyState, Pager, StatusBadge, errorMessage, formatClock, formatDate, statusLabel, usePagination } from "../dashboardCommon"
+import { DashboardPage, EmptyState, Pager, Select, StatusBadge, errorMessage, formatClock, formatDate, statusLabel, usePagination } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import { useRunStream } from "../useRunStream"
 import {
@@ -209,18 +209,18 @@ export default function AutopilotPage() {
                             {" · "}In progress: {autopilot?.in_flight ?? 0}
                             {" · "}Pending: {autopilot?.pending ?? 0}
                         </p>
-                        <label className={styles.fieldLabel}>
+                        <div className={styles.fieldLabel}>
                             Daily target
-                            <select
-                                className={styles.input}
-                                value={autopilot?.daily_target ?? 3}
-                                onChange={(event) => updateAutopilot({ dailyTarget: Number(event.target.value) })}
-                            >
-                                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((value) => (
-                                    <option key={value} value={value}>{value} per day</option>
-                                ))}
-                            </select>
-                        </label>
+                            <Select
+                                ariaLabel="Daily target"
+                                value={String(autopilot?.daily_target ?? 3)}
+                                onChange={(next) => updateAutopilot({ dailyTarget: Number(next) })}
+                                options={Array.from({ length: 10 }, (_, index) => ({
+                                    value: String(index + 1),
+                                    label: `${index + 1} per day`,
+                                }))}
+                            />
+                        </div>
                         <button
                             className={autopilot?.enabled ? styles.secondaryButton : styles.primaryButton}
                             type="button"
@@ -246,44 +246,45 @@ export default function AutopilotPage() {
                         </div>
                     </div>
                     <div className={styles.fieldStack}>
-                        <label className={styles.fieldLabel}>
+                        <div className={styles.fieldLabel}>
                             Source video
-                            <select
-                                className={styles.input}
+                            <Select
+                                ariaLabel="Source video"
                                 value={selectedVideoId}
-                                onChange={(event) => setSelectedVideoId(event.target.value)}
-                            >
-                                <option value="">Select a video…</option>
-                                {videos.map((asset) => (
-                                    <option key={asset.file_id} value={asset.file_id}>{asset.display_name}</option>
-                                ))}
-                            </select>
-                        </label>
-                        <label className={styles.fieldLabel}>
+                                onChange={setSelectedVideoId}
+                                placeholder="Select a video…"
+                                options={videos.map((asset) => ({
+                                    value: asset.file_id,
+                                    label: asset.display_name,
+                                }))}
+                            />
+                        </div>
+                        <div className={styles.fieldLabel}>
                             Song source
-                            <select
-                                className={styles.input}
+                            <Select
+                                ariaLabel="Song source"
                                 value={songMode}
-                                onChange={(event) => setSongMode(event.target.value as SongMode)}
-                            >
-                                <option value="asset">Use a saved song asset</option>
-                                <option value="youtube">Import from YouTube</option>
-                            </select>
-                        </label>
+                                onChange={(next) => setSongMode(next as SongMode)}
+                                options={[
+                                    { value: "asset", label: "Use a saved song" },
+                                    { value: "youtube", label: "Import from YouTube" },
+                                ]}
+                            />
+                        </div>
                         {songMode === "asset" ? (
-                            <label className={styles.fieldLabel}>
+                            <div className={styles.fieldLabel}>
                                 Song asset
-                                <select
-                                    className={styles.input}
+                                <Select
+                                    ariaLabel="Song asset"
                                     value={selectedSongId}
-                                    onChange={(event) => setSelectedSongId(event.target.value)}
-                                >
-                                    <option value="">Select a song…</option>
-                                    {songs.map((asset) => (
-                                        <option key={asset.file_id} value={asset.file_id}>{asset.display_name}</option>
-                                    ))}
-                                </select>
-                            </label>
+                                    onChange={setSelectedSongId}
+                                    placeholder="Select a song…"
+                                    options={songs.map((asset) => ({
+                                        value: asset.file_id,
+                                        label: asset.display_name,
+                                    }))}
+                                />
+                            </div>
                         ) : (
                             <label className={styles.fieldLabel}>
                                 YouTube song link

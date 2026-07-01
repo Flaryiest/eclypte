@@ -6,6 +6,7 @@ import { Activity, Download, Link2, RefreshCw, RotateCcw, Trash2, Upload } from 
 import {
     DashboardPage,
     Pager,
+    Select,
     SkeletonList,
     StatusBadge,
     errorMessage,
@@ -35,6 +36,8 @@ type LibraryTab = "source" | "derived" | "hidden"
 type KindFilter = "all" | "song" | "source"
 
 const LIBRARY_PAGE_SIZE = 24
+// Sources flip through smaller pages (arrow at the top) instead of one long list.
+const SOURCE_PAGE_SIZE = 8
 
 export default function AssetsPage() {
     const { isLoaded, isSignedIn, user } = useUser()
@@ -72,7 +75,11 @@ export default function AssetsPage() {
         activeTab === "source" && kindFilter !== "all"
             ? tabAssets.filter((asset) => asset.kind === (kindFilter === "song" ? "song_audio" : "source_video"))
             : tabAssets
-    const assetPager = usePagination(visibleAssets, LIBRARY_PAGE_SIZE, `${activeTab}:${kindFilter}`)
+    const assetPager = usePagination(
+        visibleAssets,
+        activeTab === "source" ? SOURCE_PAGE_SIZE : LIBRARY_PAGE_SIZE,
+        `${activeTab}:${kindFilter}`,
+    )
     const isWorking = isUploading || isImporting
     const selectedAsset = selectedFileId ? visibleAssets.find((asset) => asset.file_id === selectedFileId) ?? null : null
 
@@ -365,13 +372,18 @@ export default function AssetsPage() {
                         </div>
                     </div>
                     <div className={styles.fieldStack}>
-                        <label className={styles.fieldLabel}>
+                        <div className={styles.fieldLabel}>
                             Asset type
-                            <select className={styles.select} value={slot} onChange={(event) => onSlotChange(event.target.value as UploadSlot)}>
-                                <option value="audio">Song</option>
-                                <option value="video">Source video</option>
-                            </select>
-                        </label>
+                            <Select
+                                ariaLabel="Asset type"
+                                value={slot}
+                                onChange={(next) => onSlotChange(next as UploadSlot)}
+                                options={[
+                                    { value: "audio", label: "Song" },
+                                    { value: "video", label: "Source video" },
+                                ]}
+                            />
+                        </div>
                         <label className={styles.filePicker}>
                             <span className={styles.fileName}>{file ? file.name : "Choose a file"}</span>
                             <span className={styles.muted}>{slot === "audio" ? "Any common audio file works (WAV, MP3, M4A, FLAC…)" : "MP4 video"}</span>
@@ -463,27 +475,34 @@ export default function AssetsPage() {
                     {activeTab === "source" && (
                         <div className={styles.libraryFilters}>
                             <span className={styles.libraryFilterLabel}>Kind</span>
-                            <select
-                                className={`${styles.select} ${styles.libraryFilterSelect}`}
+                            <Select
+                                compact
+                                ariaLabel="Filter by kind"
                                 value={kindFilter}
-                                onChange={(event) => setKindFilter(event.target.value as KindFilter)}
-                                aria-label="Filter by kind"
-                            >
-                                <option value="all">All</option>
-                                <option value="song">Songs</option>
-                                <option value="source">Sources</option>
-                            </select>
+                                onChange={(next) => setKindFilter(next as KindFilter)}
+                                options={[
+                                    { value: "all", label: "All" },
+                                    { value: "song", label: "Songs" },
+                                    { value: "source", label: "Sources" },
+                                ]}
+                            />
                         </div>
                     )}
                     {visibleAssets.length === 0 ? (
                         <div className={styles.emptyState}>{emptyAssetMessage(activeTab)}</div>
                     ) : (
                         <div className={styles.assetTable}>
+                            {activeTab === "source" && (
+                                <Pager
+                                    page={assetPager.page}
+                                    pageCount={assetPager.pageCount}
+                                    onPrev={assetPager.prev}
+                                    onNext={assetPager.next}
+                                    className={styles.pagerTop}
+                                />
+                            )}
                             <div className={styles.assetTableHeader}>
                                 <span>Name</span>
-                                <span>Kind</span>
-                                <span>Size</span>
-                                <span>Updated</span>
                                 <span>Status</span>
                             </div>
                             {assetPager.pageItems.map((asset) => {
@@ -498,20 +517,20 @@ export default function AssetsPage() {
                                     >
                                         <span className={styles.assetRowName}>
                                             <span className={styles.assetRowTitle}>{asset.display_name}</span>
+                                            <span className={styles.assetRowMeta}>{kindLabel(asset.kind)}</span>
                                         </span>
-                                        <span className={styles.assetRowCell}>{kindLabel(asset.kind)}</span>
-                                        <span className={styles.assetRowCellNumeral}>{formatBytes(asset.current_version?.size_bytes)}</span>
-                                        <span className={styles.assetRowCell}>{formatDate(asset.updated_at)}</span>
-                                        <span><StatusBadge label={state} tone={state} /></span>
+                                        <span><StatusBadge label={assetStatusLabel(state)} tone={state} /></span>
                                     </button>
                                 )
                             })}
-                            <Pager
-                                page={assetPager.page}
-                                pageCount={assetPager.pageCount}
-                                onPrev={assetPager.prev}
-                                onNext={assetPager.next}
-                            />
+                            {activeTab !== "source" && (
+                                <Pager
+                                    page={assetPager.page}
+                                    pageCount={assetPager.pageCount}
+                                    onPrev={assetPager.prev}
+                                    onNext={assetPager.next}
+                                />
+                            )}
                         </div>
                     )}
                 </div>
@@ -581,7 +600,7 @@ function AssetDetail({
                         {kindLabel(asset.kind)} · {formatBytes(asset.current_version?.size_bytes)} · {formatDate(asset.updated_at)}
                     </p>
                 </div>
-                <StatusBadge label={state} tone={state} />
+                <StatusBadge label={assetStatusLabel(state)} tone={state} />
             </div>
 
             {preview ? (
@@ -653,6 +672,12 @@ function validateUpload(file: File | null, slot: UploadSlot) {
 
 function isSourceKind(kind: ArtifactKind) {
     return kind === "song_audio" || kind === "source_video"
+}
+
+// A "ready" asset has finished analysis; "Ready to review" (the shared default for
+// the publish "ready" status) reads wrong here, so the library says "Analyzed".
+function assetStatusLabel(state: string) {
+    return state === "ready" ? "Analyzed" : state
 }
 
 function emptyAssetMessage(tab: LibraryTab) {

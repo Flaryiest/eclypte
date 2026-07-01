@@ -180,9 +180,12 @@ table {
   --ok-soft: rgba(54, 211, 153, 0.14);
   --danger: #ff5c5c;
   --danger-soft: rgba(255, 92, 92, 0.14);
+  --attention: #f5c451;
+  --attention-soft: rgba(245, 196, 81, 0.16);
 
   /* Effects */
   --focus-ring: #8e80ff;
+  --elev-shadow: 0 12px 28px rgba(0, 0, 0, 0.5);
   --radius: 3px;
 
   /* Dashboard type */

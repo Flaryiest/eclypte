@@ -3,6 +3,8 @@ import { ChevronLeft, ChevronRight, Check, Copy } from "lucide-react"
 import styles from "./studio.module.css"
 import type { AssetState, AssetSummary, PublishingPostStatus, RunManifest, SynthesisReference } from "@/services/eclypteApi"
 
+export { Select, type SelectOption } from "./Select"
+
 export function DashboardPage({
     eyebrow,
     title,
@@ -123,8 +125,13 @@ export function humanizeLabel(value: string) {
         .join(" ")
 }
 
+const KIND_LABELS: Record<string, string> = {
+    source_video: "Video",
+    song_audio: "Audio",
+}
+
 export function kindLabel(kind: string) {
-    return humanizeLabel(kind)
+    return KIND_LABELS[kind] ?? humanizeLabel(kind)
 }
 
 // Client-side pagination for dashboard lists. Renders one page of `pageSize`
@@ -160,17 +167,19 @@ export function Pager({
     pageCount,
     onPrev,
     onNext,
+    className,
 }: {
     page: number
     pageCount: number
     onPrev: () => void
     onNext: () => void
+    className?: string
 }) {
     if (pageCount <= 1) {
         return null
     }
     return (
-        <div className={styles.pager}>
+        <div className={`${styles.pager} ${className ?? ""}`}>
             <button
                 type="button"
                 className={styles.pagerButton}

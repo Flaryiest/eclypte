@@ -10,7 +10,7 @@
 
 .dashboard {
 	min-width: 0;
-	padding: 2.4rem 3rem 4rem;
+	padding: 2.4rem 3rem 2rem;
 	border-left: 1px solid var(--line, rgba(255, 255, 255, 0.08));
 }
 

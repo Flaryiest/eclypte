@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Download, Eye, Play, RefreshCw, RotateCcw, Trash2, WandSparkles, XCircle } from "lucide-react"
-import { DashboardPage, Pager, SkeletonList, StatusBadge, errorMessage, formatBytes, formatDate, humanizeStageDetail, isAbortError, kindLabel, statusLabel, usePagination, versionRef } from "../dashboardCommon"
+import { DashboardPage, Pager, Select, SkeletonList, StatusBadge, errorMessage, formatBytes, formatDate, humanizeStageDetail, isAbortError, kindLabel, statusLabel, usePagination, versionRef } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import { downloadSignedUrl, safeDownloadFilename } from "@/services/downloadFile"
 import {
@@ -397,38 +397,44 @@ export default function NewEditPage() {
                                 disabled={isCreating}
                             />
                         </label>
-                        <label className={styles.fieldLabel}>
+                        <div className={styles.fieldLabel}>
                             Song
-                            <select className={styles.select} value={audioId} onChange={(event) => setAudioId(event.target.value)} disabled={isCreating}>
-                                <option value="">Choose a WAV song</option>
-                                {songs.map((asset) => (
-                                    <option key={asset.file_id} value={asset.file_id}>
-                                        {asset.display_name} - {formatBytes(asset.current_version?.size_bytes)}
-                                    </option>
-                                ))}
-                            </select>
+                            <Select
+                                ariaLabel="Song"
+                                value={audioId}
+                                onChange={setAudioId}
+                                disabled={isCreating}
+                                placeholder="Choose a song"
+                                options={songs.map((asset) => ({
+                                    value: asset.file_id,
+                                    label: `${asset.display_name} - ${formatBytes(asset.current_version?.size_bytes)}`,
+                                }))}
+                            />
                             {selectedSong && (
                                 <span className={`${styles.assetCaption} ${selectedSong.analysis ? styles.assetCaptionOk : ""}`}>
-                                    {selectedSong.analysis ? "✓ analyzed" : "○ awaiting analysis"} · {kindLabel(selectedSong.kind)} · {formatBytes(selectedSong.current_version?.size_bytes)}
+                                    {selectedSong.analysis ? "Analyzed" : "Needs analysis"} · {kindLabel(selectedSong.kind)} · {formatBytes(selectedSong.current_version?.size_bytes)}
                                 </span>
                             )}
-                        </label>
-                        <label className={styles.fieldLabel}>
+                        </div>
+                        <div className={styles.fieldLabel}>
                             Source video
-                            <select className={styles.select} value={videoId} onChange={(event) => setVideoId(event.target.value)} disabled={isCreating}>
-                                <option value="">Choose an MP4 video</option>
-                                {videos.map((asset) => (
-                                    <option key={asset.file_id} value={asset.file_id}>
-                                        {asset.display_name} - {formatBytes(asset.current_version?.size_bytes)}
-                                    </option>
-                                ))}
-                            </select>
+                            <Select
+                                ariaLabel="Source video"
+                                value={videoId}
+                                onChange={setVideoId}
+                                disabled={isCreating}
+                                placeholder="Choose a video"
+                                options={videos.map((asset) => ({
+                                    value: asset.file_id,
+                                    label: `${asset.display_name} - ${formatBytes(asset.current_version?.size_bytes)}`,
+                                }))}
+                            />
                             {selectedVideo && (
                                 <span className={`${styles.assetCaption} ${selectedVideo.analysis ? styles.assetCaptionOk : ""}`}>
                                     {selectedVideo.analysis ? "Analyzed" : "Needs analysis"} · {kindLabel(selectedVideo.kind)} · {formatBytes(selectedVideo.current_version?.size_bytes)}
                                 </span>
                             )}
-                        </label>
+                        </div>
                         <div className={styles.exportSection}>
                             <div className={styles.exportHeader}>
                                 <span>Export</span>

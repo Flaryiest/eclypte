@@ -285,7 +285,6 @@
 	outline-offset: 2px;
 }
 
-.select,
 .input,
 .textarea {
 	width: 100%;
@@ -301,7 +300,6 @@
 	transition: border-color 140ms ease;
 }
 
-.select,
 .input {
 	min-height: 42px;
 	padding: 0 0 0.4rem;
@@ -330,7 +328,6 @@
 	padding: 1.2rem 1.4rem;
 }
 
-.select:focus,
 .input:focus {
 	border-bottom-color: var(--accent);
 }
@@ -343,6 +340,183 @@
 
 .filePicker:focus-within {
 	border-color: var(--accent);
+}
+
+/* --- Custom Select (replaces native <select>; see Select.tsx) --- */
+.selectWrap {
+	position: relative;
+	width: 100%;
+}
+
+.selectWrapCompact {
+	width: auto;
+	display: inline-flex;
+}
+
+.selectTrigger {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	width: 100%;
+	box-sizing: border-box;
+	min-height: 42px;
+	padding: 0 0 0.4rem;
+	border: none;
+	border-bottom: 1px solid var(--line-strong);
+	border-radius: var(--radius);
+	background: transparent;
+	color: var(--text-primary);
+	font-family: var(--font-ui), sans-serif;
+	font-size: 0.95rem;
+	text-align: left;
+	cursor: pointer;
+	transition: border-color 140ms ease;
+}
+
+.selectTrigger:hover:not(:disabled) {
+	border-bottom-color: var(--text-secondary);
+}
+
+.selectTrigger:disabled {
+	cursor: not-allowed;
+	opacity: 0.4;
+}
+
+.selectTrigger:focus-visible {
+	outline: 2px solid var(--focus-ring);
+	outline-offset: 2px;
+}
+
+.selectTriggerOpen {
+	border-bottom-color: var(--accent);
+}
+
+/* Compact pill (library filter) — defined after .selectTrigger to override the border. */
+.selectCompact {
+	width: auto;
+	min-width: 150px;
+	min-height: 34px;
+	padding: 0.32rem 0.7rem;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius);
+	font-size: 0.82rem;
+}
+
+.selectCompact:hover:not(:disabled) {
+	border-color: var(--text-secondary);
+}
+
+.selectCompact.selectTriggerOpen {
+	border-color: var(--accent);
+}
+
+.selectValue,
+.selectPlaceholder {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.selectPlaceholder {
+	color: var(--text-muted);
+}
+
+.selectChevron {
+	flex-shrink: 0;
+	color: var(--text-muted);
+	transition: transform 160ms ease, color 140ms ease;
+}
+
+.selectTriggerOpen .selectChevron {
+	transform: rotate(180deg);
+	color: var(--accent);
+}
+
+.selectPopover {
+	position: absolute;
+	top: calc(100% + 6px);
+	left: 0;
+	z-index: 40;
+	min-width: 100%;
+	width: max-content;
+	max-width: min(92vw, 30rem);
+	max-height: 15rem;
+	overflow-y: auto;
+	padding: 0.3rem;
+	background: var(--surface-raised);
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+	box-shadow: var(--elev-shadow);
+	animation: selectPop 120ms ease both;
+}
+
+.selectPopoverUp {
+	top: auto;
+	bottom: calc(100% + 6px);
+}
+
+@keyframes selectPop {
+	from {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.selectOption {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	padding: 0.5rem 0.6rem;
+	border-radius: var(--radius);
+	color: var(--text-secondary);
+	font-family: var(--font-ui), sans-serif;
+	font-size: 0.9rem;
+	cursor: pointer;
+}
+
+.selectOptionLabel {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.selectOptionActive {
+	background: var(--accent-soft);
+	color: var(--text-primary);
+}
+
+.selectOptionSelected {
+	color: var(--accent);
+}
+
+.selectOption[aria-disabled="true"] {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+
+.selectEmpty {
+	padding: 0.7rem 0.6rem;
+	color: var(--text-muted);
+	font-family: var(--font-ui), sans-serif;
+	font-size: 0.86rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.selectPopover {
+		animation: none;
+	}
+
+	.selectChevron {
+		transition: none;
+	}
 }
 
 .fieldStack {
@@ -627,7 +801,11 @@
 	box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.05);
 }
 
-.uploaded .badgeDot,
+.uploaded .badgeDot {
+	background: var(--attention);
+	box-shadow: 0 0 0 3px var(--attention-soft);
+}
+
 .discovered .badgeDot,
 .created .badgeDot,
 .blocked .badgeDot {
@@ -684,6 +862,14 @@
 	border-top: 1px solid var(--line);
 }
 
+/* Pager placed above the list (Sources tab): no top rule, breathing room below. */
+.pagerTop {
+	margin-top: 0;
+	padding-top: 0;
+	border-top: none;
+	margin-bottom: 0.6rem;
+}
+
 .pagerStatus {
 	font-family: var(--font-ui), sans-serif;
 	font-size: 0.62rem;
@@ -737,12 +923,6 @@
 	letter-spacing: 0.22em;
 	text-transform: uppercase;
 	color: var(--text-muted);
-}
-
-.libraryFilterSelect {
-	width: auto;
-	min-width: 130px;
-	min-height: 34px;
 }
 
 .cardTop {
@@ -1090,9 +1270,9 @@
 
 .assetTableHeader {
 	display: grid;
-	grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1fr);
-	gap: 1rem;
-	padding: 0 0 0.7rem;
+	grid-template-columns: minmax(0, 1fr) minmax(0, max-content);
+	gap: 1.5rem;
+	padding: 0 0.6rem 0.7rem 0.85rem;
 	border-bottom: 1px solid var(--line);
 	color: var(--text-muted);
 	font-family: var(--font-ui), sans-serif;
@@ -1104,10 +1284,10 @@
 
 .assetRow {
 	display: grid;
-	grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1fr);
-	gap: 1rem;
+	grid-template-columns: minmax(0, 1fr) minmax(0, max-content);
+	gap: 1.5rem;
 	align-items: center;
-	padding: 1.1rem 0;
+	padding: 0.7rem 0.6rem 0.7rem 0.85rem;
 	border-bottom: 1px solid var(--line);
 	cursor: pointer;
 	background: transparent;
@@ -1121,33 +1301,31 @@
 	transition: background-color 140ms ease, color 140ms ease;
 }
 
+/* Status (last cell) sits flush-right with breathing room from the panel edge. */
+.assetTableHeader > :last-child,
+.assetRow > :last-child {
+	justify-self: end;
+}
+
 .assetRow:hover {
 	background: var(--surface-sunk);
 }
 
 .assetRowSelected {
 	background: var(--surface-sunk);
-}
-
-.assetRowSelected::before {
-	content: "";
-	display: inline-block;
-	width: 4px;
-	margin-right: -0.4rem;
-	background: var(--accent);
-	align-self: stretch;
+	box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .assetRowName {
 	display: flex;
 	flex-direction: column;
-	gap: 0.2rem;
+	gap: 0.1rem;
 	min-width: 0;
 }
 
 .assetRowTitle {
 	font-family: var(--font-display), serif;
-	font-size: 1.1rem;
+	font-size: 0.98rem;
 	font-weight: 400;
 	color: var(--text-primary);
 	letter-spacing: -0.005em;
@@ -1162,12 +1340,6 @@
 	color: var(--text-muted);
 	letter-spacing: 0.06em;
 	text-transform: uppercase;
-}
-
-.assetRowCell {
-	font-family: var(--font-ui), sans-serif;
-	font-size: 0.86rem;
-	color: var(--text-secondary);
 }
 
 .assetRowCellNumeral {
@@ -1466,18 +1638,6 @@
 
 	.numberGrid {
 		grid-template-columns: 1fr;
-	}
-
-	.assetTableHeader,
-	.assetRow {
-		grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
-	}
-
-	.assetTableHeader > :nth-child(4),
-	.assetTableHeader > :nth-child(5),
-	.assetRow > :nth-child(4),
-	.assetRow > :nth-child(5) {
-		display: none;
 	}
 }
 
