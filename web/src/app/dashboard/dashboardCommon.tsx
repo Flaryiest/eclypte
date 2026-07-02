@@ -453,13 +453,17 @@ export function Sheet({
     footer?: ReactNode
 }) {
     const panelRef = useRef<HTMLDivElement>(null)
+    const onCloseRef = useRef(onClose)
+    useEffect(() => {
+        onCloseRef.current = onClose
+    })
     useEffect(() => {
         if (!open) {
             return
         }
         const onKey = (event: KeyboardEvent) => {
             if (event.key === "Escape") {
-                onClose()
+                onCloseRef.current()
             }
         }
         document.addEventListener("keydown", onKey)
@@ -470,7 +474,7 @@ export function Sheet({
             document.removeEventListener("keydown", onKey)
             document.body.style.overflow = previousOverflow
         }
-    }, [open, onClose])
+    }, [open])
     if (!open) {
         return null
     }
