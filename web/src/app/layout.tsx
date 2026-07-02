@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, Inter_Tight, Outfit, Space_Grotesk, JetBrains_Mono } from "next/font/google";
+import { Inter, Inter_Tight, Outfit } from "next/font/google";
 import localFont from "next/font/local";
 import { ThemeProvider } from 'next-themes'
 import { ClerkProvider } from '@clerk/nextjs'
@@ -18,20 +18,6 @@ const interTight = Inter_Tight({
 const outfit = Outfit({
   variable: "--font-outfit",
   subsets: ["latin"],
-});
-
-// Dashboard "Edit Bay" identity: Space Grotesk display + JetBrains Mono timecode.
-// Marketing keeps its Eiko/Neue type; these are consumed only under [data-surface="studio"].
-const spaceGrotesk = Space_Grotesk({
-  variable: "--font-space-grotesk",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  variable: "--font-jetbrains-mono",
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
 });
 
 const neueMontreal = localFont({
@@ -69,7 +55,7 @@ export default function RootLayout({
 }>) {
   return (
     <html suppressHydrationWarning lang="en">
-      <body className={`${inter.variable} ${interTight.variable} ${outfit.variable} ${neueMontreal.variable} ${eiko.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable}`}>
+      <body className={`${inter.variable} ${interTight.variable} ${outfit.variable} ${neueMontreal.variable} ${eiko.variable}`}>
         <ClerkProvider>
           <ThemeProvider attribute="data-theme" defaultTheme="dark" enableSystem={false}>
               {children}

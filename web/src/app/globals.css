@@ -146,58 +146,60 @@ table {
 }
 
 /* ----------------------------------------------------------------------------
-   "Edit Bay" — the dashboard's dark, video-first identity. Gated entirely on
+   "Ivory & Ink" — the dashboard's warm, light identity. Gated entirely on
    [data-surface="studio"] (set on the dashboard container), so the marketing
-   site (which uses --color-* / [data-theme="dark"]) is untouched. Tokens are
-   semantic (role-based); the dashboard CSS modules consume them directly.
+   site (which uses --color-* / [data-theme="dark"]) is untouched. Token NAMES
+   are stable; values define the light system. No uppercase, no noise, no
+   gradients anywhere in the dashboard.
 ---------------------------------------------------------------------------- */
 [data-surface="studio"] {
-  color-scheme: dark;
+  color-scheme: light;
 
-  /* Surfaces (depth ladder) */
-  --surface-base: #0e1116;
-  --surface-raised: #161b22;
-  --surface-sunk: #0a0d11;
-  --surface-overlay: rgba(8, 10, 14, 0.66);
+  /* Surfaces */
+  --surface-base: #F7F5F1;
+  --surface-raised: #FFFFFF;
+  --surface-sunk: #F1EDE4;
+  --surface-overlay: rgba(38, 35, 30, 0.28);
 
-  /* Text */
-  --text-primary: #eceff4;
-  --text-secondary: #aeb7c6;
-  --text-muted: #7e8799;
+  /* Ink */
+  --text-primary: #26231E;
+  --text-secondary: #3D3A34;
+  --text-muted: #8A8375;
+  --text-faint: #B3AC9C;
 
   /* Lines */
-  --line: rgba(255, 255, 255, 0.08);
-  --line-strong: rgba(255, 255, 255, 0.16);
+  --line: #E9E4DB;
+  --line-strong: #D8D1C4;
 
-  /* Accent — the spectral energy ribbon */
-  --accent: #7b6cff;
-  --accent-soft: rgba(123, 108, 255, 0.14);
-  --accent-contrast: #f7f8ff;
-  --energy: linear-gradient(90deg, #5b6cff 0%, #9b5bff 50%, #ff5c7a 100%);
+  /* Accent — coral, reserved for progress + attention */
+  --accent: #E86A4F;
+  --accent-soft: rgba(232, 106, 79, 0.12);
+  --accent-contrast: #FBFAF7;
+  /* Legacy alias: old CSS paints progress with --energy; now plain coral. */
+  --energy: #E86A4F;
 
   /* Status */
-  --ok: #36d399;
-  --ok-soft: rgba(54, 211, 153, 0.14);
-  --danger: #ff5c5c;
-  --danger-soft: rgba(255, 92, 92, 0.14);
-  --attention: #f5c451;
-  --attention-soft: rgba(245, 196, 81, 0.16);
+  --ok: #5E8A62;
+  --ok-soft: rgba(94, 138, 98, 0.14);
+  --danger: #C25243;
+  --danger-soft: rgba(194, 82, 67, 0.12);
+  --attention: #A87B2A;
+  --attention-soft: rgba(168, 123, 42, 0.14);
 
   /* Effects */
-  --focus-ring: #8e80ff;
-  --elev-shadow: 0 12px 28px rgba(0, 0, 0, 0.5);
-  --radius: 3px;
+  --focus-ring: #E86A4F;
+  --elev-shadow: 0 12px 32px rgba(50, 42, 28, 0.16);
+  --shadow-card: 0 1px 3px rgba(50, 42, 28, 0.06);
+  --shadow-sheet: -16px 0 40px rgba(50, 42, 28, 0.12);
+  --radius: 10px;
+  --radius-card: 12px;
 
-  /* Dashboard type */
-  --font-display: var(--font-space-grotesk), var(--font-inter-tight), system-ui, sans-serif;
-  --font-ui: var(--font-neue), var(--font-inter-tight), system-ui, sans-serif;
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  /* Dashboard type — one family */
+  --font-display: var(--font-neue), "Helvetica Neue", Arial, system-ui, sans-serif;
+  --font-ui: var(--font-neue), "Helvetica Neue", Arial, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   background-color: var(--surface-base);
-  background-image:
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/></svg>");
-  background-size: 180px 180px;
-  background-attachment: fixed;
   color: var(--text-primary);
 }
 
