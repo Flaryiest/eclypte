@@ -1,320 +1,248 @@
 "use client"
 
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react"
+import { ChangeEvent, Suspense, useMemo, useRef, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useUser } from "@clerk/nextjs"
-import { Activity, Download, Link2, RefreshCw, RotateCcw, Trash2, Upload } from "lucide-react"
+import { Activity, Download, Link2, Music, Plus, RotateCcw, Trash2 } from "lucide-react"
 import {
     DashboardPage,
     Pager,
-    Select,
+    Sheet,
     SkeletonList,
-    StatusBadge,
+    Spinner,
     errorMessage,
     formatBytes,
     formatDate,
     isAbortError,
-    kindLabel,
+    stripExtension,
     usePagination,
+    useToast,
     versionRef,
 } from "../dashboardCommon"
-import { useAssets } from "@/stores/dashboardResources"
+import { posterKey, usePosterUrls } from "../posterUrls"
 import styles from "../studio.module.css"
 import { downloadSignedUrl, safeDownloadFilename } from "@/services/downloadFile"
 import {
-    ArtifactKind,
     AssetSummary,
     EclypteApiClient,
+    PublishingPost,
     assetState,
     uploadAsset,
     waitForRunCompletion,
 } from "@/services/eclypteApi"
+import { useAssets, usePublishingPosts } from "@/stores/dashboardResources"
 
-type UploadSlot = "audio" | "video"
-type PreviewState = { asset: AssetSummary; url: string }
-type Disclosure = "upload" | "youtube" | null
-type LibraryTab = "source" | "derived" | "hidden"
-type KindFilter = "all" | "song" | "source"
+type LibraryTab = "films" | "songs" | "reels" | "hidden"
+type UploadCard = { id: number; name: string; loaded: number; total: number; stage: string; error: string | null }
+type ImportCard = { url: string; stage: string; error: string | null }
 
-const LIBRARY_PAGE_SIZE = 24
-// Sources flip through smaller pages (arrow at the top) instead of one long list.
-const SOURCE_PAGE_SIZE = 8
+const AUDIO_UPLOAD_EXTENSIONS = ["wav", "mp3", "m4a", "aac", "flac", "ogg", "opus", "aiff", "wma"]
 
 export default function AssetsPage() {
-    const { isLoaded, isSignedIn, user } = useUser()
-    const [activeTab, setActiveTab] = useState<LibraryTab>("source")
-    const [kindFilter, setKindFilter] = useState<KindFilter>("all")
-    const [file, setFile] = useState<File | null>(null)
-    const [slot, setSlot] = useState<UploadSlot>("audio")
-    const [youtubeUrl, setYoutubeUrl] = useState("")
-    const [status, setStatus] = useState<string | null>(null)
-    const [error, setError] = useState<string | null>(null)
-    const [preview, setPreview] = useState<PreviewState | null>(null)
-    const [selectedFileId, setSelectedFileId] = useState<string | null>(null)
-    const [openDisclosure, setOpenDisclosure] = useState<Disclosure>(null)
-    const [isUploading, setIsUploading] = useState(false)
-    const [isImporting, setIsImporting] = useState(false)
-    const [busyAssetId, setBusyAssetId] = useState<string | null>(null)
-    const [downloadingId, setDownloadingId] = useState<string | null>(null)
-    const [deletingId, setDeletingId] = useState<string | null>(null)
-    const [restoringId, setRestoringId] = useState<string | null>(null)
-    const abortRef = useRef<AbortController | null>(null)
-
-    const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
-    const assetsResource = useAssets(api, { includeArchived: true })
-    const assets = assetsResource.data ?? []
-    const setAssets = assetsResource.set
-    const loadAssets = assetsResource.revalidate
-    const loadError = assetsResource.error
-    const sourceAssets = assets.filter((asset) => !asset.archived_at && isSourceKind(asset.kind))
-    const derivedAssets = assets.filter((asset) => !asset.archived_at && !isSourceKind(asset.kind) && asset.kind !== "render_output")
-    const hiddenAssets = assets.filter((asset) => Boolean(asset.archived_at))
-    const tabAssets = activeTab === "source" ? sourceAssets : activeTab === "derived" ? derivedAssets : hiddenAssets
-    // The Songs/Sources kind filter only applies to the Sources tab (where the two
-    // primary kinds live); Derived/Hidden ignore it.
-    const visibleAssets =
-        activeTab === "source" && kindFilter !== "all"
-            ? tabAssets.filter((asset) => asset.kind === (kindFilter === "song" ? "song_audio" : "source_video"))
-            : tabAssets
-    const assetPager = usePagination(
-        visibleAssets,
-        activeTab === "source" ? SOURCE_PAGE_SIZE : LIBRARY_PAGE_SIZE,
-        `${activeTab}:${kindFilter}`,
+    return (
+        <Suspense fallback={<SkeletonList count={3} />}>
+            <LibraryPage />
+        </Suspense>
     )
-    const isWorking = isUploading || isImporting
-    const selectedAsset = selectedFileId ? visibleAssets.find((asset) => asset.file_id === selectedFileId) ?? null : null
+}
 
-    useEffect(() => {
-        return () => abortRef.current?.abort()
-    }, [])
+function LibraryPage() {
+    const { isLoaded, isSignedIn, user } = useUser()
+    const router = useRouter()
+    const searchParams = useSearchParams()
+    const toast = useToast()
+    const tab = (searchParams.get("tab") as LibraryTab) || "films"
+    const [selectedId, setSelectedId] = useState<string | null>(null)
+    const [addOpen, setAddOpen] = useState(false)
+    const [youtubeUrl, setYoutubeUrl] = useState("")
+    const [uploads, setUploads] = useState<UploadCard[]>([])
+    const [imports, setImports] = useState<ImportCard[]>([])
+    const [error, setError] = useState<string | null>(null)
+    const uploadIdRef = useRef(0)
 
-    const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-        const next = event.target.files?.[0] ?? null
-        setFile(next)
-        setError(validateUpload(next, slot))
-        setStatus(null)
+    const api = useMemo(() => (user?.id ? new EclypteApiClient({ userId: user.id }) : null), [user?.id])
+    const assetsResource = useAssets(api, { includeArchived: true })
+    const assets = useMemo(() => assetsResource.data ?? [], [assetsResource.data])
+    const setAssets = assetsResource.set
+    const reelsResource = useAssets(api, { kind: "render_output" })
+    const reels = useMemo(() => reelsResource.data ?? [], [reelsResource.data])
+    const postsResource = usePublishingPosts(api, { status: "all" })
+    const posts = useMemo(() => postsResource.data ?? [], [postsResource.data])
+    const postByRender = useMemo(() => new Map(posts.map((post) => [post.render_file_id, post])), [posts])
+
+    const films = assets.filter((a) => a.kind === "source_video" && a.current_version_id && !a.archived_at)
+    const songs = assets.filter((a) => a.kind === "song_audio" && a.current_version_id && !a.archived_at)
+    const hidden = assets.filter((a) => Boolean(a.archived_at))
+    const tabItems: AssetSummary[] = tab === "films" ? films : tab === "songs" ? songs : tab === "reels" ? reels : hidden
+    const pager = usePagination(tabItems, tab === "songs" ? 10 : 12, tab)
+
+    const posterUrls = usePosterUrls(api, [
+        ...films.map((a) => a.poster),
+        ...reels.map((a) => a.poster),
+    ])
+
+    const setTab = (next: LibraryTab) => {
+        setSelectedId(null)
+        router.replace(next === "films" ? "/dashboard/assets" : `/dashboard/assets?tab=${next}`)
     }
 
-    const onSlotChange = (next: UploadSlot) => {
-        setSlot(next)
-        setError(validateUpload(file, next))
-        setStatus(null)
-    }
+    const selected = selectedId
+        ? [...films, ...songs, ...reels, ...hidden].find((a) => a.file_id === selectedId) ?? null
+        : null
 
-    const uploadSelected = async () => {
-        if (!api || !file) {
+    // --- Add flow: one smart file input (MP4 → film, audio → song), plus YouTube. ---
+    const onPick = (event: ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0] ?? null
+        event.target.value = ""
+        if (!file || !api) {
             return
         }
-        const validation = validateUpload(file, slot)
-        if (validation) {
-            setError(validation)
+        const extension = file.name.toLowerCase().split(".").pop() ?? ""
+        const isVideo = file.type === "video/mp4" || extension === "mp4"
+        const isAudio = file.type.startsWith("audio/") || AUDIO_UPLOAD_EXTENSIONS.includes(extension)
+        if (!isVideo && !isAudio) {
+            setError("Use an MP4 film or a common audio file (WAV, MP3, M4A, FLAC, OGG).")
             return
         }
-        const controller = new AbortController()
-        abortRef.current = controller
         setError(null)
-        setIsUploading(true)
+        setAddOpen(false)
+        void runUpload(file, isVideo)
+    }
+
+    const runUpload = async (file: File, isVideo: boolean) => {
+        if (!api) {
+            return
+        }
+        const id = ++uploadIdRef.current
+        const patch = (partial: Partial<UploadCard>) =>
+            setUploads((current) => current.map((card) => (card.id === id ? { ...card, ...partial } : card)))
+        setUploads((current) => [
+            ...current,
+            { id, name: stripExtension(file.name), loaded: 0, total: file.size, stage: "Checking the file", error: null },
+        ])
         try {
-            const isAudio = slot === "audio"
             const extension = file.name.toLowerCase().split(".").pop() ?? ""
             const isWav = file.type === "audio/wav" || extension === "wav"
-            const contentType = isAudio ? file.type || "application/octet-stream" : "video/mp4"
             const uploaded = await uploadAsset(api, {
                 file,
-                kind: isAudio ? "song_audio" : "source_video",
-                contentType,
-                signal: controller.signal,
-                onStatus: setStatus,
+                kind: isVideo ? "source_video" : "song_audio",
+                contentType: isVideo ? "video/mp4" : file.type || "application/octet-stream",
+                onStatus: (stage) => patch({ stage }),
+                onProgress: (loaded) => patch({ loaded, stage: "Uploading" }),
             })
-            if (isAudio && !isWav) {
-                // Non-WAV audio is converted server-side into a WAV song_audio asset.
-                setStatus("Converting to WAV")
-                const run = await api.createAudioConversion(uploaded, controller.signal)
-                await waitForRunCompletion(api, run, {
-                    signal: controller.signal,
-                    onUpdate: (next) =>
-                        setStatus(next.status === "failed" ? "Conversion failed" : "Converting to WAV"),
-                })
-                setStatus("Converted to WAV")
-            } else {
-                setStatus("Upload complete")
+            if (!isVideo && !isWav) {
+                patch({ stage: "Converting the audio", loaded: file.size })
+                const run = await api.createAudioConversion(uploaded)
+                await waitForRunCompletion(api, run)
             }
-            setFile(null)
-            loadAssets()
+            setUploads((current) => current.filter((card) => card.id !== id))
+            assetsResource.revalidate()
+            toast(`${stripExtension(file.name)} added to your library`)
         } catch (caught) {
-            if (!isAbortError(caught)) {
-                setError(errorMessage(caught))
+            if (isAbortError(caught)) {
+                setUploads((current) => current.filter((card) => card.id !== id))
+                return
             }
-        } finally {
-            abortRef.current = null
-            setIsUploading(false)
+            patch({ error: errorMessage(caught), stage: "Didn't work" })
         }
     }
 
-    const importYouTubeSong = async () => {
-        if (!api) {
+    const runImport = async () => {
+        if (!api || !youtubeUrl.trim()) {
             return
         }
-        const validation = validateYouTubeUrl(youtubeUrl)
-        if (validation) {
-            setError(validation)
-            return
-        }
-        const controller = new AbortController()
-        abortRef.current = controller
-        setError(null)
-        setIsImporting(true)
+        const url = youtubeUrl.trim()
+        setYoutubeUrl("")
+        setAddOpen(false)
+        const patch = (partial: Partial<ImportCard>) =>
+            setImports((current) => current.map((card) => (card.url === url ? { ...card, ...partial } : card)))
+        setImports((current) => [...current, { url, stage: "Getting the song", error: null }])
         try {
-            setStatus("Starting YouTube import")
-            const run = await api.createYouTubeSongImport(youtubeUrl.trim(), controller.signal)
+            const run = await api.createYouTubeSongImport(url)
             await waitForRunCompletion(api, run, {
-                signal: controller.signal,
-                onUpdate: (next) => setStatus(formatYouTubeImportStatus(next.status)),
+                onUpdate: (next) => patch({ stage: next.status === "running" ? "Getting the song" : "Finishing up" }),
             })
-            setStatus("YouTube song imported and analyzed")
-            setYoutubeUrl("")
-            setActiveTab("source")
-            loadAssets()
-        } catch (caught) {
-            if (!isAbortError(caught)) {
-                setError(errorMessage(caught))
+            setImports((current) => current.filter((card) => card.url !== url))
+            if (tab !== "songs") {
+                setTab("songs")
             }
-        } finally {
-            abortRef.current = null
-            setIsImporting(false)
+            assetsResource.revalidate()
+            toast("Song imported and ready")
+        } catch (caught) {
+            patch({ error: errorMessage(caught), stage: "Didn't work" })
         }
     }
 
-    const analyzeAsset = async (asset: AssetSummary) => {
-        if (!api) {
-            return
-        }
-        const ref = versionRef(asset)
-        if (!ref) {
-            setError("Asset has no current version.")
-            return
-        }
-        setBusyAssetId(asset.file_id)
+    // --- Row/card actions (archive keeps the old optimistic cache patch behavior). ---
+    const [busyAction, setBusyAction] = useState<string | null>(null)
+    const act = async (name: string, action: () => Promise<void>) => {
+        setBusyAction(name)
         setError(null)
-        setStatus(null)
         try {
-            const run = asset.kind === "song_audio"
-                ? await api.createMusicAnalysis(ref)
-                : await api.createVideoAnalysis(ref)
-            await waitForRunCompletion(api, run, {
-                onUpdate: (next) => setStatus(`Analysis ${next.status}`),
-            })
-            setStatus("Analysis complete")
-            loadAssets()
+            await action()
         } catch (caught) {
             setError(errorMessage(caught))
         } finally {
-            setBusyAssetId(null)
+            setBusyAction(null)
         }
     }
 
-    const openPreview = async (asset: AssetSummary) => {
-        if (!api) {
-            return
-        }
-        const ref = versionRef(asset)
-        if (!ref) {
-            return
-        }
-        const download = await api.getDownloadUrl(ref)
-        setPreview({ asset, url: download.download_url })
-    }
+    const analyze = (asset: AssetSummary) =>
+        act("analyze", async () => {
+            const ref = versionRef(asset)
+            if (!api || !ref) {
+                return
+            }
+            const run = asset.kind === "song_audio" ? await api.createMusicAnalysis(ref) : await api.createVideoAnalysis(ref)
+            assetsResource.revalidate()
+            await waitForRunCompletion(api, run)
+            assetsResource.revalidate()
+            toast("All set — ready to use")
+        })
 
-    const selectAsset = (asset: AssetSummary) => {
-        setSelectedFileId(asset.file_id)
-        if (preview && preview.asset.file_id !== asset.file_id) {
-            setPreview(null)
-        }
-    }
-
-    const downloadAsset = async (asset: AssetSummary) => {
-        if (!api) {
-            return
-        }
-        const ref = versionRef(asset)
-        if (!ref) {
-            setError("Asset has no current version.")
-            return
-        }
-        setDownloadingId(asset.file_id)
-        setError(null)
-        try {
+    const download = (asset: AssetSummary) =>
+        act("download", async () => {
+            const ref = versionRef(asset)
+            if (!api || !ref) {
+                return
+            }
             const downloadUrl = (await api.getDownloadUrl(ref)).download_url
             await downloadSignedUrl({
                 url: downloadUrl,
                 filename: safeDownloadFilename(asset.current_version?.original_filename || asset.display_name, "eclypte-asset"),
             })
-        } catch (caught) {
-            setError(errorMessage(caught))
-        } finally {
-            setDownloadingId(null)
-        }
-    }
+        })
 
-    const deleteAsset = async (asset: AssetSummary) => {
-        if (!api) {
-            return
-        }
-        setDeletingId(asset.file_id)
-        setError(null)
-        try {
-            await api.deleteAsset(asset.file_id)
-            setStatus(`${asset.display_name} removed from the library`)
-            if (selectedFileId === asset.file_id) {
-                setSelectedFileId(null)
-                setPreview(null)
+    const hide = (asset: AssetSummary) =>
+        act("hide", async () => {
+            if (!api) {
+                return
             }
-            // Soft delete (archive): move it to the Hidden lane in place instead of
-            // re-pulling the whole library.
+            await api.deleteAsset(asset.file_id)
+            setSelectedId(null)
             setAssets((current = []) =>
                 current.map((item) =>
                     item.file_id === asset.file_id
-                        ? {
-                              ...item,
-                              archived_at: new Date().toISOString(),
-                              archived_reason: item.archived_reason ?? "archived",
-                          }
+                        ? { ...item, archived_at: new Date().toISOString(), archived_reason: item.archived_reason ?? "archived" }
                         : item,
                 ),
             )
-        } catch (caught) {
-            setError(errorMessage(caught))
-        } finally {
-            setDeletingId(null)
-        }
-    }
+            toast(`${stripExtension(asset.display_name)} hidden`)
+        })
 
-    const restoreAsset = async (asset: AssetSummary) => {
-        if (!api) {
-            return
-        }
-        setRestoringId(asset.file_id)
-        setError(null)
-        try {
+    const restore = (asset: AssetSummary) =>
+        act("restore", async () => {
+            if (!api) {
+                return
+            }
             const restored = await api.restoreAsset(asset.file_id)
-            setStatus(`${asset.display_name} restored`)
-            setActiveTab(isSourceKind(asset.kind) ? "source" : "derived")
-            setAssets((current = []) =>
-                current.map((item) => (item.file_id === restored.file_id ? restored : item)),
-            )
-        } catch (caught) {
-            setError(errorMessage(caught))
-        } finally {
-            setRestoringId(null)
-        }
-    }
-
-    const toggleDisclosure = (next: Disclosure) => {
-        setOpenDisclosure((current) => (current === next ? null : next))
-    }
+            setAssets((current = []) => current.map((item) => (item.file_id === restored.file_id ? restored : item)))
+            toast(`${stripExtension(asset.display_name)} restored`)
+        })
 
     if (!isLoaded) {
         return (
-            <DashboardPage eyebrow="Library" title="Loading assets">
+            <DashboardPage eyebrow="Library" title="Library">
                 <SkeletonList count={3} />
             </DashboardPage>
         )
@@ -322,396 +250,344 @@ export default function AssetsPage() {
     if (!isSignedIn || !user) {
         return (
             <DashboardPage eyebrow="Library" title="Sign in required">
-                <div className={styles.emptyState}>Sign in from the homepage to manage assets.</div>
+                <div className={styles.emptyState}>Sign in from the homepage to manage your library.</div>
             </DashboardPage>
         )
     }
 
     return (
         <DashboardPage
-            eyebrow="Library"
-            title="Your library"
-            subtitle="Upload songs and source videos once, then reuse them across every edit."
+            eyebrow="Everything you own"
+            title="Library"
             action={
-                <>
-                    <button
-                        className={openDisclosure === "upload" ? styles.primaryButton : styles.secondaryButton}
-                        type="button"
-                        onClick={() => toggleDisclosure("upload")}
-                        aria-expanded={openDisclosure === "upload"}
-                    >
-                        <Upload size={16} /> Upload
-                    </button>
-                    <button
-                        className={openDisclosure === "youtube" ? styles.primaryButton : styles.secondaryButton}
-                        type="button"
-                        onClick={() => toggleDisclosure("youtube")}
-                        aria-expanded={openDisclosure === "youtube"}
-                    >
-                        <Link2 size={16} /> YouTube
-                    </button>
-                    <button className={styles.ghostButton} type="button" onClick={loadAssets}>
-                        <RefreshCw size={16} /> Refresh
-                    </button>
-                </>
+                <button className={styles.primaryButton} type="button" onClick={() => setAddOpen(true)}>
+                    <Plus size={16} /> Add
+                </button>
             }
         >
-            {(error || loadError || status) && (
-                <div className={styles.fieldStack}>
-                    {status && <div className={styles.successBanner}>{status}</div>}
-                    {(error || loadError) && <div className={styles.errorBanner}>{error || loadError}</div>}
-                </div>
-            )}
+            {(error || assetsResource.error) && <div className={styles.errorBanner}>{error || assetsResource.error}</div>}
 
-            {openDisclosure === "upload" && (
-                <div className={`${styles.panel} ${styles.full}`}>
-                    <div className={styles.panelHeader}>
-                        <div>
-                            <h2>Upload</h2>
-                            <p>Your uploads are saved to your library for reuse.</p>
-                        </div>
-                    </div>
-                    <div className={styles.fieldStack}>
-                        <div className={styles.fieldLabel}>
-                            Asset type
-                            <Select
-                                ariaLabel="Asset type"
-                                value={slot}
-                                onChange={(next) => onSlotChange(next as UploadSlot)}
-                                options={[
-                                    { value: "audio", label: "Song" },
-                                    { value: "video", label: "Source video" },
-                                ]}
-                            />
-                        </div>
-                        <label className={styles.filePicker}>
-                            <span className={styles.fileName}>{file ? file.name : "Choose a file"}</span>
-                            <span className={styles.muted}>{slot === "audio" ? "Any common audio file works (WAV, MP3, M4A, FLAC…)" : "MP4 video"}</span>
-                            {file && <span className={styles.smallText}>{formatBytes(file.size)}</span>}
-                            <input type="file" accept={slot === "audio" ? AUDIO_UPLOAD_ACCEPT : "video/mp4,.mp4"} onChange={onFileChange} />
-                        </label>
-                        <button className={styles.primaryButton} type="button" onClick={uploadSelected} disabled={!file || Boolean(validateUpload(file, slot)) || isWorking}>
-                            <Upload size={16} /> {isUploading ? "Uploading" : "Upload asset"}
-                        </button>
-                    </div>
-                </div>
-            )}
+            <div className={styles.tabPills} role="tablist" aria-label="Library">
+                {(["films", "songs", "reels"] as const).map((item) => (
+                    <button
+                        key={item}
+                        type="button"
+                        role="tab"
+                        aria-selected={tab === item}
+                        className={tab === item ? styles.pillActive : styles.pill}
+                        onClick={() => setTab(item)}
+                    >
+                        {item === "films" ? `Films (${films.length})` : item === "songs" ? `Songs (${songs.length})` : `Reels (${reels.length})`}
+                    </button>
+                ))}
+                <button type="button" className={styles.hiddenLink} onClick={() => setTab("hidden")}>
+                    Hidden{hidden.length ? ` (${hidden.length})` : ""}
+                </button>
+            </div>
 
-            {openDisclosure === "youtube" && (
-                <div className={`${styles.panel} ${styles.full}`}>
-                    <div className={styles.panelHeader}>
-                        <div>
-                            <h2>Import from YouTube</h2>
-                            <p>We&apos;ll grab the audio and analyze it for you automatically.</p>
-                        </div>
-                    </div>
-                    <div className={styles.fieldStack}>
-                        <label className={styles.fieldLabel}>
-                            YouTube song URL
-                            <input
-                                className={styles.input}
-                                type="url"
-                                value={youtubeUrl}
-                                placeholder="https://www.youtube.com/watch?v=..."
-                                onChange={(event) => {
-                                    setYoutubeUrl(event.target.value)
-                                    setError(null)
-                                    setStatus(null)
-                                }}
-                            />
-                        </label>
-                        <button
-                            className={styles.primaryButton}
-                            type="button"
-                            onClick={importYouTubeSong}
-                            disabled={!youtubeUrl.trim() || isWorking}
-                        >
-                            <Link2 size={16} /> {isImporting ? "Importing" : "Import and analyze"}
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            <section className={styles.grid}>
-                <div className={`${styles.panel} ${styles.wide}`}>
-                    <div className={styles.panelHeader}>
-                        <div>
-                            <h2>Library</h2>
-                            <p>{visibleAssets.length} asset{visibleAssets.length === 1 ? "" : "s"}</p>
-                        </div>
-                        <div className={styles.segmentedControl} role="tablist" aria-label="Library">
-                            <button
-                                className={activeTab === "source" ? styles.segmentActive : styles.segmentButton}
-                                type="button"
-                                onClick={() => {
-                                    setActiveTab("source")
-                                    setSelectedFileId(null)
-                                }}
-                            >
-                                Sources ({sourceAssets.length})
-                            </button>
-                            <button
-                                className={activeTab === "derived" ? styles.segmentActive : styles.segmentButton}
-                                type="button"
-                                onClick={() => {
-                                    setActiveTab("derived")
-                                    setSelectedFileId(null)
-                                }}
-                            >
-                                Generated ({derivedAssets.length})
-                            </button>
-                            <button
-                                className={activeTab === "hidden" ? styles.segmentActive : styles.segmentButton}
-                                type="button"
-                                onClick={() => {
-                                    setActiveTab("hidden")
-                                    setSelectedFileId(null)
-                                }}
-                            >
-                                Hidden ({hiddenAssets.length})
-                            </button>
-                        </div>
-                    </div>
-                    {activeTab === "source" && (
-                        <div className={styles.libraryFilters}>
-                            <span className={styles.libraryFilterLabel}>Kind</span>
-                            <Select
-                                compact
-                                ariaLabel="Filter by kind"
-                                value={kindFilter}
-                                onChange={(next) => setKindFilter(next as KindFilter)}
-                                options={[
-                                    { value: "all", label: "All" },
-                                    { value: "song", label: "Songs" },
-                                    { value: "source", label: "Sources" },
-                                ]}
-                            />
-                        </div>
-                    )}
-                    {visibleAssets.length === 0 ? (
-                        <div className={styles.emptyState}>{emptyAssetMessage(activeTab)}</div>
-                    ) : (
-                        <div className={styles.assetTable}>
-                            {activeTab === "source" && (
-                                <Pager
-                                    page={assetPager.page}
-                                    pageCount={assetPager.pageCount}
-                                    onPrev={assetPager.prev}
-                                    onNext={assetPager.next}
-                                    className={styles.pagerTop}
-                                />
-                            )}
-                            <div className={styles.assetTableHeader}>
-                                <span>Name</span>
-                                <span>Status</span>
+            {/* In-flight uploads/imports appear at the top of the active view. */}
+            {(uploads.length > 0 || imports.length > 0) && (
+                <div className={styles.feedSection}>
+                    {uploads.map((card) => (
+                        <div key={card.id} className={styles.progressRow}>
+                            <div className={styles.progressRowTop}>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: "0.55rem", minWidth: 0 }}>
+                                    {!card.error && <Spinner />}
+                                    <span className={styles.truncate}>{card.name}</span>
+                                </span>
+                                <span>
+                                    {card.error
+                                        ? card.error
+                                        : card.stage === "Uploading"
+                                            ? `Uploading · ${formatBytes(card.loaded)} of ${formatBytes(card.total)}`
+                                            : `${card.stage}…`}
+                                </span>
                             </div>
-                            {assetPager.pageItems.map((asset) => {
-                                const state = assetState(asset)
-                                const isSelected = selectedFileId === asset.file_id
-                                return (
-                                    <button
-                                        type="button"
-                                        key={asset.file_id}
-                                        className={`${styles.assetRow} ${isSelected ? styles.assetRowSelected : ""}`}
-                                        onClick={() => selectAsset(asset)}
-                                    >
-                                        <span className={styles.assetRowName}>
-                                            <span className={styles.assetRowTitle}>{asset.display_name}</span>
-                                            <span className={styles.assetRowMeta}>{kindLabel(asset.kind)}</span>
-                                        </span>
-                                        <span><StatusBadge label={assetStatusLabel(state)} tone={state} /></span>
+                            {!card.error && card.stage === "Uploading" && (
+                                <div className={styles.progressTrack}>
+                                    <div className={styles.progressFill} style={{ width: `${Math.min(100, (card.loaded / Math.max(1, card.total)) * 100)}%` }} />
+                                </div>
+                            )}
+                            {card.error && (
+                                <div>
+                                    <button className={styles.ghostButton} type="button" onClick={() => setUploads((current) => current.filter((item) => item.id !== card.id))}>
+                                        Dismiss
                                     </button>
-                                )
-                            })}
-                            {activeTab !== "source" && (
-                                <Pager
-                                    page={assetPager.page}
-                                    pageCount={assetPager.pageCount}
-                                    onPrev={assetPager.prev}
-                                    onNext={assetPager.next}
-                                />
+                                </div>
                             )}
                         </div>
-                    )}
+                    ))}
+                    {imports.map((card) => (
+                        <div key={card.url} className={styles.progressRow}>
+                            <div className={styles.progressRowTop}>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: "0.55rem", minWidth: 0 }}>
+                                    {!card.error && <Spinner />}
+                                    <span className={styles.truncate}>{card.url}</span>
+                                </span>
+                                <span>{card.error ?? `${card.stage}…`}</span>
+                            </div>
+                            {card.error && (
+                                <div>
+                                    <button className={styles.ghostButton} type="button" onClick={() => setImports((current) => current.filter((item) => item.url !== card.url))}>
+                                        Dismiss
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    ))}
                 </div>
+            )}
 
-                <div className={`${styles.detailPanel} ${styles.side}`}>
-                    {!selectedAsset ? (
-                        <div className={styles.detailEmpty}>Select an asset to preview, analyze, or download.</div>
-                    ) : (
-                        <AssetDetail
-                            asset={selectedAsset}
-                            preview={preview && preview.asset.file_id === selectedAsset.file_id ? preview : null}
-                            isAnalyzing={busyAssetId === selectedAsset.file_id}
-                            isDownloading={downloadingId === selectedAsset.file_id}
-                            onAnalyze={() => analyzeAsset(selectedAsset)}
-                            onPreview={() => openPreview(selectedAsset)}
-                            onDownload={() => downloadAsset(selectedAsset)}
-                            onDelete={() => deleteAsset(selectedAsset)}
-                            onRestore={() => restoreAsset(selectedAsset)}
-                            isDeleting={deletingId === selectedAsset.file_id}
-                            isRestoring={restoringId === selectedAsset.file_id}
-                        />
-                    )}
+            {tabItems.length === 0 && uploads.length === 0 && imports.length === 0 ? (
+                <div className={styles.emptyState}>
+                    <p className={styles.emptyStateTitle}>{emptyTitle(tab)}</p>
+                    <p className={styles.emptyStateHint}>{emptyHint(tab)}</p>
                 </div>
-            </section>
+            ) : tab === "songs" ? (
+                <div>
+                    {pager.pageItems.map((asset) => (
+                        <SongRow key={asset.file_id} asset={asset} onOpen={() => setSelectedId(asset.file_id)} />
+                    ))}
+                    <Pager page={pager.page} pageCount={pager.pageCount} onPrev={pager.prev} onNext={pager.next} />
+                </div>
+            ) : (
+                <>
+                    <div className={styles.mediaGrid}>
+                        {pager.pageItems.map((asset) => (
+                            <MediaCard
+                                key={asset.file_id}
+                                asset={asset}
+                                tall={tab === "reels"}
+                                posterUrl={asset.poster ? posterUrls[posterKey(asset.poster)] : undefined}
+                                postedLabel={tab === "reels" ? reelPostedLabel(postByRender.get(asset.file_id)) : null}
+                                onOpen={() => setSelectedId(asset.file_id)}
+                            />
+                        ))}
+                    </div>
+                    <Pager page={pager.page} pageCount={pager.pageCount} onPrev={pager.prev} onNext={pager.next} />
+                </>
+            )}
+
+            {api && selected && (
+                <AssetSheet
+                    api={api}
+                    asset={selected}
+                    posterUrl={selected.poster ? posterUrls[posterKey(selected.poster)] : undefined}
+                    busyAction={busyAction}
+                    onClose={() => setSelectedId(null)}
+                    onAnalyze={() => analyze(selected)}
+                    onDownload={() => download(selected)}
+                    onHide={() => hide(selected)}
+                    onRestore={() => restore(selected)}
+                />
+            )}
+
+            <Sheet
+                open={addOpen}
+                title="Add to your library"
+                onClose={() => setAddOpen(false)}
+                footer={
+                    <button className={styles.secondaryButton} type="button" onClick={runImport} disabled={!youtubeUrl.trim()}>
+                        <Link2 size={15} /> Import from YouTube
+                    </button>
+                }
+            >
+                <label className={`${styles.filePicker} ${styles.uploadDrop}`}>
+                    <span className={styles.fileName}>Choose a file</span>
+                    <span className={styles.muted}>An MP4 becomes a film; audio (WAV, MP3, M4A, FLAC…) becomes a song.</span>
+                    <input type="file" accept={`video/mp4,.mp4,audio/*,${AUDIO_UPLOAD_EXTENSIONS.map((ext) => `.${ext}`).join(",")}`} onChange={onPick} />
+                </label>
+                <label className={styles.fieldLabel}>
+                    Or paste a YouTube song link
+                    <input className={styles.input} placeholder="https://youtu.be/…" value={youtubeUrl} onChange={(event) => setYoutubeUrl(event.target.value)} />
+                </label>
+            </Sheet>
         </DashboardPage>
     )
 }
 
-function AssetDetail({
+function assetStatusText(asset: AssetSummary): { text: string; busy: boolean; ok: boolean } {
+    const state = assetState(asset)
+    if (state === "analyzing") {
+        return { text: asset.kind === "song_audio" ? "Listening to the song…" : "Getting to know this film…", busy: true, ok: false }
+    }
+    if (state === "ready") {
+        return { text: "Ready to use", busy: false, ok: true }
+    }
+    if (state === "failed") {
+        return { text: "Needs another try", busy: false, ok: false }
+    }
+    return { text: "Needs a first look", busy: false, ok: false }
+}
+
+function MediaCard({
     asset,
-    preview,
-    isAnalyzing,
-    isDownloading,
-    isDeleting,
-    isRestoring,
-    onAnalyze,
-    onPreview,
-    onDownload,
-    onDelete,
-    onRestore,
+    tall,
+    posterUrl,
+    postedLabel,
+    onOpen,
 }: {
     asset: AssetSummary
-    preview: PreviewState | null
-    isAnalyzing: boolean
-    isDownloading: boolean
-    isDeleting: boolean
-    isRestoring: boolean
-    onAnalyze: () => void
-    onPreview: () => void
-    onDownload: () => void
-    onDelete: () => void
-    onRestore: () => void
+    tall: boolean
+    posterUrl?: string
+    postedLabel: string | null
+    onOpen: () => void
 }) {
-    const state = assetState(asset)
-    const isArchived = Boolean(asset.archived_at)
-    const canAnalyze = (asset.kind === "song_audio" || asset.kind === "source_video") && !asset.analysis && !isArchived
-    const contentType = asset.current_version?.content_type || ""
-    const isAudio = contentType.startsWith("audio/")
-    const isVideo = contentType.startsWith("video/")
-
+    const status = assetStatusText(asset)
     return (
-        <>
-            <div className={styles.cardTop}>
-                <div>
-                    <h3 className={styles.detailTitle}>{asset.display_name}</h3>
-                    <p className={styles.smallText}>
-                        {kindLabel(asset.kind)} · {formatBytes(asset.current_version?.size_bytes)} · {formatDate(asset.updated_at)}
-                    </p>
-                </div>
-                <StatusBadge label={assetStatusLabel(state)} tone={state} />
-            </div>
-
-            {preview ? (
-                <>
-                    {isAudio && <audio className={styles.previewMedia} controls src={preview.url} />}
-                    {isVideo && <video className={styles.previewMedia} controls src={preview.url} />}
-                    {!isAudio && !isVideo && (
-                        <div className={styles.emptyState}>No preview — download to view.</div>
-                    )}
-                    <p className={styles.smallText}>Presigned URLs expire; refresh preview if playback stops.</p>
-                </>
+        <button type="button" className={styles.mediaCard} onClick={onOpen}>
+            {posterUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL, next/image can't optimize
+                <img className={`${styles.mediaThumb} ${tall ? styles.mediaThumbTall : ""}`} src={posterUrl} alt="" />
             ) : (
-                <p className={styles.smallText}>Preview to play this asset inline, or download to save it locally.</p>
+                <span className={`${styles.mediaThumb} ${tall ? styles.mediaThumbTall : ""}`} aria-hidden />
             )}
-
-            <div className={styles.cardActions}>
-                {canAnalyze && state !== "analyzing" && state !== "ready" && (
-                    <button className={styles.secondaryButton} type="button" onClick={onAnalyze} disabled={isAnalyzing}>
-                        <Activity size={16} /> {isAnalyzing ? "Analyzing" : "Analyze"}
-                    </button>
-                )}
-                {asset.current_version_id && !preview && !isArchived && (
-                    <button className={styles.secondaryButton} type="button" onClick={onPreview}>
-                        <Download size={16} /> Preview
-                    </button>
-                )}
-                {asset.current_version_id && !isArchived && (
-                    <button className={styles.primaryButton} type="button" onClick={onDownload} disabled={isDownloading}>
-                        <Download size={16} /> {isDownloading ? "Downloading" : "Download"}
-                    </button>
-                )}
-                {isArchived ? (
-                    <button className={styles.secondaryButton} type="button" onClick={onRestore} disabled={isRestoring}>
-                        <RotateCcw size={16} /> {isRestoring ? "Restoring" : "Restore"}
-                    </button>
-                ) : (
-                    <button className={styles.dangerButton} type="button" onClick={onDelete} disabled={isDeleting}>
-                        <Trash2 size={16} /> {isDeleting ? "Deleting" : "Delete"}
-                    </button>
-                )}
-            </div>
-        </>
+            <span className={styles.mediaCardBody}>
+                <span className={styles.mediaTitle}>{stripExtension(asset.display_name)}</span>
+                <span className={styles.mediaMeta}>
+                    {postedLabel ?? (
+                        <>
+                            {status.busy ? <Spinner /> : <span className={styles.statusDotSwatch} style={{ background: status.ok ? "var(--ok)" : "var(--attention)" }} aria-hidden />}
+                            {status.text}
+                        </>
+                    )}
+                </span>
+            </span>
+        </button>
     )
 }
 
-const AUDIO_UPLOAD_EXTENSIONS = ["wav", "mp3", "m4a", "aac", "flac", "ogg", "opus", "aiff", "wma"]
-const AUDIO_UPLOAD_ACCEPT = `audio/*,${AUDIO_UPLOAD_EXTENSIONS.map((ext) => `.${ext}`).join(",")}`
-
-function validateUpload(file: File | null, slot: UploadSlot) {
-    if (!file) {
-        return null
-    }
-    if (file.size <= 0) {
-        return "Use a non-empty file."
-    }
-    const extension = file.name.toLowerCase().split(".").pop() ?? ""
-    if (
-        slot === "audio" &&
-        !file.type.startsWith("audio/") &&
-        !AUDIO_UPLOAD_EXTENSIONS.includes(extension)
-    ) {
-        return "Use an audio file (WAV, MP3, M4A, AAC, FLAC, OGG)."
-    }
-    if (slot === "video" && file.type !== "video/mp4" && extension !== "mp4") {
-        return "Use an MP4 file."
-    }
-    return null
+function SongRow({ asset, onOpen }: { asset: AssetSummary; onOpen: () => void }) {
+    const status = assetStatusText(asset)
+    return (
+        <button type="button" className={styles.songRow} onClick={onOpen}>
+            <span className={styles.songArt} aria-hidden><Music size={16} /></span>
+            <span style={{ minWidth: 0 }}>
+                <span className={styles.mediaTitle} style={{ display: "block" }}>{stripExtension(asset.display_name)}</span>
+                <span className={styles.mediaMeta}>
+                    {status.busy ? <Spinner /> : <span className={styles.statusDotSwatch} style={{ background: status.ok ? "var(--ok)" : "var(--attention)" }} aria-hidden />}
+                    {status.text}
+                </span>
+            </span>
+        </button>
+    )
 }
 
-function isSourceKind(kind: ArtifactKind) {
-    return kind === "song_audio" || kind === "source_video"
-}
-
-// A "ready" asset has finished analysis; "Ready to review" (the shared default for
-// the publish "ready" status) reads wrong here, so the library says "Analyzed".
-function assetStatusLabel(state: string) {
-    return state === "ready" ? "Analyzed" : state
-}
-
-function emptyAssetMessage(tab: LibraryTab) {
-    if (tab === "source") {
-        return "No songs or videos yet — upload one to get started."
+function reelPostedLabel(post: PublishingPost | undefined) {
+    if (!post) {
+        return "Not posted yet"
     }
-    if (tab === "derived") {
-        return "Nothing generated yet. Analyses and timelines show up here as you make edits."
+    if (post.status === "published") {
+        return "On Instagram"
     }
-    return "Nothing hidden."
+    if (post.status === "queued" || post.status === "scheduled") {
+        return "Queued to post"
+    }
+    return "Not posted yet"
 }
 
-function validateYouTubeUrl(value: string) {
-    try {
-        const url = new URL(value.trim())
-        const host = url.hostname.toLowerCase()
-        if (
-            (url.protocol === "http:" || url.protocol === "https:") &&
-            (host === "youtu.be" || host === "youtube.com" || host.endsWith(".youtube.com"))
-        ) {
-            return null
+function AssetSheet({
+    api,
+    asset,
+    posterUrl,
+    busyAction,
+    onClose,
+    onAnalyze,
+    onDownload,
+    onHide,
+    onRestore,
+}: {
+    api: EclypteApiClient
+    asset: AssetSummary
+    posterUrl?: string
+    busyAction: string | null
+    onClose: () => void
+    onAnalyze: () => void
+    onDownload: () => void
+    onHide: () => void
+    onRestore: () => void
+}) {
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+    const isArchived = Boolean(asset.archived_at)
+    const contentType = asset.current_version?.content_type || ""
+    const isAudio = contentType.startsWith("audio/")
+    const isVideo = contentType.startsWith("video/")
+    const status = assetStatusText(asset)
+    const canAnalyze = (asset.kind === "song_audio" || asset.kind === "source_video") && !asset.analysis && !isArchived && !status.busy
+
+    const openPreview = async () => {
+        const ref = versionRef(asset)
+        if (!ref) {
+            return
         }
-    } catch {
-        return "Use a valid YouTube URL."
+        const download = await api.getDownloadUrl(ref)
+        setPreviewUrl(download.download_url)
     }
-    return "Use a valid YouTube URL."
+
+    return (
+        <Sheet
+            open
+            title={stripExtension(asset.display_name)}
+            onClose={onClose}
+            footer={
+                <>
+                    {canAnalyze && (
+                        <button className={styles.secondaryButton} type="button" onClick={onAnalyze} disabled={busyAction !== null}>
+                            {busyAction === "analyze" ? <Spinner /> : <Activity size={15} />} Get it ready
+                        </button>
+                    )}
+                    <button className={styles.secondaryButton} type="button" onClick={onDownload} disabled={busyAction !== null || !asset.current_version_id}>
+                        {busyAction === "download" ? <Spinner /> : <Download size={15} />} Download
+                    </button>
+                    <span className={styles.sheetActionsRight}>
+                        {isArchived ? (
+                            <button className={styles.secondaryButton} type="button" onClick={onRestore} disabled={busyAction !== null}>
+                                {busyAction === "restore" ? <Spinner /> : <RotateCcw size={15} />} Restore
+                            </button>
+                        ) : (
+                            <button className={styles.dangerButton} type="button" onClick={onHide} disabled={busyAction !== null}>
+                                {busyAction === "hide" ? <Spinner /> : <Trash2 size={15} />} Hide
+                            </button>
+                        )}
+                    </span>
+                </>
+            }
+        >
+            {previewUrl ? (
+                <>
+                    {isAudio && <audio className={styles.previewMedia} controls autoPlay src={previewUrl} />}
+                    {isVideo && <video className={styles.previewMedia} controls src={previewUrl} />}
+                </>
+            ) : (
+                <button type="button" className={styles.posterButton} onClick={openPreview}>
+                    {posterUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL, next/image can't optimize
+                        <img className={styles.mediaThumb} src={posterUrl} alt="" />
+                    ) : (
+                        <span className={styles.mediaThumb} aria-hidden />
+                    )}
+                    <span className={styles.posterPlayIcon}>▶</span>
+                </button>
+            )}
+            <p className={styles.smallText} style={{ margin: 0 }}>
+                <span className={status.busy ? "" : ""}>{status.text}</span>
+                {" · added "}{formatDate(asset.created_at)}
+                {" · "}{formatBytes(asset.current_version?.size_bytes)}
+            </p>
+        </Sheet>
+    )
 }
 
-function formatYouTubeImportStatus(status: string) {
-    if (status === "completed") {
-        return "YouTube song imported and analyzed"
-    }
-    if (status === "failed") {
-        return "YouTube import failed"
-    }
-    return `YouTube import ${status}`
+function emptyTitle(tab: LibraryTab) {
+    if (tab === "films") return "No films yet"
+    if (tab === "songs") return "No songs yet"
+    if (tab === "reels") return "No reels yet"
+    return "Nothing hidden"
+}
+
+function emptyHint(tab: LibraryTab) {
+    if (tab === "films") return "Add an MP4 of a film or anime — it becomes the footage your reels are cut from."
+    if (tab === "songs") return "Add an audio file or import a song from YouTube."
+    if (tab === "reels") return "Finished reels land here automatically."
+    return "Things you hide can be restored from here."
 }

@@ -791,15 +791,17 @@ export async function uploadAsset(
         contentType,
         signal,
         onStatus,
+        onProgress,
     }: {
         file: File
         kind: "song_audio" | "source_video"
         contentType: string
         signal?: AbortSignal
         onStatus?: (status: string) => void
+        onProgress?: (loadedBytes: number) => void
     },
 ): Promise<FileVersionInput> {
-    onStatus?.("Preparing upload")
+    onStatus?.("Checking the file")
     const reservation = await api.createUpload(
         {
             kind,
@@ -811,9 +813,9 @@ export async function uploadAsset(
     )
     try {
         const sha256 = await sha256File(file)
-        onStatus?.("Uploading to R2")
-        await uploadToPresignedUrl(reservation.upload_url, file, reservation.required_headers, signal)
-        onStatus?.("Completing upload")
+        onStatus?.("Uploading")
+        await uploadToPresignedUrl(reservation.upload_url, file, reservation.required_headers, signal, onProgress)
+        onStatus?.("Finishing up")
         await api.completeUpload(reservation.upload_id, sha256, signal)
     } catch (caught) {
         await api.deleteUpload(reservation.upload_id).catch(() => undefined)
@@ -996,20 +998,42 @@ export async function uploadToPresignedUrl(
     file: File,
     headers: Record<string, string>,
     signal?: AbortSignal,
+    onProgress?: (loadedBytes: number) => void,
 ) {
-    const response = await fetch(url, {
-        method: "PUT",
-        headers,
-        body: file,
-        signal,
-    })
-
-    if (!response.ok) {
-        throw new EclypteApiError(
-            `Upload failed with status ${response.status}`,
-            response.status,
-        )
+    if (!onProgress) {
+        const response = await fetch(url, { method: "PUT", headers, body: file, signal })
+        if (!response.ok) {
+            throw new EclypteApiError(`Upload failed with status ${response.status}`, response.status)
+        }
+        return
     }
+    // fetch() cannot report upload progress; XHR can.
+    await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open("PUT", url)
+        for (const [key, value] of Object.entries(headers)) {
+            xhr.setRequestHeader(key, value)
+        }
+        xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable) {
+                onProgress(event.loaded)
+            }
+        }
+        xhr.onload = () =>
+            xhr.status >= 200 && xhr.status < 300
+                ? resolve()
+                : reject(new EclypteApiError(`Upload failed with status ${xhr.status}`, xhr.status))
+        xhr.onerror = () => reject(new EclypteApiError("Upload failed", 0))
+        xhr.onabort = () => reject(new DOMException("Aborted", "AbortError"))
+        if (signal) {
+            if (signal.aborted) {
+                xhr.abort()
+                return
+            }
+            signal.addEventListener("abort", () => xhr.abort(), { once: true })
+        }
+        xhr.send(file)
+    })
 }
 
 // 16 MB chunks keep peak memory tiny and, critically, avoid passing the whole
