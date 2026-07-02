@@ -403,7 +403,7 @@ function LibraryPage() {
                 </div>
             ) : (
                 <>
-                    <div className={styles.mediaGrid}>
+                    <div className={`${styles.mediaGrid} ${tab === "reels" ? styles.mediaGridTall : ""}`}>
                         {pager.pageItems.map((asset) => (
                             <MediaCard
                                 key={asset.file_id}
@@ -421,6 +421,7 @@ function LibraryPage() {
 
             {api && selected && (
                 <AssetSheet
+                    key={selected.file_id}
                     api={api}
                     asset={selected}
                     posterUrl={selected.poster ? posterUrls[posterKey(selected.poster)] : undefined}
@@ -492,12 +493,19 @@ function MediaCard({
     const status = assetStatusText(asset)
     return (
         <button type="button" className={styles.mediaCard} onClick={onOpen}>
-            {posterUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL, next/image can't optimize
-                <img className={`${styles.mediaThumb} ${tall ? styles.mediaThumbTall : ""}`} src={posterUrl} alt="" />
-            ) : (
-                <span className={`${styles.mediaThumb} ${tall ? styles.mediaThumbTall : ""}`} aria-hidden />
-            )}
+            <span className={styles.mediaThumbFrame}>
+                {posterUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL, next/image can't optimize
+                    <img className={`${styles.mediaThumb} ${tall ? styles.mediaThumbTall : ""}`} src={posterUrl} alt="" />
+                ) : (
+                    <span className={`${styles.mediaThumb} ${tall ? styles.mediaThumbTall : ""}`} aria-hidden />
+                )}
+                {tall && (
+                    <span className={styles.mediaPlayHint} aria-hidden>
+                        <span>▶</span>
+                    </span>
+                )}
+            </span>
             <span className={styles.mediaCardBody}>
                 <span className={styles.mediaTitle}>{stripExtension(asset.display_name)}</span>
                 <span className={styles.mediaMeta}>
@@ -568,26 +576,47 @@ function AssetSheet({
     onPost: () => void
 }) {
     const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+    const [previewError, setPreviewError] = useState<string | null>(null)
     const isArchived = Boolean(asset.archived_at)
     const contentType = asset.current_version?.content_type || ""
     const isAudio = contentType.startsWith("audio/")
     const isVideo = contentType.startsWith("video/")
+    const isReel = asset.kind === "render_output"
     const status = assetStatusText(asset)
+
+    // Fetch the signed playback URL as soon as the sheet opens, so the media is
+    // ready to play with one tap on the native controls (the old click-the-poster
+    // flow was easy to miss and failed silently). The sheet is keyed by file id at
+    // the call site, so switching assets remounts and resets this state naturally.
+    const previewFileId = asset.file_id
+    const previewVersionId = asset.current_version_id
+    useEffect(() => {
+        if (!previewVersionId) {
+            return
+        }
+        let ignore = false
+        void api
+            .getDownloadUrl({ file_id: previewFileId, version_id: previewVersionId })
+            .then((download) => {
+                if (!ignore) {
+                    setPreviewUrl(download.download_url)
+                }
+            })
+            .catch(() => {
+                if (!ignore) {
+                    setPreviewError("Preview isn't loading right now — Download still works.")
+                }
+            })
+        return () => {
+            ignore = true
+        }
+    }, [api, previewFileId, previewVersionId])
     const canAnalyze = (asset.kind === "song_audio" || asset.kind === "source_video") && !asset.analysis && !isArchived && !status.busy
     // Already-analyzed media can be re-analyzed on demand (e.g. to pick up a
     // thumbnail or credits data added after the original analysis ran).
     const canRefreshAnalysis =
         (asset.kind === "song_audio" || asset.kind === "source_video") && Boolean(asset.analysis) && !isArchived && !status.busy
     const canPost = asset.kind === "render_output" && Boolean(asset.current_version_id) && !existingPost
-
-    const openPreview = async () => {
-        const ref = versionRef(asset)
-        if (!ref) {
-            return
-        }
-        const download = await api.getDownloadUrl(ref)
-        setPreviewUrl(download.download_url)
-    }
 
     return (
         <Sheet
@@ -628,21 +657,34 @@ function AssetSheet({
                 </>
             }
         >
-            {previewUrl ? (
-                <>
-                    {isAudio && <audio className={styles.previewMedia} controls autoPlay src={previewUrl} />}
-                    {isVideo && <video className={styles.previewMedia} controls src={previewUrl} />}
-                </>
-            ) : (
-                <button type="button" className={styles.posterButton} onClick={openPreview}>
+            {isVideo && previewUrl ? (
+                <video
+                    className={`${styles.previewMedia} ${isReel ? styles.previewMediaTall : ""}`}
+                    controls
+                    preload="metadata"
+                    poster={posterUrl}
+                    src={previewUrl}
+                />
+            ) : isAudio && previewUrl ? (
+                <audio className={styles.previewMedia} controls src={previewUrl} />
+            ) : previewError ? (
+                <p className={styles.smallText} style={{ margin: 0 }}>{previewError}</p>
+            ) : isVideo ? (
+                <span className={styles.mediaThumbFrame} style={isReel ? { maxWidth: 240, alignSelf: "center" } : undefined}>
                     {posterUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL, next/image can't optimize
-                        <img className={styles.mediaThumb} src={posterUrl} alt="" />
+                        <img className={`${styles.mediaThumb} ${isReel ? styles.mediaThumbTall : ""}`} src={posterUrl} alt="" />
                     ) : (
-                        <span className={styles.mediaThumb} aria-hidden />
+                        <span className={`${styles.mediaThumb} ${isReel ? styles.mediaThumbTall : ""}`} aria-hidden />
                     )}
-                    <span className={styles.posterPlayIcon}>▶</span>
-                </button>
+                    <span className={styles.posterPlayIcon}>
+                        <Spinner onInk />
+                    </span>
+                </span>
+            ) : (
+                <p className={styles.smallText} style={{ margin: 0 }}>
+                    <Spinner /> Getting ready to play…
+                </p>
             )}
             <p className={styles.smallText} style={{ margin: 0 }}>
                 <span className={status.busy ? "" : ""}>{status.text}</span>
