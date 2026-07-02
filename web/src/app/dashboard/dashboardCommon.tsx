@@ -333,6 +333,12 @@ export function formatDuration(totalSec: number | null | undefined) {
     return rem ? `${minutes}m ${String(rem).padStart(2, "0")}s` : `${minutes}m`
 }
 
+// Strips a known media/asset extension off a display name for cleaner titles,
+// e.g. "chorus.wav" -> "chorus". Shared by the Home feed and the asset Library.
+export function stripExtension(name: string) {
+    return name.replace(/\.(mp4|wav|mp3|m4a|aac|flac|ogg|opus|aiff|wma|jpg|jpeg|json)$/i, "")
+}
+
 // One consistent empty-state voice for every list, replacing the per-page ad-hoc copy.
 export function EmptyState({
     title,

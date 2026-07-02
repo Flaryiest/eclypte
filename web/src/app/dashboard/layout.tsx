@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { Menu } from "lucide-react"
 import styles from "./layout.module.css"
 import Sidebar from "@/components/dashboard/sidebar/sidebar"
+import { ToastProvider } from "./dashboardCommon"
 
 export default function Layout({ children }: { children: React.ReactNode }) {
     const [isMobile, setIsMobile] = useState(false)
@@ -44,7 +45,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                         <span>Menu</span>
                     </button>
                 )}
-                {children}
+                <ToastProvider>{children}</ToastProvider>
             </div>
 
             {isMobile && dashboardOpen && (
