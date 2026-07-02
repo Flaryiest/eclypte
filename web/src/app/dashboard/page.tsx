@@ -93,18 +93,20 @@ export default function HomePage() {
     })
 
     // --- Poster refs: publishing posts carry the MP4 ref; the poster ref lives on the
-    // post's source run outputs (render_poster_*). Fetched once per post, cached here.
+    // post's source run outputs (render_poster_*). Fetched exactly once per post: the
+    // resolved/in-flight sets are refs, so a resolving sibling never re-triggers or
+    // discards the others' fetches (results are keyed by post id and can't go stale).
     const [postPosterRefs, setPostPosterRefs] = useState<Record<string, FileVersionInput | null>>({})
     const postPosterInFlightRef = useRef<Set<string>>(new Set())
+    const postPosterResolvedRef = useRef<Set<string>>(new Set())
     useEffect(() => {
         if (!api) {
             return
         }
-        let cancelled = false
         const wanted = [...readyPosts, ...postedPosts].filter(
             (post) =>
                 post.source_run_id
-                && postPosterRefs[post.post_id] === undefined
+                && !postPosterResolvedRef.current.has(post.post_id)
                 && !postPosterInFlightRef.current.has(post.post_id),
         )
         for (const post of wanted) {
@@ -112,29 +114,23 @@ export default function HomePage() {
             void api
                 .getRun(post.source_run_id as string)
                 .then((run) => {
-                    if (cancelled) {
-                        return
-                    }
                     const fileId = run.outputs["render_poster_file_id"]
                     const versionId = run.outputs["render_poster_version_id"]
+                    postPosterResolvedRef.current.add(post.post_id)
                     setPostPosterRefs((current) => ({
                         ...current,
                         [post.post_id]: fileId && versionId ? { file_id: fileId, version_id: versionId } : null,
                     }))
                 })
                 .catch(() => {
-                    if (!cancelled) {
-                        setPostPosterRefs((current) => ({ ...current, [post.post_id]: null }))
-                    }
+                    postPosterResolvedRef.current.add(post.post_id)
+                    setPostPosterRefs((current) => ({ ...current, [post.post_id]: null }))
                 })
                 .finally(() => {
                     postPosterInFlightRef.current.delete(post.post_id)
                 })
         }
-        return () => {
-            cancelled = true
-        }
-    }, [api, readyPosts, postedPosts, postPosterRefs])
+    }, [api, readyPosts, postedPosts])
 
     const assetById = useMemo(() => new Map(assets.map((asset) => [asset.file_id, asset])), [assets])
     const queueSourceRefs = useMemo(
