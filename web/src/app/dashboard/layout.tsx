@@ -1,61 +1,63 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Menu } from "lucide-react"
+import Link from "next/link"
+import { usePathname } from "next/navigation"
+import { useClerk } from "@clerk/nextjs"
+import { LogOut, Settings } from "lucide-react"
 import styles from "./layout.module.css"
-import Sidebar from "@/components/dashboard/sidebar/sidebar"
 import { ToastProvider } from "./dashboardCommon"
 
+const navItems = [
+    { href: "/dashboard", label: "Home" },
+    { href: "/dashboard/assets", label: "Library" },
+]
+
 export default function Layout({ children }: { children: React.ReactNode }) {
-    const [isMobile, setIsMobile] = useState(false)
-    const [dashboardOpen, setDashboardOpen] = useState(true)
+    const pathname = usePathname()
+    const { signOut } = useClerk()
 
-    useEffect(() => {
-        const mediaQuery = window.matchMedia("(max-width: 768px)")
-
-        const syncViewport = () => {
-            const mobile = mediaQuery.matches
-            setIsMobile(mobile)
-            setDashboardOpen(!mobile)
-        }
-
-        syncViewport()
-        mediaQuery.addEventListener("change", syncViewport)
-
-        return () => mediaQuery.removeEventListener("change", syncViewport)
-    }, [])
+    const isActive = (href: string) =>
+        href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href)
 
     return (
         <div className={styles.container} data-surface="studio">
-            <Sidebar
-                isOpen={dashboardOpen}
-                onToggle={() => setDashboardOpen((prev) => !prev)}
-            />
-            <div className={styles.dashboard}>
-                {isMobile && (
-                    <button
-                        type="button"
-                        className={styles.mobileToggle}
-                        onClick={() => setDashboardOpen((prev) => !prev)}
-                        aria-controls="dashboard-sidebar"
-                        aria-expanded={dashboardOpen}
-                        aria-label={dashboardOpen ? "Close menu" : "Open menu"}
-                    >
-                        <Menu size={20} aria-hidden />
-                        <span>Menu</span>
-                    </button>
-                )}
-                <ToastProvider>{children}</ToastProvider>
-            </div>
-
-            {isMobile && dashboardOpen && (
-                <button
-                    type="button"
-                    className={styles.backdrop}
-                    aria-label="Close sidebar"
-                    onClick={() => setDashboardOpen(false)}
-                />
-            )}
+            <ToastProvider>
+                <header className={styles.topBar}>
+                    <Link className={styles.brand} href="/dashboard">
+                        Eclypte
+                    </Link>
+                    <nav className={styles.nav} aria-label="Main">
+                        {navItems.map((item) => (
+                            <Link
+                                key={item.href}
+                                href={item.href}
+                                className={isActive(item.href) ? styles.navLinkActive : styles.navLink}
+                                aria-current={isActive(item.href) ? "page" : undefined}
+                            >
+                                {item.label}
+                            </Link>
+                        ))}
+                    </nav>
+                    <div className={styles.topBarRight}>
+                        <Link
+                            href="/dashboard/settings"
+                            className={isActive("/dashboard/settings") ? styles.navLinkActive : styles.navLink}
+                            aria-label="Settings"
+                        >
+                            <Settings size={17} aria-hidden />
+                        </Link>
+                        <button
+                            type="button"
+                            className={styles.signOut}
+                            onClick={() => signOut({ redirectUrl: "/" })}
+                            aria-label="Sign out"
+                        >
+                            <LogOut size={16} aria-hidden />
+                        </button>
+                    </div>
+                </header>
+                <main className={styles.main}>{children}</main>
+            </ToastProvider>
         </div>
     )
 }
