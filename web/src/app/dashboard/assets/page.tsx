@@ -574,6 +574,10 @@ function AssetSheet({
     const isVideo = contentType.startsWith("video/")
     const status = assetStatusText(asset)
     const canAnalyze = (asset.kind === "song_audio" || asset.kind === "source_video") && !asset.analysis && !isArchived && !status.busy
+    // Already-analyzed media can be re-analyzed on demand (e.g. to pick up a
+    // thumbnail or credits data added after the original analysis ran).
+    const canRefreshAnalysis =
+        (asset.kind === "song_audio" || asset.kind === "source_video") && Boolean(asset.analysis) && !isArchived && !status.busy
     const canPost = asset.kind === "render_output" && Boolean(asset.current_version_id) && !existingPost
 
     const openPreview = async () => {
@@ -600,6 +604,11 @@ function AssetSheet({
                     {canAnalyze && (
                         <button className={styles.secondaryButton} type="button" onClick={onAnalyze} disabled={busyAction !== null}>
                             {busyAction === "analyze" ? <Spinner /> : <Activity size={15} />} Get it ready
+                        </button>
+                    )}
+                    {canRefreshAnalysis && (
+                        <button className={styles.ghostButton} type="button" onClick={onAnalyze} disabled={busyAction !== null}>
+                            {busyAction === "analyze" ? <Spinner /> : <Activity size={15} />} Refresh analysis
                         </button>
                     )}
                     <button className={styles.secondaryButton} type="button" onClick={onDownload} disabled={busyAction !== null || !asset.current_version_id}>
