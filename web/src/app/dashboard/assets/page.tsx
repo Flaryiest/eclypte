@@ -1,6 +1,6 @@
 "use client"
 
-import { ChangeEvent, Suspense, useMemo, useRef, useState } from "react"
+import { ChangeEvent, Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useUser } from "@clerk/nextjs"
 import { Activity, Download, Link2, Music, Plus, RotateCcw, Trash2 } from "lucide-react"
@@ -51,7 +51,8 @@ function LibraryPage() {
     const router = useRouter()
     const searchParams = useSearchParams()
     const toast = useToast()
-    const tab = (searchParams.get("tab") as LibraryTab) || "films"
+    const tabParam = searchParams.get("tab")
+    const tab: LibraryTab = tabParam === "songs" || tabParam === "reels" || tabParam === "hidden" ? tabParam : "films"
     const [selectedId, setSelectedId] = useState<string | null>(null)
     const [addOpen, setAddOpen] = useState(false)
     const [youtubeUrl, setYoutubeUrl] = useState("")
@@ -59,6 +60,16 @@ function LibraryPage() {
     const [imports, setImports] = useState<ImportCard[]>([])
     const [error, setError] = useState<string | null>(null)
     const uploadIdRef = useRef(0)
+    const uploadControllersRef = useRef<Map<number, AbortController>>(new Map())
+    const importControllersRef = useRef<Map<string, AbortController>>(new Map())
+
+    useEffect(
+        () => () => {
+            uploadControllersRef.current.forEach((controller) => controller.abort())
+            importControllersRef.current.forEach((controller) => controller.abort())
+        },
+        [],
+    )
 
     const api = useMemo(() => (user?.id ? new EclypteApiClient({ userId: user.id }) : null), [user?.id])
     const assetsResource = useAssets(api, { includeArchived: true })
@@ -114,6 +125,8 @@ function LibraryPage() {
             return
         }
         const id = ++uploadIdRef.current
+        const controller = new AbortController()
+        uploadControllersRef.current.set(id, controller)
         const patch = (partial: Partial<UploadCard>) =>
             setUploads((current) => current.map((card) => (card.id === id ? { ...card, ...partial } : card)))
         setUploads((current) => [
@@ -127,13 +140,14 @@ function LibraryPage() {
                 file,
                 kind: isVideo ? "source_video" : "song_audio",
                 contentType: isVideo ? "video/mp4" : file.type || "application/octet-stream",
+                signal: controller.signal,
                 onStatus: (stage) => patch({ stage }),
                 onProgress: (loaded) => patch({ loaded, stage: "Uploading" }),
             })
             if (!isVideo && !isWav) {
                 patch({ stage: "Converting the audio", loaded: file.size })
-                const run = await api.createAudioConversion(uploaded)
-                await waitForRunCompletion(api, run)
+                const run = await api.createAudioConversion(uploaded, controller.signal)
+                await waitForRunCompletion(api, run, { signal: controller.signal })
             }
             setUploads((current) => current.filter((card) => card.id !== id))
             assetsResource.revalidate()
@@ -144,6 +158,8 @@ function LibraryPage() {
                 return
             }
             patch({ error: errorMessage(caught), stage: "Didn't work" })
+        } finally {
+            uploadControllersRef.current.delete(id)
         }
     }
 
@@ -151,15 +167,19 @@ function LibraryPage() {
         if (!api || !youtubeUrl.trim()) {
             return
         }
+        setError(null)
         const url = youtubeUrl.trim()
         setYoutubeUrl("")
         setAddOpen(false)
+        const controller = new AbortController()
+        importControllersRef.current.set(url, controller)
         const patch = (partial: Partial<ImportCard>) =>
             setImports((current) => current.map((card) => (card.url === url ? { ...card, ...partial } : card)))
         setImports((current) => [...current, { url, stage: "Getting the song", error: null }])
         try {
-            const run = await api.createYouTubeSongImport(url)
+            const run = await api.createYouTubeSongImport(url, controller.signal)
             await waitForRunCompletion(api, run, {
+                signal: controller.signal,
                 onUpdate: (next) => patch({ stage: next.status === "running" ? "Getting the song" : "Finishing up" }),
             })
             setImports((current) => current.filter((card) => card.url !== url))
@@ -169,7 +189,13 @@ function LibraryPage() {
             assetsResource.revalidate()
             toast("Song imported and ready")
         } catch (caught) {
+            if (isAbortError(caught)) {
+                setImports((current) => current.filter((card) => card.url !== url))
+                return
+            }
             patch({ error: errorMessage(caught), stage: "Didn't work" })
+        } finally {
+            importControllersRef.current.delete(url)
         }
     }
 
@@ -308,6 +334,13 @@ function LibraryPage() {
                                     <div className={styles.progressFill} style={{ width: `${Math.min(100, (card.loaded / Math.max(1, card.total)) * 100)}%` }} />
                                 </div>
                             )}
+                            {!card.error && (
+                                <div>
+                                    <button className={styles.ghostButton} type="button" onClick={() => uploadControllersRef.current.get(card.id)?.abort()}>
+                                        Cancel
+                                    </button>
+                                </div>
+                            )}
                             {card.error && (
                                 <div>
                                     <button className={styles.ghostButton} type="button" onClick={() => setUploads((current) => current.filter((item) => item.id !== card.id))}>
@@ -326,6 +359,13 @@ function LibraryPage() {
                                 </span>
                                 <span>{card.error ?? `${card.stage}…`}</span>
                             </div>
+                            {!card.error && (
+                                <div>
+                                    <button className={styles.ghostButton} type="button" onClick={() => importControllersRef.current.get(card.url)?.abort()}>
+                                        Cancel
+                                    </button>
+                                </div>
+                            )}
                             {card.error && (
                                 <div>
                                     <button className={styles.ghostButton} type="button" onClick={() => setImports((current) => current.filter((item) => item.url !== card.url))}>
