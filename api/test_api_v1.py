@@ -1388,6 +1388,7 @@ def test_invalid_artifact_kind_is_rejected_for_music_analysis():
     )
 
     assert response.status_code == 400
+    assert "expected song_audio" in response.json()["detail"]
 
 
 def test_assets_default_listing_excludes_source_posters():
