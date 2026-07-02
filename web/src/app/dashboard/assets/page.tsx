@@ -579,9 +579,11 @@ function AssetSheet({
     const [previewError, setPreviewError] = useState<string | null>(null)
     const isArchived = Boolean(asset.archived_at)
     const contentType = asset.current_version?.content_type || ""
-    const isAudio = contentType.startsWith("audio/")
-    const isVideo = contentType.startsWith("video/")
+    // Kind is authoritative (reels/films are always video, songs always audio);
+    // content type is only a fallback so odd/missing metadata can't strand the UI.
     const isReel = asset.kind === "render_output"
+    const isVideo = isReel || asset.kind === "source_video" || contentType.startsWith("video/")
+    const isAudio = !isVideo && (asset.kind === "song_audio" || contentType.startsWith("audio/"))
     const status = assetStatusText(asset)
 
     // Fetch the signed playback URL as soon as the sheet opens, so the media is
@@ -592,19 +594,26 @@ function AssetSheet({
     const previewVersionId = asset.current_version_id
     useEffect(() => {
         if (!previewVersionId) {
+            setPreviewError("This file isn't ready to preview yet.")
             return
         }
         let ignore = false
-        void api
-            .getDownloadUrl({ file_id: previewFileId, version_id: previewVersionId })
+        const timeoutMs = 12000
+        const timeout = new Promise<never>((_, reject) => {
+            window.setTimeout(() => reject(new Error(`preview request timed out after ${timeoutMs / 1000}s`)), timeoutMs)
+        })
+        void Promise.race([
+            api.getDownloadUrl({ file_id: previewFileId, version_id: previewVersionId }),
+            timeout,
+        ])
             .then((download) => {
                 if (!ignore) {
                     setPreviewUrl(download.download_url)
                 }
             })
-            .catch(() => {
+            .catch((caught) => {
                 if (!ignore) {
-                    setPreviewError("Preview isn't loading right now — Download still works.")
+                    setPreviewError(`Preview couldn't load (${errorMessage(caught)}) — Download still works.`)
                 }
             })
         return () => {
@@ -657,18 +666,24 @@ function AssetSheet({
                 </>
             }
         >
-            {isVideo && previewUrl ? (
+            {previewError ? (
+                <p className={styles.smallText} style={{ margin: 0 }}>{previewError}</p>
+            ) : isVideo && previewUrl ? (
                 <video
                     className={`${styles.previewMedia} ${isReel ? styles.previewMediaTall : ""}`}
                     controls
                     preload="metadata"
                     poster={posterUrl}
                     src={previewUrl}
+                    onError={(event) => {
+                        const mediaError = event.currentTarget.error
+                        setPreviewError(
+                            `Playback failed${mediaError ? ` (media error ${mediaError.code})` : ""} — Download still works.`,
+                        )
+                    }}
                 />
             ) : isAudio && previewUrl ? (
                 <audio className={styles.previewMedia} controls src={previewUrl} />
-            ) : previewError ? (
-                <p className={styles.smallText} style={{ margin: 0 }}>{previewError}</p>
             ) : isVideo ? (
                 <span className={styles.mediaThumbFrame} style={isReel ? { maxWidth: 240, alignSelf: "center" } : undefined}>
                     {posterUrl ? (

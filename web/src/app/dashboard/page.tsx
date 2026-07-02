@@ -578,6 +578,7 @@ function ReviewSheet({
     const [hashtags, setHashtags] = useState("")
     const [scheduledAt, setScheduledAt] = useState("")
     const [videoUrl, setVideoUrl] = useState<string | null>(null)
+    const [videoError, setVideoError] = useState<string | null>(null)
     const [playing, setPlaying] = useState(false)
     const [busy, setBusy] = useState<string | null>(null) // which action is running
     const syncedPostIdRef = useRef<string | null>(null)
@@ -594,9 +595,12 @@ function ReviewSheet({
         setHashtags(post.hashtags.join(" "))
         setScheduledAt(toLocalDateTimeInput(post.scheduled_at))
         setPlaying(false)
+        setVideoError(null)
     }, [post])
 
     // Preview URL fetched once per rendered media (ported previewKeyRef contract).
+    // Failures surface INSIDE the sheet — the page-level banner sits behind the
+    // overlay, so routing errors there left the play button spinning forever.
     useEffect(() => {
         const key = `${post.render_file_id}:${post.render_version_id}`
         if (key === previewKeyRef.current) {
@@ -614,13 +618,13 @@ function ReviewSheet({
             })
             .catch((caught) => {
                 if (!ignore) {
-                    onError(errorMessage(caught))
+                    setVideoError(`Preview couldn't load (${errorMessage(caught)}).`)
                 }
             })
         return () => {
             ignore = true
         }
-    }, [api, post.render_file_id, post.render_version_id, onError])
+    }, [api, post.render_file_id, post.render_version_id])
 
     const saveCurrent = async () => {
         const next = await api.updatePublishingPost(post.post_id, {
@@ -740,8 +744,20 @@ function ReviewSheet({
                 )
             }
         >
-            {playing && videoUrl ? (
-                <video className={styles.previewMedia} controls autoPlay src={videoUrl} style={{ maxWidth: 260 }} />
+            {videoError ? (
+                <p className={styles.smallText} style={{ margin: 0 }}>{videoError}</p>
+            ) : playing && videoUrl ? (
+                <video
+                    className={styles.previewMedia}
+                    controls
+                    autoPlay
+                    src={videoUrl}
+                    style={{ maxWidth: 260 }}
+                    onError={(event) => {
+                        const mediaError = event.currentTarget.error
+                        setVideoError(`Playback failed${mediaError ? ` (media error ${mediaError.code})` : ""}.`)
+                    }}
+                />
             ) : (
                 <button type="button" className={styles.posterButton} style={{ width: 160 }} onClick={() => setPlaying(true)} disabled={!videoUrl}>
                     {posterUrl ? (
