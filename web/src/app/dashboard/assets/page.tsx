@@ -576,7 +576,11 @@ function AssetSheet({
     onPost: () => void
 }) {
     const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-    const [previewError, setPreviewError] = useState<string | null>(null)
+    // Lazy init instead of an effect: the sheet is keyed by file id, so a missing
+    // version is known at mount time (and the compiler bans sync setState in effects).
+    const [previewError, setPreviewError] = useState<string | null>(() =>
+        asset.current_version_id ? null : "This file isn't ready to preview yet.",
+    )
     const isArchived = Boolean(asset.archived_at)
     const contentType = asset.current_version?.content_type || ""
     // Kind is authoritative (reels/films are always video, songs always audio);
@@ -594,7 +598,6 @@ function AssetSheet({
     const previewVersionId = asset.current_version_id
     useEffect(() => {
         if (!previewVersionId) {
-            setPreviewError("This file isn't ready to preview yet.")
             return
         }
         let ignore = false
