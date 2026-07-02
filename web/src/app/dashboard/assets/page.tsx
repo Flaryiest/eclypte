@@ -600,7 +600,9 @@ function AssetSheet({
         if (!previewVersionId) {
             return
         }
-        let ignore = false
+        // No cleanup-based ignore flag: the sheet is keyed by file id, so an asset
+        // switch remounts (stale setState is a safe no-op), and under Strict Mode a
+        // cleanup flag would waste the first fetch's result.
         const timeoutMs = 12000
         const timeout = new Promise<never>((_, reject) => {
             window.setTimeout(() => reject(new Error(`preview request timed out after ${timeoutMs / 1000}s`)), timeoutMs)
@@ -610,18 +612,11 @@ function AssetSheet({
             timeout,
         ])
             .then((download) => {
-                if (!ignore) {
-                    setPreviewUrl(download.download_url)
-                }
+                setPreviewUrl(download.download_url)
             })
             .catch((caught) => {
-                if (!ignore) {
-                    setPreviewError(`Preview couldn't load (${errorMessage(caught)}) — Download still works.`)
-                }
+                setPreviewError(`Preview couldn't load (${errorMessage(caught)}) — Download still works.`)
             })
-        return () => {
-            ignore = true
-        }
     }, [api, previewFileId, previewVersionId])
     const canAnalyze = (asset.kind === "song_audio" || asset.kind === "source_video") && !asset.analysis && !isArchived && !status.busy
     // Already-analyzed media can be re-analyzed on demand (e.g. to pick up a

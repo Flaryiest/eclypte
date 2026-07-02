@@ -601,6 +601,10 @@ function ReviewSheet({
     // Preview URL fetched once per rendered media (ported previewKeyRef contract).
     // Failures surface INSIDE the sheet — the page-level banner sits behind the
     // overlay, so routing errors there left the play button spinning forever.
+    // Staleness is decided by comparing against the ref (content-addressed), NOT a
+    // cleanup flag: under Strict Mode the remount preserves the ref, so a
+    // cleanup-based ignore flag would discard the only fetch's result while the
+    // ref-guard blocks a refetch — a dev-only permanent spinner.
     useEffect(() => {
         const key = `${post.render_file_id}:${post.render_version_id}`
         if (key === previewKeyRef.current) {
@@ -608,22 +612,18 @@ function ReviewSheet({
         }
         previewKeyRef.current = key
         setVideoUrl(null)
-        let ignore = false
         void api
             .getDownloadUrl({ file_id: post.render_file_id, version_id: post.render_version_id })
             .then((download) => {
-                if (!ignore) {
+                if (previewKeyRef.current === key) {
                     setVideoUrl(download.download_url)
                 }
             })
             .catch((caught) => {
-                if (!ignore) {
+                if (previewKeyRef.current === key) {
                     setVideoError(`Preview couldn't load (${errorMessage(caught)}).`)
                 }
             })
-        return () => {
-            ignore = true
-        }
     }, [api, post.render_file_id, post.render_version_id])
 
     const saveCurrent = async () => {
