@@ -3,7 +3,7 @@
 import { ChangeEvent, Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useUser } from "@clerk/nextjs"
-import { Activity, Download, Link2, Music, Plus, RotateCcw, Trash2 } from "lucide-react"
+import { Activity, Download, Link2, Music, Plus, RotateCcw, Send, Trash2 } from "lucide-react"
 import {
     DashboardPage,
     Pager,
@@ -266,6 +266,17 @@ function LibraryPage() {
             toast(`${stripExtension(asset.display_name)} restored`)
         })
 
+    const post = (asset: AssetSummary) =>
+        act("post", async () => {
+            const ref = versionRef(asset)
+            if (!api || !ref) {
+                return
+            }
+            const next = await api.createPublishingPost({ renderOutput: ref })
+            postsResource.set((current = []) => [next, ...current])
+            toast("Added to Ready for you on Home")
+        })
+
     if (!isLoaded) {
         return (
             <DashboardPage eyebrow="Library" title="Library">
@@ -414,11 +425,13 @@ function LibraryPage() {
                     asset={selected}
                     posterUrl={selected.poster ? posterUrls[posterKey(selected.poster)] : undefined}
                     busyAction={busyAction}
+                    existingPost={postByRender.get(selected.file_id)}
                     onClose={() => setSelectedId(null)}
                     onAnalyze={() => analyze(selected)}
                     onDownload={() => download(selected)}
                     onHide={() => hide(selected)}
                     onRestore={() => restore(selected)}
+                    onPost={() => post(selected)}
                 />
             )}
 
@@ -447,6 +460,9 @@ function LibraryPage() {
 }
 
 function assetStatusText(asset: AssetSummary): { text: string; busy: boolean; ok: boolean } {
+    if (asset.archived_at) {
+        return { text: "Hidden", busy: false, ok: false }
+    }
     const state = assetState(asset)
     if (state === "analyzing") {
         return { text: asset.kind === "song_audio" ? "Listening to the song…" : "Getting to know this film…", busy: true, ok: false }
@@ -531,21 +547,25 @@ function AssetSheet({
     asset,
     posterUrl,
     busyAction,
+    existingPost,
     onClose,
     onAnalyze,
     onDownload,
     onHide,
     onRestore,
+    onPost,
 }: {
     api: EclypteApiClient
     asset: AssetSummary
     posterUrl?: string
     busyAction: string | null
+    existingPost?: PublishingPost
     onClose: () => void
     onAnalyze: () => void
     onDownload: () => void
     onHide: () => void
     onRestore: () => void
+    onPost: () => void
 }) {
     const [previewUrl, setPreviewUrl] = useState<string | null>(null)
     const isArchived = Boolean(asset.archived_at)
@@ -554,6 +574,7 @@ function AssetSheet({
     const isVideo = contentType.startsWith("video/")
     const status = assetStatusText(asset)
     const canAnalyze = (asset.kind === "song_audio" || asset.kind === "source_video") && !asset.analysis && !isArchived && !status.busy
+    const canPost = asset.kind === "render_output" && Boolean(asset.current_version_id) && !existingPost
 
     const openPreview = async () => {
         const ref = versionRef(asset)
@@ -571,6 +592,11 @@ function AssetSheet({
             onClose={onClose}
             footer={
                 <>
+                    {canPost && (
+                        <button className={styles.primaryButton} type="button" onClick={onPost} disabled={busyAction !== null}>
+                            {busyAction === "post" ? <Spinner /> : <Send size={15} />} Post this
+                        </button>
+                    )}
                     {canAnalyze && (
                         <button className={styles.secondaryButton} type="button" onClick={onAnalyze} disabled={busyAction !== null}>
                             {busyAction === "analyze" ? <Spinner /> : <Activity size={15} />} Get it ready
@@ -614,6 +640,9 @@ function AssetSheet({
                 {" · added "}{formatDate(asset.created_at)}
                 {" · "}{formatBytes(asset.current_version?.size_bytes)}
             </p>
+            {asset.kind === "render_output" && existingPost && (
+                <p className={styles.muted} style={{ margin: 0 }}>{reelPostedLabel(existingPost)}</p>
+            )}
         </Sheet>
     )
 }

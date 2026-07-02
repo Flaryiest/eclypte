@@ -59,8 +59,7 @@
 	gap: 1.2rem;
 }
 
-.panel,
-.detailPanel {
+.panel {
 	border: 1px solid var(--line);
 	border-radius: var(--radius-card);
 	background: var(--surface-raised);
@@ -72,8 +71,6 @@
 	min-width: 0;
 }
 
-.assetCard,
-.runCard,
 .jobCard,
 .listCard {
 	border: 1px solid var(--line);
@@ -107,8 +104,6 @@
 	font-weight: 500;
 }
 
-.assetCard h3,
-.runCard h3,
 .listCard h3,
 .jobCard h3 {
 	margin: 0;
@@ -230,11 +225,10 @@
 	flex: none;
 }
 
-.analyzing .badgeDot, .running .badgeDot, .queued .badgeDot, .scheduled .badgeDot,
-.activeStage .stageDot { background: var(--accent); }
+.analyzing .badgeDot, .running .badgeDot, .queued .badgeDot, .scheduled .badgeDot { background: var(--accent); }
 .ready .badgeDot, .completed .badgeDot, .available .badgeDot, .approved .badgeDot,
-.imported .badgeDot, .published .badgeDot, .completeStage .stageDot { background: var(--ok); }
-.failed .badgeDot, .rejected .badgeDot, .failedStage .stageDot { background: var(--danger); }
+.imported .badgeDot, .published .badgeDot { background: var(--ok); }
+.failed .badgeDot, .rejected .badgeDot { background: var(--danger); }
 .canceled .badgeDot, .archived .badgeDot { background: var(--text-faint); }
 .uploaded .badgeDot { background: var(--attention); }
 .discovered .badgeDot, .created .badgeDot, .blocked .badgeDot {
@@ -486,32 +480,14 @@
 .successBanner { border-color: rgba(94, 138, 98, 0.35); background: var(--ok-soft); }
 .topBanner { background: var(--surface-raised); box-shadow: var(--shadow-card); }
 
-.stageList, .assetList, .runList, .versionList, .referenceList {
+.versionList, .referenceList {
 	display: flex; flex-direction: column; gap: 0.7rem; margin: 0; padding: 0; list-style: none;
 }
 
-.stageItem {
-	display: grid;
-	grid-template-columns: 18px 1fr;
-	gap: 0.6rem;
-	align-items: start;
-	padding: 0.8rem 0.95rem;
-	border: 1px solid var(--line);
-	border-radius: var(--radius-card);
-	background: var(--surface-raised);
-}
-
-.stageDot { width: 8px; height: 8px; margin-top: 0.4rem; border-radius: 999px; background: var(--text-faint); }
-.stageLabel { display: block; color: var(--text-primary); font-family: var(--font-ui); font-size: 0.88rem; font-weight: 500; }
 .stageDetail { display: block; margin-top: 0.2rem; color: var(--text-muted); font-family: var(--font-ui); font-size: 0.82rem; }
-
-.settingsGrid { display: grid; grid-template-columns: 1fr; gap: 1.1rem; }
-
-.settingLabel { display: block; margin-bottom: 0.3rem; color: var(--text-muted); font-family: var(--font-ui); font-size: 0.8rem; font-weight: 500; }
 
 /* --- Pager --- */
 .pager { display: flex; align-items: center; justify-content: flex-end; gap: 0.9rem; padding-top: 0.9rem; }
-.pagerTop { padding-top: 0; margin-bottom: 0.5rem; }
 
 .pagerStatus { font-family: var(--font-ui); font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; }
 
@@ -534,9 +510,6 @@
 
 .pagerButton:hover:not(:disabled) { border-color: var(--text-muted); color: var(--text-primary); }
 .pagerButton:disabled { opacity: 0.45; cursor: not-allowed; }
-
-.libraryFilters { display: flex; align-items: center; gap: 0.6rem; padding-bottom: 0.9rem; }
-.libraryFilterLabel { font-family: var(--font-ui); font-size: 0.82rem; color: var(--text-muted); }
 
 .cardTop { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.85rem; }
 .cardActions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: auto; padding-top: 0.3rem; }
@@ -703,9 +676,6 @@
 .detailLink:hover { text-decoration-color: var(--text-primary); }
 
 .proseText { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); font-family: var(--font-ui); font-size: 0.9rem; line-height: 1.65; }
-
-.detailEmpty { padding: 2.2rem 1.4rem; color: var(--text-muted); font-family: var(--font-ui); text-align: center; font-size: 0.95rem; }
-.detailTitle { margin: 0; font-family: var(--font-ui); font-size: 1.15rem; font-weight: 500; overflow-wrap: anywhere; }
 
 .disclosure { display: flex; flex-direction: column; }
 
@@ -982,7 +952,7 @@
 
 @media (max-width: 640px) {
 	.page { gap: 1.5rem; }
-	.panel, .detailPanel { padding: 1.1rem 1.1rem 1.2rem; }
+	.panel { padding: 1.1rem 1.1rem 1.2rem; }
 	.toolbar, .cardActions { align-items: stretch; flex-direction: column; }
 	.primaryButton, .secondaryButton, .ghostButton, .dangerButton { width: 100%; }
 	.rangeGrid { grid-template-columns: 1fr; }
