@@ -87,16 +87,6 @@
 	min-width: 0;
 }
 
-.settingCard {
-	display: flex;
-	align-items: flex-start;
-	gap: 0.85rem;
-	min-width: 0;
-	color: var(--text-secondary);
-}
-
-.settingCard > div { min-width: 0; }
-
 .wide { grid-column: span 8; }
 .side { grid-column: span 4; }
 .full { grid-column: 1 / -1; }
@@ -190,13 +180,11 @@
 .segmentActive:focus-visible,
 .pagerButton:focus-visible,
 .disclosureToggle:focus-visible,
-.assetRow:focus-visible,
 .pill:focus-visible,
 .pillActive:focus-visible,
 .reviewCard:focus-visible,
 .mediaCard:focus-visible,
-.switchButton:focus-visible,
-.filmstripCard:focus-visible {
+.switchButton:focus-visible {
 	outline: 2px solid var(--focus-ring);
 	outline-offset: 2px;
 }
@@ -517,7 +505,6 @@
 .stageLabel { display: block; color: var(--text-primary); font-family: var(--font-ui); font-size: 0.88rem; font-weight: 500; }
 .stageDetail { display: block; margin-top: 0.2rem; color: var(--text-muted); font-family: var(--font-ui); font-size: 0.82rem; }
 
-.assetGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
 .settingsGrid { display: grid; grid-template-columns: 1fr; gap: 1.1rem; }
 
 .settingLabel { display: block; margin-bottom: 0.3rem; color: var(--text-muted); font-family: var(--font-ui); font-size: 0.8rem; font-weight: 500; }
@@ -716,48 +703,6 @@
 .detailLink:hover { text-decoration-color: var(--text-primary); }
 
 .proseText { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); font-family: var(--font-ui); font-size: 0.9rem; line-height: 1.65; }
-.numeral { font-family: var(--font-ui); font-weight: 500; color: var(--text-primary); }
-
-/* --- Legacy asset table (new-edit job list still uses rows) --- */
-.assetTable { display: flex; flex-direction: column; }
-
-.assetTableHeader {
-	display: grid;
-	grid-template-columns: minmax(0, 1fr) minmax(0, max-content);
-	gap: 1.5rem;
-	padding: 0 0.6rem 0.6rem 0.75rem;
-	border-bottom: 1px solid var(--line);
-	color: var(--text-muted);
-	font-family: var(--font-ui);
-	font-size: 0.8rem;
-	font-weight: 500;
-}
-
-.assetRow {
-	display: grid;
-	grid-template-columns: minmax(0, 1fr) minmax(0, max-content);
-	gap: 1.5rem;
-	align-items: center;
-	padding: 0.65rem 0.6rem 0.65rem 0.75rem;
-	border: none;
-	border-bottom: 1px solid var(--line);
-	cursor: pointer;
-	background: transparent;
-	width: 100%;
-	text-align: left;
-	font-family: inherit;
-	color: var(--text-primary);
-	transition: background-color 140ms ease;
-}
-
-.assetTableHeader > :last-child, .assetRow > :last-child { justify-self: end; }
-.assetRow:hover { background: var(--surface-sunk); }
-.assetRowSelected { background: var(--surface-sunk); box-shadow: inset 3px 0 0 var(--accent); }
-
-.assetRowName { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
-.assetRowTitle { font-family: var(--font-ui); font-size: 0.94rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.assetRowMeta { font-family: var(--font-ui); font-size: 0.8rem; color: var(--text-muted); }
-.assetRowCellNumeral { font-family: var(--font-ui); font-size: 0.94rem; font-weight: 500; }
 
 .detailEmpty { padding: 2.2rem 1.4rem; color: var(--text-muted); font-family: var(--font-ui); text-align: center; font-size: 0.95rem; }
 .detailTitle { margin: 0; font-family: var(--font-ui); font-size: 1.15rem; font-weight: 500; overflow-wrap: anywhere; }
@@ -787,49 +732,6 @@
 .disclosureOpen .disclosureCaret { transform: rotate(45deg); }
 .disclosureBody { padding: 1.3rem 0 0; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 1.2rem; }
 
-.filmstrip { display: flex; gap: 0.9rem; overflow-x: auto; padding: 0.3rem 0 0.9rem; scroll-snap-type: x mandatory; }
-
-.filmstripCard {
-	flex: 0 0 220px;
-	display: flex;
-	flex-direction: column;
-	gap: 0.55rem;
-	padding: 0.75rem;
-	border: 1px solid var(--line);
-	border-radius: var(--radius-card);
-	background: var(--surface-raised);
-	cursor: pointer;
-	scroll-snap-align: start;
-	transition: border-color 140ms ease;
-	min-width: 0;
-}
-
-.filmstripCard:hover { border-color: var(--text-muted); }
-.filmstripActive { border-color: var(--text-primary); background: var(--surface-sunk); }
-
-.filmstripFrame {
-	width: 100%;
-	height: 120px;
-	background: var(--surface-sunk);
-	border-radius: var(--radius);
-	color: var(--text-muted);
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	font-family: var(--font-ui);
-	font-size: 0.88rem;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	padding: 0 0.6rem;
-	text-align: center;
-}
-
-.heroPlayer { display: flex; flex-direction: column; gap: 1.1rem; max-width: 1080px; margin: 0 auto; width: 100%; }
-.heroCaption { display: flex; align-items: flex-end; justify-content: space-between; gap: 1.3rem; flex-wrap: wrap; }
-.heroCaptionTitle { margin: 0; font-family: var(--font-ui); font-size: 1.2rem; font-weight: 500; overflow-wrap: anywhere; }
-.heroCaptionMeta { margin: 0.3rem 0 0; color: var(--text-muted); font-family: var(--font-ui); font-size: 0.82rem; }
-
 .settingsStack { display: flex; flex-direction: column; max-width: 720px; width: 100%; }
 .settingsGroup { display: flex; flex-direction: column; gap: 1.2rem; padding: 1.7rem 0; border-bottom: 1px solid var(--line); }
 .settingsGroupHeader { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 0.4rem; }
@@ -838,36 +740,8 @@
 .settingsRowLabel { color: var(--text-muted); font-family: var(--font-ui); font-size: 0.84rem; }
 .settingsRowValue { color: var(--text-primary); font-family: var(--font-ui); font-size: 0.94rem; overflow-wrap: anywhere; }
 
-.queueStrip { display: flex; flex-direction: column; gap: 0.8rem; }
-.queueLine { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0.85rem; align-items: baseline; padding: 0.65rem 0; border-bottom: 1px solid var(--line); font-family: var(--font-ui); font-size: 0.88rem; color: var(--text-secondary); min-width: 0; }
-.queueLineNumeral { font-family: var(--font-ui); font-size: 0.95rem; font-weight: 500; color: var(--text-primary); }
-.queueLineTitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
-.queueLineMeta { color: var(--text-muted); font-size: 0.8rem; white-space: nowrap; }
-
 .assetCaption { margin: 0.5rem 0 0; color: var(--text-muted); font-family: var(--font-ui); font-size: 0.82rem; }
 .assetCaptionOk { color: var(--ok); }
-
-.packageList { display: flex; flex-direction: column; }
-.packageRow {
-	display: flex;
-	flex-direction: column;
-	gap: 0.35rem;
-	width: 100%;
-	padding: 0.9rem 0.2rem 0.9rem 0.6rem;
-	border: none;
-	border-bottom: 1px solid var(--line);
-	background: transparent;
-	color: var(--text-primary);
-	font-family: inherit;
-	text-align: left;
-	cursor: pointer;
-	transition: background-color 140ms ease;
-}
-.packageRow:hover { background: var(--surface-sunk); }
-.packageRowSelected { background: var(--surface-sunk); box-shadow: inset 3px 0 0 var(--accent); }
-.packageRowHead { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; min-width: 0; }
-.packageRowTitle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-ui); font-size: 0.95rem; font-weight: 500; }
-.packageRowMeta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-ui); font-size: 0.8rem; color: var(--text-muted); }
 
 .haltClearButton { margin-left: auto; }
 

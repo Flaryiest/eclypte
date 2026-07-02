@@ -850,9 +850,9 @@ class DefaultWorkflowRunner:
                     )
                     outputs["source_poster_file_id"] = poster_ref.file_id
                     outputs["source_poster_version_id"] = poster_version.version_id
-                except Exception:
+                except Exception as poster_exc:
                     # Poster is decorative; the analysis run must not fail for it.
-                    pass
+                    print(f"[run_video_analysis] poster publish failed (non-fatal): {poster_exc}")
             repo.update_run_status(
                 RunRef(user_id=user_id, run_id=run_id),
                 status="completed",

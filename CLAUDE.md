@@ -78,7 +78,7 @@ Optional env vars:
 
 Routes:
 
-- Health: `GET /healthz` — also reports non-secret booleans for YouTube cookies, realtime streaming (`REDIS_URL`), and Modal worker-progress configuration.
+- Health: `GET /healthz` — also reports non-secret booleans for YouTube cookies, realtime streaming (`REDIS_URL`), Modal worker-progress configuration, and always-on autopilot loop configuration (`autopilot_loop_configured`, i.e. `ECLYPTE_AUTOPILOT=1`).
 - Uploads/files/assets: `POST /v1/uploads`, `POST /v1/uploads/{upload_id}/complete`, `DELETE /v1/uploads/{upload_id}`, `GET /v1/files/{file_id}`, `GET /v1/files/{file_id}/versions/{version_id}`, `GET /v1/files/{file_id}/versions/{version_id}/download-url`, `GET /v1/assets`, `DELETE /v1/assets/{file_id}`, `POST /v1/assets/{file_id}/restore`.
 - Workflows: `POST /v1/music/analyses`, `POST /v1/music/youtube-imports`, `POST /v1/music/conversions` (transcode an uploaded non-WAV audio file into a WAV `song_audio` asset), `POST /v1/video/analyses`, `POST /v1/timelines`, `POST /v1/renders`.
 - Edit jobs: `POST /v1/edits`, `GET /v1/edits`, `GET /v1/edits/{run_id}`, `POST /v1/edits/{run_id}/cancel`, `DELETE /v1/edits/{run_id}`, `POST /v1/edits/{run_id}/redo`.
@@ -114,10 +114,11 @@ Artifact kinds are:
 - `timeline`
 - `render_output`
 - `render_poster`
+- `source_poster`
 
 `StorageRepository` is the API-facing facade. It writes file/upload metadata to the object store, routes run state through Postgres when configured or R2 JSON otherwise, and publishes Redis updates after durable writes. Redis failures must not break persistence.
 
-Default asset lists hide archived assets, render outputs, and render posters. Use `kind=render_output` to list render outputs. Archive/restore instead of hard deletion for normal dashboard lifecycle.
+Default asset lists hide archived assets, render outputs, render posters, and source posters. Use `kind=render_output` (or `kind=source_poster`) to list them explicitly. Archive/restore instead of hard deletion for normal dashboard lifecycle. `AssetSummary.poster` carries an optional `FileVersionInput` ref to the asset's thumbnail — resolved from the completed `video_analysis` run's `source_poster_file_id`/`source_poster_version_id` outputs for a `source_video` asset, or from the `render_poster_file_id`/`render_poster_version_id` outputs for a `render_output` asset — so the dashboard can show a thumbnail without a raw artifact-kind listing.
 
 ## Workflow Orchestration
 
@@ -127,7 +128,7 @@ Important workflows:
 
 - `run_music_analysis`: loads audio from R2, calls `eclypte-analysis::analyze_remote`, publishes a `music_analysis` asset.
 - `run_youtube_song_import`: downloads/transcodes audio through `api/youtube_download.py`, records `youtube_download_attempt` events, publishes `song_audio`, then runs music analysis.
-- `run_video_analysis`: calls `eclypte-video-r2::analyze_r2`, publishes `video_analysis`.
+- `run_video_analysis`: calls `eclypte-video-r2::analyze_r2`, publishes `video_analysis`, and (best-effort) a `source_poster` JPEG from the analyzer's picked poster frame — a publish failure is logged and swallowed, never fails the run.
 - `run_timeline_plan`: runs the OpenAI/CLIP agent planner and publishes `timeline`.
 - `run_render`: calls `eclypte-render-r2::render_r2`, publishes a `render_output` MP4 and a `render_poster` JPEG thumbnail.
 - `run_edit_pipeline`: parent workflow that selects saved assets, ensures missing analysis, plans, renders, and writes child run ids/output refs onto the parent run.
@@ -183,12 +184,12 @@ Heavy audio landmines:
 - `impact.py`: adaptive visual-energy impact/stillness detection.
 - `credits.py`: end-credit detection. `decide_content_end` (pure, unit-tested) finds the dense-text credits block by scanning per-frame OCR word counts backward from the end and returns a conservative `content_end_sec = credits_start − 30s` (with guardrails so mid-film text can't truncate the edit); `detect_content_end` does the tail decode + Tesseract OCR (imports cv2/pytesseract lazily; stays Modal-free like scenes/motion).
 
-`analysis_cuda.py` is the GPU orchestrator. It decodes sequentially and resets previous-frame state at scene boundaries so optical flow does not cross cuts, then runs `credits.detect_content_end` and adds a `credits` block (`{detected, credits_start_sec, content_end_sec}`) to the `video_analysis` payload. Planning hard-caps the usable source to `content_end_sec`: `_run_agent_timeline_plan` passes it as the agent's source duration, into `adapt(content_end_sec=...)` (clamps every shot's source range), and filters CLIP `query_clips` results beyond it. Older analyses without `credits` fall back to full duration.
+`analysis_cuda.py` is the GPU orchestrator. It decodes sequentially and resets previous-frame state at scene boundaries so optical flow does not cross cuts, then runs `credits.detect_content_end` and adds a `credits` block (`{detected, credits_start_sec, content_end_sec}`) to the `video_analysis` payload. Planning hard-caps the usable source to `content_end_sec`: `_run_agent_timeline_plan` passes it as the agent's source duration, into `adapt(content_end_sec=...)` (clamps every shot's source range), and filters CLIP `query_clips` results beyond it. Older analyses without `credits` fall back to full duration. `analysis_cuda.py` also samples frames through `poster.py` — a pure, unit-tested poster-frame picker (mirrors `credits.py`'s pure-decision pattern: brightness/detail/window-position scoring, no cv2/numpy at module level) — and returns a representative JPEG poster frame (base64) alongside the analysis payload; `run_video_analysis` publishes it as a best-effort `source_poster` asset.
 
 Modal apps:
 
 - `api/prototyping/video/analysis_modal.py`: volume-based prototype app `eclypte-video`.
-- `api/prototyping/video/storage_modal.py`: R2-aware API app `eclypte-video-r2`, function `analyze_r2`. Its image bundles `tesseract-ocr` + `pytesseract` (for credit OCR) and `add_local_python_source(... "credits" ...)`; redeploy `eclypte-video-r2` after changing `analysis_cuda.py`/`credits.py` (re-analyze a film to populate the new `credits` block).
+- `api/prototyping/video/storage_modal.py`: R2-aware API app `eclypte-video-r2`, function `analyze_r2`. Its image bundles `tesseract-ocr` + `pytesseract` (for credit OCR) and `add_local_python_source(... "credits", "poster" ...)`; redeploy `eclypte-video-r2` after changing `analysis_cuda.py`/`credits.py`/`poster.py` (re-analyze a film afterward to populate the new `credits` block and/or its poster thumbnail).
 
 OpenCV-CUDA has no friendly local wheel path. Keep CUDA/OpenCV build complexity inside Modal unless the task explicitly asks for dependency work.
 
@@ -248,24 +249,26 @@ Frontend architecture:
 - `web/src/app/page.tsx`: marketing landing page.
 - `web/src/app/pricing/page.tsx`: marketing pricing page — three tiers (Free/Creator/Studio) + FAQ.
 - `web/src/app/demo/page.tsx`: marketing "Screening Room" demo page. Poster-first lazy video via `web/src/components/demo/demoPlayer.tsx` (`DemoReel`/`DemoTile`); posters in `web/public/demo/posters/` and web-optimized 1080p sources in `web/public/demo/web/` (4K originals are unreferenced).
-- `web/src/app/dashboard/layout.tsx`: dashboard shell/sidebar.
-- `web/src/app/dashboard/page.tsx`: redirects to `/dashboard/new-edit`.
-- `web/src/app/dashboard/new-edit/page.tsx`: compose/edit pipeline UI.
-- `web/src/app/dashboard/assets/page.tsx`: upload/import/manage asset library (Sources/Derived/Hidden tabs + a Songs/Sources kind filter on the Sources tab; library paginates at 24/page).
-- `web/src/app/dashboard/synthesis/page.tsx`: references and prompt management.
-- `web/src/app/dashboard/publish/page.tsx`: Buffer publishing queue with setup diagnostics, render preview, caption editing/regeneration, queue/schedule actions, posted/error metadata, per-lane tab counts, live reconciliation that polls in-flight posts against Buffer (~25s interval + on tab refocus) so queued posts auto-advance to Posted and permalinks back-fill, and a manual "Refresh from Buffer" button that re-checks on demand and surfaces Buffer errors (the background poll swallows them). A failed Buffer lookup is recorded on the post and shown inline rather than failing the request, and a manual "Mark as posted" override moves a stuck queued/scheduled post to Posted when Buffer can't reconcile it (`POST .../mark-posted`).
-- `web/src/app/dashboard/autopilot/page.tsx`: autopilot status (enable/pause, daily target, halt banner), backlog form (video asset + song asset or YouTube link + optional brief), queue/activity list, and a manual "Run tick now" action.
-- `web/src/app/dashboard/renders/page.tsx`: render outputs and recent render runs.
-- `web/src/app/dashboard/settings/page.tsx`: API/user/prompt/YouTube-cookie health plus realtime (Redis) and worker-progress status.
-- `web/src/app/dashboard/dashboardCommon.tsx`: shared dashboard page wrapper, skeleton placeholders (`Skeleton`/`SkeletonList`), formatting helpers (`formatBytes`/`formatDate`/`kindLabel`/`humanizeLabel` — `kindLabel` and `StatusBadge` Title-case raw enum/kind strings so the UI shows `Song Audio`/`Completed` not `song_audio`/`completed`), client-side list pagination (`usePagination` + the `Pager` control used by every big dashboard list; pass a `resetKey` such as the active tab/filter to reset to page 1), the `errorMessage`/`isAbortError` error helpers, and `useAbortableLoad` — a no-cache loader hook (aborts the prior in-flight load, drops stale/aborted responses) still used by `/settings`; the data pages load through the `web/src/stores/` cache instead.
+- `web/src/app/dashboard/layout.tsx`: dashboard shell — a top bar (brand, Home/Library nav links, a Settings icon, sign-out); the old sidebar was retired (`web/src/components/dashboard/sidebar/` is gone).
+- `web/src/app/dashboard/page.tsx`: the Home pipeline feed at `/dashboard`, the dashboard's default/index page. It absorbed the old autopilot and publish pages: an autopilot status line (enable/pause switch, daily-target `Select`, halt banner with Resume), a "Ready for you" review-card grid (approve/edit captions/send to Buffer — the old `/dashboard/publish` review queue), "In the works"/"Up next" live job and backlog rows, a "Posted" strip, and two `Sheet`-based flows: `ReviewSheet` (approve/caption/queue/schedule/post-now/mark-as-posted) and `ComposerSheet` (add a film + song/YouTube-link backlog item with an optional creative brief).
+- `web/src/app/dashboard/new-edit/page.tsx`: compose/edit pipeline UI. Not linked from the top bar, but still routable directly.
+- `web/src/app/dashboard/assets/page.tsx`: the Library at `/dashboard/assets` — Films/Songs/Reels tab pills (`?tab=` query param) plus a Hidden link, replacing the old Sources/Derived/Hidden tabs and absorbing the render-output library (Reels tab). Upload/import cards report real byte progress (XHR `upload.onprogress`, via `uploadToPresignedUrl`'s optional `onProgress` callback) instead of an all-or-nothing spinner. The library paginates at 12/page (10 for Songs).
+- `web/src/app/dashboard/synthesis/page.tsx`: references and prompt management. Not linked from the top bar; reachable via the "Tune how your reels are edited" link on `/dashboard/settings`.
+- `web/src/app/dashboard/publish/page.tsx`, `web/src/app/dashboard/autopilot/page.tsx`: redirect stubs to `/dashboard` — their functionality now lives in the Home feed.
+- `web/src/app/dashboard/renders/page.tsx`: redirect stub to `/dashboard/assets?tab=reels`.
+- `web/src/app/dashboard/settings/page.tsx`: API/user/prompt/YouTube-cookie health plus realtime (Redis), worker-progress, and always-on-creation (autopilot loop) status; an Advanced disclosure holds the raw API base URL and account id (behind `CopyableId`).
+- `web/src/app/dashboard/dashboardCommon.tsx`: shared dashboard page wrapper, skeleton placeholders (`Skeleton`/`SkeletonList`), formatting/humanizing helpers (`formatBytes`/`formatDate`/`kindLabel`/`humanizeLabel`/`statusLabel`/`humanizeStageDetail`/`formatClock`/`formatDuration`/`stripExtension` — `kindLabel`, `statusLabel`, and `StatusBadge` turn raw enum/kind strings into creator-facing words, e.g. `song_audio` → `Song Audio`, `ready` → `Ready to review`), client-side list pagination (`usePagination` + the `Pager` control used by every big dashboard list; pass a `resetKey` such as the active tab/filter to reset to page 1), the `errorMessage`/`isAbortError` error helpers, `useAbortableLoad` (still used by `/settings`; the data pages load through `web/src/stores/` instead), and the shared feedback-tier primitives: `Spinner`, `ProgressRow` (spinner + human stage sentence + a real progress bar), `Sheet` (the one modal pattern — right slide-over on desktop, bottom sheet on mobile; Escape closes, body scroll locks), `ToastProvider`/`useToast` (quiet confirmations, mounted once in `layout.tsx`), plus `EmptyState`, `MetaList` (replaces `JSON.stringify` dumps), and `CopyableId` (hides raw IDs behind a copy affordance).
+- `web/src/app/dashboard/editEta.ts`: render/edit ETA estimation (`useNow`, `useRenderEta`, `EDIT_STAGE_WEIGHTS`) extracted out of `new-edit/page.tsx` so other pages' job rows can share it.
+- `web/src/app/dashboard/posterUrls.ts`: `posterKey`/`usePosterUrls` — resolves signed poster-thumbnail download URLs (film posters via `AssetSummary.poster`, render posters) with in-flight dedupe; shared by Home and Library.
 - `web/src/stores/`: a zustand stale-while-revalidate cache shared across dashboard pages — `dashboardStore.ts` (generic per-key resource cache, in-flight dedup, latest-wins), `useResource.ts` (the SWR hook → `{ data, isLoading, error, revalidate, set }`), and `dashboardResources.ts` (typed, user-scoped wrappers: `useAssets`, `useEditJobs`, `useRuns`, `usePublishingPosts`, `usePublishingConfig`, `useSynthesisReferences`, `useSynthesisPrompt`, `useAutopilot`). Keys are scoped by `EclypteApiClient.userId`; signed URLs are never cached. `web/src/stores/README.md` documents the design, page→resource map, and editing gotchas.
-- `web/src/app/dashboard/useRunStream.ts`: shared hook that subscribes to `/v1/runs/stream` with a debounced refresh callback, a ~15s safety-poll watchdog that reconciles a connected-but-silent stream, and a 1s polling fallback when the stream fails; used by the new-edit, renders, and autopilot pages.
-- `web/src/components/dashboard/sidebar/`: dashboard navigation.
+- `web/src/app/dashboard/useRunStream.ts`: shared hook that subscribes to `/v1/runs/stream` with a debounced refresh callback, a ~15s safety-poll watchdog that reconciles a connected-but-silent stream, and a 1s polling fallback when the stream fails; used by the Home, new-edit, and Library (Reels) pages.
 - `web/src/services/eclypteApi.ts`: typed browser API client. Extend this before adding ad hoc fetch calls.
 
 Run streams are newline-delimited JSON. Use `readJsonLineStream()` and `drainJsonLines()` from `eclypteApi.ts`; keep polling fallback logic because Redis may be absent or stale.
 
-Dashboard data loading uses the `web/src/stores/` zustand SWR cache: route each page's primary list through a typed `useResource` wrapper, so navigation serves cached data instantly and revalidates in the background (TTL ~30s) with in-flight dedup and latest-wins. Mutations patch the cache via the hook's `set` (value or updater) instead of re-pulling the whole collection (archive/restore/delete patch the array in place); `useRunStream` and the publish Buffer-poll refreshers call `revalidate`. A fetch is deliberately not aborted on unmount — finishing it populates the shared cache (latest-wins + dedup keep it correct). Two non-obvious rules: the Publish package list uses the compact `.packageRow` layout because the 5-column `.assetRow` table only fits the wide panel; and the Synthesis prompt textarea is user-owned — a background revalidate must not overwrite unsaved edits (guarded by a last-seeded-value dirty check, `lastSeededRef`).
+Dashboard data loading uses the `web/src/stores/` zustand SWR cache: route each page's primary list through a typed `useResource` wrapper, so navigation serves cached data instantly and revalidates in the background (TTL ~30s) with in-flight dedup and latest-wins. Mutations patch the cache via the hook's `set` (value or updater) instead of re-pulling the whole collection (archive/restore/delete patch the array in place); `useRunStream` and the Home page's Buffer-poll refresher call `revalidate`. A fetch is deliberately not aborted on unmount — finishing it populates the shared cache (latest-wins + dedup keep it correct). One non-obvious rule remains: the Synthesis prompt textarea is user-owned — a background revalidate must not overwrite unsaved edits (guarded by a last-seeded-value dirty check, `lastSeededRef`).
+
+The dashboard's visual identity is "Ivory & Ink" — a light, warm system (ivory `#F7F5F1` surfaces, ink `#26231E` text, a coral `#E86A4F` accent reserved for progress/attention, not decoration) defined as CSS custom properties under `[data-surface="studio"]` in `web/src/app/globals.css` and applied via `data-surface="studio"` on the dashboard container in `layout.tsx`. It replaced the earlier dark "Edit Bay" identity; token *names* (`--surface-*`, `--text-*`, `--line*`, `--accent*`, `--ok`/`--danger`/`--attention`, `--font-*`) are unchanged so component CSS didn't need touching when the values swapped. One typeface everywhere — PP Neue Montreal (`--font-display`/`--font-ui`, local `.otf` files) — and sentence case only: no `text-transform: uppercase` and no positive `letter-spacing` anywhere in `web/src/app/dashboard/studio.module.css`. The marketing site (`/`, `/pricing`, `/demo`) keeps its own separate dark `--color-*`/`[data-theme="dark"]` theme, untouched by this redesign.
 
 The frontend depends on these output keys:
 
@@ -276,6 +279,8 @@ The frontend depends on these output keys:
 - `render_poster_file_id`, `render_poster_version_id`
 - `clip_index_file_id`, `clip_index_version_id`
 - `synthesis_prompt_version_id`
+
+`source_poster_file_id`/`source_poster_version_id` on a `video_analysis` run's outputs are additive and best-effort (not required — a missing poster is not an error); the frontend resolves them into `AssetSummary.poster` rather than reading them directly off run outputs.
 
 Styling uses CSS Modules and the existing dashboard/landing visual language. Shared services and components should stay typed and colocated with their CSS where that pattern already exists.
 

@@ -294,6 +294,7 @@ export type HealthResponse = {
     youtube_cookies_configured?: boolean
     realtime_streaming_configured?: boolean
     worker_progress_configured?: boolean
+    autopilot_loop_configured: boolean
 }
 
 export const ECLYPTE_API_BASE_URL =

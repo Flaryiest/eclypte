@@ -179,8 +179,10 @@ curl -H "X-User-Id: local_dev" \
   http://127.0.0.1:8000/v1/publishing/config
 ```
 
-`/dashboard/publish` is review-gated. Public R2 copies under `public/publishing/`
-and Buffer posts are created only when a user queues or schedules a package.
+Publishing is review-gated in the dashboard Home feed (`/dashboard`; the old
+`/dashboard/publish` page now redirects there). Public R2 copies under
+`public/publishing/` and Buffer posts are created only when a user queues or
+schedules a package.
 
 Autopilot (review-gated content loop): set `ECLYPTE_AUTOPILOT=1` on the API to
 run the background tick loop (`ECLYPTE_AUTOPILOT_INTERVAL_SEC`, default 300).
@@ -197,7 +199,8 @@ curl -X POST -H "X-User-Id: local_dev" \
 ```
 
 Manage state via `GET/PATCH /v1/autopilot` and `POST /v1/autopilot/queue`;
-auto-created packages appear as `ready` on `/dashboard/publish` for approval.
+auto-created packages appear as `ready` on the dashboard Home feed (`/dashboard`)
+for approval (`/dashboard/publish` now redirects there).
 
 Deploy the new R2-aware Modal wrappers before using video-analysis/render API
 jobs against live Modal. Run deploys from `api/prototyping/` so the shared
@@ -222,11 +225,15 @@ update deployed apps. Redeploy `eclypte-render-r2` whenever `edit/render/**`,
 `edit/synthesis/validators.py` change (encode settings, effects/transitions,
 overlay skills, schema values), or live renders keep the old behavior — an
 older render image silently drops overlays whose skills it lacks. Redeploy
-`eclypte-video-r2` whenever `video/analysis_cuda.py` or `video/credits.py`
-change (its image bundles `tesseract-ocr` + `pytesseract` for end-credit OCR);
-re-analyze a film afterward to populate the new `credits.content_end_sec`. On
-Windows the UTF-8 env var matters: without it the Modal CLI can die printing
-Unicode (`'charmap' codec can't encode character`).
+`eclypte-video-r2` (`modal deploy video/storage_modal.py`, `PYTHONUTF8=1` on
+Windows per above) whenever `video/analysis_cuda.py`, `video/credits.py`, or
+`video/poster.py` change (its image bundles `tesseract-ocr` + `pytesseract`
+for end-credit OCR, plus the pure poster-frame picker); re-analyze a film
+afterward to populate the new `credits.content_end_sec` and/or its poster
+thumbnail — re-analysis is also how existing films pick up a thumbnail for
+the dashboard Library after deploying a `poster.py` change for the first
+time. On Windows the UTF-8 env var matters: without it the Modal CLI can die
+printing Unicode (`'charmap' codec can't encode character`).
 
 Music analysis API jobs reuse the existing `eclypte-analysis::analyze_remote`
 Modal function from `api/prototyping/music/analysis_modal.py`.
@@ -313,6 +320,7 @@ python -m pytest api/prototyping/edit/synthesis/ -v
 python -m pytest api/prototyping/edit/index/ -v
 python -m pytest api/prototyping/edit/skills/ -v
 python -m pytest api/prototyping/video/test_credits.py -v
+python -m pytest api/prototyping/video/test_poster.py -v
 ```
 
 `pytest.ini` disables pytest's cache provider and sets tmp-path retention to

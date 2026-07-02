@@ -43,6 +43,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                             href="/dashboard/settings"
                             className={isActive("/dashboard/settings") ? styles.navLinkActive : styles.navLink}
                             aria-label="Settings"
+                            aria-current={isActive("/dashboard/settings") ? "page" : undefined}
                         >
                             <Settings size={17} aria-hidden />
                         </Link>

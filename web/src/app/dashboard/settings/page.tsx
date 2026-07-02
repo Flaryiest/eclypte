@@ -13,15 +13,10 @@ import {
     SynthesisPromptState,
 } from "@/services/eclypteApi"
 
-// The backend's /healthz also reports whether always-on creation (autopilot)
-// is running, but the shared HealthResponse type predates that field. Widen
-// it locally rather than touching the shared API client contract.
-type HealthDetails = HealthResponse & { autopilot_loop_configured?: boolean }
-
 export default function SettingsPage() {
     const { isLoaded, isSignedIn, user } = useUser()
     const [health, setHealth] = useState<"unknown" | "ok" | "failed">("unknown")
-    const [healthDetails, setHealthDetails] = useState<HealthDetails | null>(null)
+    const [healthDetails, setHealthDetails] = useState<HealthResponse | null>(null)
     const [promptState, setPromptState] = useState<SynthesisPromptState | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [isChecking, setIsChecking] = useState(false)
