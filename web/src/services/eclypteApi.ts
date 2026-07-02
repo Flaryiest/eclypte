@@ -84,6 +84,7 @@ export type AssetSummary = {
     current_version: FileVersionMeta | null
     latest_run: RunManifest | null
     analysis: FileVersionInput | null
+    poster: FileVersionInput | null
     archived_at: string | null
     archived_reason: string | null
 }

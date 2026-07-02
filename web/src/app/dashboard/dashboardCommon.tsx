@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
-import { ChevronLeft, ChevronRight, Check, Copy } from "lucide-react"
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react"
+import { ChevronLeft, ChevronRight, Check, Copy, X } from "lucide-react"
 import styles from "./studio.module.css"
 import type { AssetState, AssetSummary, PublishingPostStatus, RunManifest, SynthesisReference } from "@/services/eclypteApi"
 
@@ -393,4 +393,135 @@ export function CopyableId({ value, label = "Copy ID" }: { value: string; label?
             {copied ? "Copied" : label}
         </button>
     )
+}
+
+export function Spinner({ onInk = false }: { onInk?: boolean }) {
+    return (
+        <span
+            className={`${styles.spinner} ${onInk ? styles.spinnerOnInk : ""}`}
+            role="status"
+            aria-label="Working"
+        />
+    )
+}
+
+// Long-running work: spinner + name on the left, human stage sentence + number on
+// the right, a real bar underneath whenever a percentage exists (feedback tier 3).
+export function ProgressRow({
+    title,
+    stageText,
+    percent,
+    error,
+}: {
+    title: ReactNode
+    stageText: string
+    percent: number | null
+    error?: string | null
+}) {
+    return (
+        <div className={styles.progressRow}>
+            <div className={styles.progressRowTop}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "0.55rem", minWidth: 0 }}>
+                    {!error && <Spinner />}
+                    <span className={styles.truncate}>{title}</span>
+                </span>
+                <span>{stageText}</span>
+            </div>
+            {percent !== null && !error && (
+                <div className={styles.progressTrack}>
+                    <div className={styles.progressFill} style={{ width: `${Math.max(0, Math.min(100, percent))}%` }} />
+                </div>
+            )}
+            {error && <p className={styles.smallText}>{error}</p>}
+        </div>
+    )
+}
+
+// The single modal pattern: right slide-over on desktop, bottom sheet on mobile
+// (media query in studio.module.css). Escape closes; body scroll is locked.
+export function Sheet({
+    open,
+    title,
+    onClose,
+    children,
+    footer,
+}: {
+    open: boolean
+    title: string
+    onClose: () => void
+    children: ReactNode
+    footer?: ReactNode
+}) {
+    const panelRef = useRef<HTMLDivElement>(null)
+    useEffect(() => {
+        if (!open) {
+            return
+        }
+        const onKey = (event: KeyboardEvent) => {
+            if (event.key === "Escape") {
+                onClose()
+            }
+        }
+        document.addEventListener("keydown", onKey)
+        const previousOverflow = document.body.style.overflow
+        document.body.style.overflow = "hidden"
+        panelRef.current?.focus()
+        return () => {
+            document.removeEventListener("keydown", onKey)
+            document.body.style.overflow = previousOverflow
+        }
+    }, [open, onClose])
+    if (!open) {
+        return null
+    }
+    return (
+        <>
+            <button type="button" className={styles.sheetOverlay} aria-label="Close" onClick={onClose} />
+            <div className={styles.sheet} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={panelRef}>
+                <div className={styles.sheetHeader}>
+                    <h2 className={styles.sheetTitle}>{title}</h2>
+                    <button type="button" className={styles.ghostButton} onClick={onClose}>
+                        <X size={16} /> Close
+                    </button>
+                </div>
+                <div className={styles.sheetBody}>{children}</div>
+                {footer && <div className={styles.sheetFooter}>{footer}</div>}
+            </div>
+        </>
+    )
+}
+
+// Quiet confirmations (feedback tiers 1-2). Mount ToastProvider once in the
+// dashboard layout; pages call useToast()("Posted to Instagram").
+type ToastItem = { id: number; text: string; tone: "ok" | "err" }
+
+const ToastContext = createContext<(text: string, tone?: "ok" | "err") => void>(() => undefined)
+
+export function ToastProvider({ children }: { children: ReactNode }) {
+    const [toasts, setToasts] = useState<ToastItem[]>([])
+    const idRef = useRef(0)
+    const push = useCallback((text: string, tone: "ok" | "err" = "ok") => {
+        const id = ++idRef.current
+        setToasts((current) => [...current, { id, text, tone }])
+        setTimeout(() => setToasts((current) => current.filter((toast) => toast.id !== id)), 3500)
+    }, [])
+    return (
+        <ToastContext.Provider value={push}>
+            {children}
+            <div className={styles.toastStack} role="status" aria-live="polite">
+                {toasts.map((toast) => (
+                    <div key={toast.id} className={styles.toast}>
+                        <span className={toast.tone === "ok" ? styles.toastOk : styles.toastErr}>
+                            {toast.tone === "ok" ? "✓" : "!"}
+                        </span>
+                        {toast.text}
+                    </div>
+                ))}
+            </div>
+        </ToastContext.Provider>
+    )
+}
+
+export function useToast() {
+    return useContext(ToastContext)
 }
