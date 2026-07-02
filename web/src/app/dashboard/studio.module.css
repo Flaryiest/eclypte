@@ -835,6 +835,9 @@
 	border-radius: 8px;
 	object-fit: cover;
 	flex: none;
+	/* Flex rows stretch cross-axis by default, which overrides aspect-ratio
+	   and drags the thumb to the text column's height — keep it 9:16. */
+	align-self: flex-start;
 	background: linear-gradient(160deg, #D8D2C6, #B9B1A0);
 	border: none;
 	display: block;
