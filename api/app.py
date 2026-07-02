@@ -263,6 +263,7 @@ class AssetSummary(BaseModel):
     current_version: FileVersionMeta | None
     latest_run: RunManifest | None
     analysis: FileVersionInput | None
+    poster: FileVersionInput | None
     archived_at: str | None
     archived_reason: str | None
 
@@ -680,6 +681,17 @@ def create_app(
                 (run for run in runs if run.run_id == manifest.source_run_id),
                 None,
             )
+        poster = None
+        if manifest.kind == "source_video" and analysis_run is not None and analysis_run.status == "completed":
+            poster = file_version_input(
+                analysis_run.outputs.get("source_poster_file_id"),
+                analysis_run.outputs.get("source_poster_version_id"),
+            )
+        elif manifest.kind == "render_output" and latest_run is not None:
+            poster = file_version_input(
+                latest_run.outputs.get("render_poster_file_id"),
+                latest_run.outputs.get("render_poster_version_id"),
+            )
         return AssetSummary(
             file_id=manifest.file_id,
             kind=manifest.kind,
@@ -692,6 +704,7 @@ def create_app(
             current_version=current_version,
             latest_run=latest_run,
             analysis=analysis,
+            poster=poster,
             archived_at=manifest.archived_at,
             archived_reason=manifest.archived_reason,
         )
@@ -1000,7 +1013,7 @@ def create_app(
             manifests = [
                 manifest
                 for manifest in manifests
-                if manifest.kind not in ("render_output", "render_poster")
+                if manifest.kind not in ("render_output", "render_poster", "source_poster")
             ]
         if not include_archived:
             manifests = [manifest for manifest in manifests if manifest.archived_at is None]

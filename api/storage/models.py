@@ -12,6 +12,7 @@ ArtifactKind = Literal[
     "timeline",
     "render_output",
     "render_poster",
+    "source_poster",
 ]
 RunStatus = Literal["created", "running", "blocked", "failed", "completed", "canceled"]
 StepStatus = Literal["pending", "running", "completed", "failed"]

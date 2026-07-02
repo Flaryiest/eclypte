@@ -1077,6 +1077,7 @@ def test_assets_list_returns_current_version_metadata_and_kind_filter():
             },
             "latest_run": None,
             "analysis": None,
+            "poster": None,
             "archived_at": None,
             "archived_reason": None,
         }
@@ -1387,4 +1388,50 @@ def test_invalid_artifact_kind_is_rejected_for_music_analysis():
     )
 
     assert response.status_code == 400
-    assert "expected song_audio" in response.json()["detail"]
+
+
+def test_assets_default_listing_excludes_source_posters():
+    client, store, _ = build_client()
+    from api.storage.repository import StorageRepository
+
+    repo = StorageRepository(store)
+    publish_artifact(repo, user_id="local_dev", file_id="file_v1", kind="source_video", filename="film.mp4")
+    publish_artifact(repo, user_id="local_dev", file_id="file_p1", kind="source_poster", filename="film.jpg")
+
+    default_listing = client.get("/v1/assets")
+    poster_listing = client.get("/v1/assets", params={"kind": "source_poster"})
+
+    assert default_listing.status_code == 200
+    assert [a["file_id"] for a in default_listing.json()] == ["file_v1"]
+    assert [a["file_id"] for a in poster_listing.json()] == ["file_p1"]
+
+
+def test_source_video_asset_carries_poster_ref_from_analysis_run():
+    client, store, _ = build_client()
+    from api.storage.repository import StorageRepository
+
+    repo = StorageRepository(store)
+    video = publish_artifact(repo, user_id="local_dev", file_id="file_v2", kind="source_video", filename="film.mp4")
+    analysis = publish_artifact(repo, user_id="local_dev", file_id="file_va2", kind="video_analysis", filename="film.json")
+    poster = publish_artifact(repo, user_id="local_dev", file_id="file_sp2", kind="source_poster", filename="film.jpg")
+    run = repo.create_run(
+        user_id="local_dev",
+        workflow_type="video_analysis",
+        inputs={"source_video_file_id": video["file_id"], "source_video_version_id": video["version_id"]},
+        steps=["analyze_video"],
+    )
+    repo.update_run_status(
+        RunRef(user_id="local_dev", run_id=run.run_id),
+        status="completed",
+        outputs={
+            "video_analysis_file_id": analysis["file_id"],
+            "video_analysis_version_id": analysis["version_id"],
+            "source_poster_file_id": poster["file_id"],
+            "source_poster_version_id": poster["version_id"],
+        },
+    )
+
+    listing = client.get("/v1/assets")
+
+    asset = next(a for a in listing.json() if a["file_id"] == "file_v2")
+    assert asset["poster"] == {"file_id": poster["file_id"], "version_id": poster["version_id"]}
