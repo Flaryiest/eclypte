@@ -805,6 +805,8 @@ class DefaultWorkflowRunner:
             if progress_context is not None:
                 args.append(progress_context)
             result = analyze.remote(*args)
+            poster_b64 = result.pop("poster_jpeg_b64", None)
+            result.pop("poster_ts_sec", None)
             file_ref = FileRef(user_id=user_id, file_id=f"file_video_analysis_{run_id}")
             repo.create_file_manifest(
                 file_ref=file_ref,
@@ -821,13 +823,40 @@ class DefaultWorkflowRunner:
                 input_file_version_ids=[source_ref.version_id],
                 derived_from_run_id=run_id,
             )
+            outputs = {
+                "video_analysis_file_id": file_ref.file_id,
+                "video_analysis_version_id": version.version_id,
+            }
+            if poster_b64:
+                try:
+                    import base64
+
+                    poster_ref = FileRef(user_id=user_id, file_id=f"file_source_poster_{run_id}")
+                    repo.create_file_manifest(
+                        file_ref=poster_ref,
+                        kind="source_poster",
+                        display_name=f"{source_meta.original_filename}.jpg",
+                        source_run_id=run_id,
+                    )
+                    poster_version = repo.publish_bytes(
+                        file_ref=poster_ref,
+                        body=base64.b64decode(poster_b64),
+                        content_type="image/jpeg",
+                        original_filename=f"{source_meta.original_filename}.jpg",
+                        created_by_step="analyze_video",
+                        derived_from_step="analyze_video",
+                        input_file_version_ids=[source_ref.version_id],
+                        derived_from_run_id=run_id,
+                    )
+                    outputs["source_poster_file_id"] = poster_ref.file_id
+                    outputs["source_poster_version_id"] = poster_version.version_id
+                except Exception:
+                    # Poster is decorative; the analysis run must not fail for it.
+                    pass
             repo.update_run_status(
                 RunRef(user_id=user_id, run_id=run_id),
                 status="completed",
-                outputs={
-                    "video_analysis_file_id": file_ref.file_id,
-                    "video_analysis_version_id": version.version_id,
-                },
+                outputs=outputs,
             )
         except Exception as exc:
             self._mark_failed(repo, user_id, run_id, exc)

@@ -1,5 +1,7 @@
+import base64
 import json
 import sys
+import types
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -720,3 +722,66 @@ def test_edit_pipeline_fails_parent_when_child_run_fails(monkeypatch):
     assert failed.current_step == "music"
     assert failed.last_error == "music exploded"
     assert "timeline_file_id" not in failed.outputs
+
+
+def test_run_video_analysis_publishes_source_poster(monkeypatch):
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setattr(runner, "_r2_config_payload", lambda: {"bucket": "b"})
+
+    source_ref = FileRef(user_id="user_123", file_id="file_video")
+    repo.create_file_manifest(file_ref=source_ref, kind="source_video", display_name="film.mp4")
+    source_version = repo.publish_bytes(
+        file_ref=source_ref,
+        body=b"video-bytes",
+        content_type="video/mp4",
+        original_filename="film.mp4",
+        created_by_step="test",
+        derived_from_step="test",
+        input_file_version_ids=[],
+    )
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="video_analysis",
+        inputs={"source_video_file_id": "file_video", "source_video_version_id": source_version.version_id},
+        steps=["analyze_video"],
+    )
+
+    poster_b64 = base64.b64encode(b"jpeg-bytes").decode("ascii")
+    payload = {
+        "schema_version": 1,
+        "source": {"duration_sec": 100.0},
+        "scenes": [],
+        "poster_jpeg_b64": poster_b64,
+        "poster_ts_sec": 20.0,
+    }
+
+    class _FakeRemote:
+        def remote(self, *args):
+            return dict(payload)
+
+    fake_modal = types.SimpleNamespace(
+        Function=types.SimpleNamespace(from_name=lambda app, fn: _FakeRemote())
+    )
+    monkeypatch.setitem(sys.modules, "modal", fake_modal)
+
+    runner.run_video_analysis(
+        user_id="user_123",
+        run_id=run.run_id,
+        source_video={"file_id": "file_video", "version_id": source_version.version_id},
+    )
+
+    completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=run.run_id))
+    assert completed.status == "completed", completed.last_error
+    assert completed.outputs["source_poster_file_id"] == f"file_source_poster_{run.run_id}"
+    assert completed.outputs["source_poster_version_id"].startswith("ver_")
+    # The published analysis JSON must NOT contain the transport-only poster keys.
+    analysis_key = [
+        k
+        for k in store.objects
+        if completed.outputs["video_analysis_version_id"] in k and k.endswith("blob")
+    ]
+    stored = json.loads(store.get_bytes(analysis_key[0]).decode("utf-8"))
+    assert "poster_jpeg_b64" not in stored and "poster_ts_sec" not in stored
