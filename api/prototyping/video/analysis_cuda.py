@@ -8,6 +8,7 @@ from scenes import detect_scenes
 from motion import build_motion_dict, flow_stats, to_gray_small
 from impact import impacts_per_scene
 from credits import detect_content_end
+from poster import PosterPicker, POSTER_SAMPLE_EVERY_SEC
 
 SCHEMA_VERSION = 1
 
@@ -33,6 +34,10 @@ def analyze_cuda(video_path, out_path=None, progress_callback=None):
     )
     scene_accs = [_SceneAccumulator() for _ in scenes]
 
+    poster_picker = PosterPicker(src_meta["duration_sec"])
+    poster_frame = None
+    poster_sample_every = max(1, int(fps_hz * POSTER_SAMPLE_EVERY_SEC))
+
     cap = cv2.VideoCapture(str(video_path))
     prev_gpu = None
     prev_gray = None
@@ -54,6 +59,10 @@ def analyze_cuda(video_path, out_path=None, progress_callback=None):
                 break
 
             gray = to_gray_small(frame)
+            if fi % poster_sample_every == 0 and poster_picker.consider(
+                ts, brightness=float(gray.mean()), detail=float(gray.std())
+            ):
+                poster_frame = frame.copy()
             gpu = cv2.cuda_GpuMat()
             gpu.upload(gray)
 
@@ -78,6 +87,21 @@ def analyze_cuda(video_path, out_path=None, progress_callback=None):
                 )
     finally:
         cap.release()
+
+    poster_payload = {}
+    if poster_frame is not None:
+        import base64
+
+        height, width = poster_frame.shape[:2]
+        if width > 854:
+            scale = 854 / width
+            poster_frame = cv2.resize(poster_frame, (854, max(1, int(height * scale))))
+        ok, jpeg = cv2.imencode(".jpg", poster_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+        if ok:
+            poster_payload = {
+                "poster_jpeg_b64": base64.b64encode(jpeg.tobytes()).decode("ascii"),
+                "poster_ts_sec": round(float(poster_picker.best_ts_sec or 0.0), 3),
+            }
 
     scene_dicts = []
     for i, (start_sec, end_sec) in enumerate(scenes):
@@ -105,6 +129,7 @@ def analyze_cuda(video_path, out_path=None, progress_callback=None):
         "source": src_meta,
         "scenes": scene_dicts,
         "credits": credits,
+        **poster_payload,
     }
     if out_path:
         Path(out_path).write_text(json.dumps(result, indent=2))

@@ -30,7 +30,7 @@ image = (
         "rm -rf /opt/opencv /opt/opencv_contrib",
     )
     .pip_install("scenedetect")
-    .add_local_python_source("analysis_cuda", "scenes", "motion", "impact")
+    .add_local_python_source("analysis_cuda", "scenes", "motion", "impact", "credits", "poster")
 )
 
 app = modal.App("eclypte-video")
