@@ -43,6 +43,8 @@ export default function HomePage() {
     const [reviewPostId, setReviewPostId] = useState<string | null>(null)
     const [composerOpen, setComposerOpen] = useState(false)
     const [isTicking, setIsTicking] = useState(false)
+    const [isSavingSettings, setIsSavingSettings] = useState(false)
+    const [removingItemId, setRemovingItemId] = useState<string | null>(null)
     const pollableIdsRef = useRef<string[]>([])
 
     const api = useMemo(() => (user?.id ? new EclypteApiClient({ userId: user.id }) : null), [user?.id])
@@ -93,15 +95,20 @@ export default function HomePage() {
     // --- Poster refs: publishing posts carry the MP4 ref; the poster ref lives on the
     // post's source run outputs (render_poster_*). Fetched once per post, cached here.
     const [postPosterRefs, setPostPosterRefs] = useState<Record<string, FileVersionInput | null>>({})
+    const postPosterInFlightRef = useRef<Set<string>>(new Set())
     useEffect(() => {
         if (!api) {
             return
         }
         let cancelled = false
         const wanted = [...readyPosts, ...postedPosts].filter(
-            (post) => post.source_run_id && postPosterRefs[post.post_id] === undefined,
+            (post) =>
+                post.source_run_id
+                && postPosterRefs[post.post_id] === undefined
+                && !postPosterInFlightRef.current.has(post.post_id),
         )
         for (const post of wanted) {
+            postPosterInFlightRef.current.add(post.post_id)
             void api
                 .getRun(post.source_run_id as string)
                 .then((run) => {
@@ -119,6 +126,9 @@ export default function HomePage() {
                     if (!cancelled) {
                         setPostPosterRefs((current) => ({ ...current, [post.post_id]: null }))
                     }
+                })
+                .finally(() => {
+                    postPosterInFlightRef.current.delete(post.post_id)
                 })
         }
         return () => {
@@ -196,10 +206,13 @@ export default function HomePage() {
             return
         }
         setError(null)
+        setIsSavingSettings(true)
         try {
             setAutopilot(await api.updateAutopilot(input))
         } catch (caught) {
             toast(errorMessage(caught), "err")
+        } finally {
+            setIsSavingSettings(false)
         }
     }
 
@@ -223,10 +236,13 @@ export default function HomePage() {
         if (!api) {
             return
         }
+        setRemovingItemId(itemId)
         try {
             setAutopilot(await api.removeAutopilotItem(itemId))
         } catch (caught) {
             toast(errorMessage(caught), "err")
+        } finally {
+            setRemovingItemId(null)
         }
     }
 
@@ -271,6 +287,7 @@ export default function HomePage() {
                         ariaLabel="Daily goal"
                         value={String(target)}
                         onChange={(next) => updateSettings({ dailyTarget: Number(next) })}
+                        disabled={isSavingSettings}
                         options={Array.from({ length: 10 }, (_, index) => ({
                             value: String(index + 1),
                             label: `${index + 1} per day`,
@@ -283,12 +300,14 @@ export default function HomePage() {
                         aria-checked={Boolean(autopilot?.enabled)}
                         aria-label={autopilot?.enabled ? "Pause autopilot" : "Turn autopilot on"}
                         onClick={() => updateSettings({ enabled: !autopilot?.enabled })}
+                        disabled={isSavingSettings}
                     />
                     {!autopilot?.loop_configured && (
                         <button className={styles.ghostButton} type="button" onClick={runTick} disabled={isTicking}>
                             {isTicking ? <Spinner /> : <Zap size={15} />} Run now
                         </button>
                     )}
+                    {isSavingSettings && <Spinner />}
                 </span>
             </div>
 
@@ -299,8 +318,9 @@ export default function HomePage() {
                         className={`${styles.secondaryButton} ${styles.haltClearButton}`}
                         type="button"
                         onClick={() => updateSettings({ clearHalt: true })}
+                        disabled={isSavingSettings}
                     >
-                        <Play size={15} /> Resume
+                        {isSavingSettings ? <Spinner /> : <Play size={15} />} Resume
                     </button>
                 </div>
             )}
@@ -326,6 +346,7 @@ export default function HomePage() {
                             return (
                                 <div key={post.post_id} className={styles.reviewCard}>
                                     {url ? (
+                                        // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL, next/image can't optimize
                                         <img className={styles.posterThumb} src={url} alt="" />
                                     ) : (
                                         <span className={`${styles.posterThumb} ${styles.posterThumbPlaceholder}`} aria-hidden>▶</span>
@@ -389,6 +410,7 @@ export default function HomePage() {
                             return (
                                 <div key={item.item_id} className={styles.queueRow}>
                                     {url ? (
+                                        // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL, next/image can't optimize
                                         <img className={styles.queueThumb} src={url} alt="" />
                                     ) : (
                                         <span className={styles.queueThumb} aria-hidden />
@@ -396,8 +418,13 @@ export default function HomePage() {
                                     <span className={styles.truncate}>{itemTitle(item, assetById)}</span>
                                     <span style={{ marginLeft: "auto", display: "inline-flex", gap: "0.6rem", alignItems: "center" }}>
                                         {item.status === "failed" && <span className={styles.smallText} style={{ margin: 0, color: "var(--danger)" }}>didn&apos;t work</span>}
-                                        <button className={styles.ghostButton} type="button" onClick={() => removeItem(item.item_id)}>
-                                            Remove
+                                        <button
+                                            className={styles.ghostButton}
+                                            type="button"
+                                            onClick={() => removeItem(item.item_id)}
+                                            disabled={removingItemId === item.item_id}
+                                        >
+                                            {removingItemId === item.item_id ? <Spinner /> : null} Remove
                                         </button>
                                     </span>
                                 </div>
@@ -426,6 +453,7 @@ export default function HomePage() {
                             return (
                                 <button key={post.post_id} type="button" className={styles.postedCard} onClick={() => setReviewPostId(post.post_id)}>
                                     {url ? (
+                                        // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL, next/image can't optimize
                                         <img className={styles.postedThumb} src={url} alt={postTitle(post)} />
                                     ) : (
                                         <span className={styles.postedThumb} aria-hidden />
@@ -520,14 +548,14 @@ function EditingRow({ title, job, item }: { title: string; job: EditJobStatus; i
     const now = useNow(isActive)
     const etaSec = useRenderEta(job, isActive, now)
     const stage = job.stages.find((candidate) => candidate.status === "running") ?? null
-    const window =
+    const trimWindow =
         item.audio_start_sec !== null && item.audio_end_sec !== null
             ? ` · cutting ${formatClock(item.audio_start_sec)}–${formatClock(item.audio_end_sec)}`
             : ""
     const eta = etaSec !== null ? ` · about ${Math.max(1, Math.round(etaSec))}s left` : ""
     return (
         <ProgressRow
-            title={`${title}${window}`}
+            title={`${title}${trimWindow}`}
             stageText={`${humanizeStageDetail(stage?.detail, stage?.id ?? job.status)} · ${job.progress_percent}%${eta}`}
             percent={job.progress_percent}
         />
@@ -588,7 +616,11 @@ function ReviewSheet({
                     setVideoUrl(download.download_url)
                 }
             })
-            .catch((caught) => onError(errorMessage(caught)))
+            .catch((caught) => {
+                if (!ignore) {
+                    onError(errorMessage(caught))
+                }
+            })
         return () => {
             ignore = true
         }
@@ -717,6 +749,7 @@ function ReviewSheet({
             ) : (
                 <button type="button" className={styles.posterButton} style={{ width: 160 }} onClick={() => setPlaying(true)} disabled={!videoUrl}>
                     {posterUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL, next/image can't optimize
                         <img className={styles.posterThumb} style={{ width: 160 }} src={posterUrl} alt="" />
                     ) : (
                         <span className={`${styles.posterThumb} ${styles.posterThumbPlaceholder}`} style={{ width: 160 }} aria-hidden />
@@ -859,7 +892,12 @@ function ComposerSheet({
                                 style={selected ? { borderColor: "var(--text-primary)", boxShadow: "inset 0 0 0 1px var(--text-primary)" } : undefined}
                                 onClick={() => setVideoId(asset.file_id)}
                             >
-                                {url ? <img className={styles.mediaThumb} src={url} alt="" /> : <span className={styles.mediaThumb} aria-hidden />}
+                                {url ? (
+                                    // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL, next/image can't optimize
+                                    <img className={styles.mediaThumb} src={url} alt="" />
+                                ) : (
+                                    <span className={styles.mediaThumb} aria-hidden />
+                                )}
                                 <span className={styles.mediaCardBody}>
                                     <span className={styles.mediaTitle}>{stripExtension(asset.display_name)}</span>
                                 </span>
