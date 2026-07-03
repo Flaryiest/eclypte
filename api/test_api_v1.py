@@ -1078,6 +1078,7 @@ def test_assets_list_returns_current_version_metadata_and_kind_filter():
             "latest_run": None,
             "analysis": None,
             "poster": None,
+            "poster_url": None,
             "archived_at": None,
             "archived_reason": None,
         }
@@ -1436,3 +1437,10 @@ def test_source_video_asset_carries_poster_ref_from_analysis_run():
 
     asset = next(a for a in listing.json() if a["file_id"] == "file_v2")
     assert asset["poster"] == {"file_id": poster["file_id"], "version_id": poster["version_id"]}
+    # The listing also carries a ready-to-use signed URL for the poster blob,
+    # built from the deterministic version key — no extra client round trips.
+    assert asset["poster_url"].startswith("memory://get/")
+    assert (
+        f"users/local_dev/files/{poster['file_id']}/versions/{poster['version_id']}/blob"
+        in asset["poster_url"]
+    )

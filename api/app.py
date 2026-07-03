@@ -56,6 +56,7 @@ from api.storage.models import (
     SynthesisPromptState,
     SynthesisReferenceRecord,
 )
+from api.storage.keys import file_version_blob_key
 from api.storage.r2_client import ObjectStore
 from api.storage.refs import FileRef, FileVersionRef, RunRef
 from api.storage.repository import StorageRepository
@@ -69,7 +70,9 @@ DEFAULT_CORS_ORIGINS = (
     "http://127.0.0.1:3000",
 )
 UPLOAD_URL_EXPIRES_IN = 900
-DOWNLOAD_URL_EXPIRES_IN = 900
+# One hour: list responses embed signed poster/render URLs, and the client
+# reuses each URL string for its lifetime so the browser image cache stays hot.
+DOWNLOAD_URL_EXPIRES_IN = 3600
 EDIT_STAGE_LABELS = {
     "assets": "Asset prep",
     "music": "Music analysis",
@@ -264,6 +267,7 @@ class AssetSummary(BaseModel):
     latest_run: RunManifest | None
     analysis: FileVersionInput | None
     poster: FileVersionInput | None
+    poster_url: str | None
     archived_at: str | None
     archived_reason: str | None
 
@@ -656,6 +660,7 @@ def create_app(
         runs: list[RunManifest],
         uid: str,
         version_metas: dict[str, FileVersionMeta] | None = None,
+        store: ObjectStore | None = None,
     ) -> AssetSummary:
         # `version_metas` lets list endpoints prefetch every current-version meta in
         # one parallel batch; single-asset callers omit it and read the one meta.
@@ -692,6 +697,15 @@ def create_app(
                 latest_run.outputs.get("render_poster_file_id"),
                 latest_run.outputs.get("render_poster_version_id"),
             )
+        # Ready-to-use signed URL for the poster blob. Version blob keys are
+        # deterministic (storage_key == file_version_blob_key), so this is a pure
+        # local presign — no meta fetch, no extra round trip.
+        poster_url = None
+        if poster is not None and store is not None:
+            poster_url = store.presigned_get_url(
+                file_version_blob_key(user_id=uid, file_id=poster.file_id, version_id=poster.version_id),
+                expires_in=DOWNLOAD_URL_EXPIRES_IN,
+            )
         return AssetSummary(
             file_id=manifest.file_id,
             kind=manifest.kind,
@@ -705,6 +719,7 @@ def create_app(
             latest_run=latest_run,
             analysis=analysis,
             poster=poster,
+            poster_url=poster_url,
             archived_at=manifest.archived_at,
             archived_reason=manifest.archived_reason,
         )
@@ -1004,6 +1019,7 @@ def create_app(
         kind: ArtifactKind | None = None,
         include_archived: bool = False,
         repo: StorageRepository = Depends(repository),
+        resolved_store: ObjectStore = Depends(resolve_store),
         uid: str = Depends(user_id),
     ) -> list[AssetSummary]:
         manifests = repo.list_file_manifests(uid)
@@ -1021,7 +1037,7 @@ def create_app(
         runs = repo.list_run_manifests(uid)
         version_metas = repo.load_current_version_metas(manifests, uid)
         return [
-            summarize_asset(repo, manifest, runs, uid, version_metas)
+            summarize_asset(repo, manifest, runs, uid, version_metas, store=resolved_store)
             for manifest in manifests
         ]
 
@@ -1058,6 +1074,7 @@ def create_app(
     def restore_asset(
         file_id: str,
         repo: StorageRepository = Depends(repository),
+        resolved_store: ObjectStore = Depends(resolve_store),
         uid: str = Depends(user_id),
     ) -> AssetSummary:
         file_ref = FileRef(user_id=uid, file_id=file_id)
@@ -1066,7 +1083,7 @@ def create_app(
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="asset not found") from exc
         runs = repo.list_run_manifests(uid)
-        return summarize_asset(repo, manifest, runs, uid)
+        return summarize_asset(repo, manifest, runs, uid, store=resolved_store)
 
     @app.get("/v1/files/{file_id}/versions/{version_id}", response_model=FileVersionMeta)
     def get_file_version(
