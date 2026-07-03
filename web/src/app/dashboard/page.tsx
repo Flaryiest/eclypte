@@ -6,9 +6,13 @@ import Link from "next/link"
 import { Play, Plus, RefreshCw, Zap } from "lucide-react"
 import {
     DashboardPage,
+    PostedStripSkeleton,
     ProgressRow,
+    QueueRowsSkeleton,
+    ReviewCardsSkeleton,
     Select,
     Sheet,
+    Skeleton,
     SkeletonList,
     Spinner,
     errorMessage,
@@ -223,6 +227,10 @@ export default function HomePage() {
             }
         >
             <div className={styles.statusLine}>
+                {autopilotResource.isLoading ? (
+                    <Skeleton className={styles.skeletonLineShort} />
+                ) : (
+                    <>
                 <span className={autopilot?.enabled ? styles.statusOnDot : styles.statusOffDot} aria-hidden />
                 {autopilot?.enabled
                     ? `Autopilot is on · ${madeToday} of ${target} reels made today`
@@ -256,6 +264,8 @@ export default function HomePage() {
                     )}
                     {isSavingSettings && <Spinner />}
                 </span>
+                    </>
+                )}
             </div>
 
             {autopilot?.halted_reason && (
@@ -279,9 +289,13 @@ export default function HomePage() {
             <section className={styles.feedSection}>
                 <div className={styles.feedSectionHead}>
                     <h2 className={styles.feedSectionTitle}>Ready for you</h2>
-                    <span className={styles.feedSectionCount}>{readyPosts.length}</span>
+                    <span className={styles.feedSectionCount}>
+                        {postsResource.isLoading ? "…" : readyPosts.length}
+                    </span>
                 </div>
-                {readyPosts.length === 0 ? (
+                {postsResource.isLoading ? (
+                    <ReviewCardsSkeleton />
+                ) : readyPosts.length === 0 ? (
                     <p className={styles.smallText}>
                         Nothing to review right now — new reels land here when they&apos;re done.
                     </p>
@@ -343,9 +357,13 @@ export default function HomePage() {
             <section className={styles.feedSection}>
                 <div className={styles.feedSectionHead}>
                     <h2 className={styles.feedSectionTitle}>Up next</h2>
-                    <span className={styles.feedSectionCount}>{pendingItems.length + failedItems.length}</span>
+                    <span className={styles.feedSectionCount}>
+                        {autopilotResource.isLoading ? "…" : pendingItems.length + failedItems.length}
+                    </span>
                 </div>
-                {pendingItems.length === 0 && failedItems.length === 0 ? (
+                {autopilotResource.isLoading ? (
+                    <QueueRowsSkeleton />
+                ) : pendingItems.length === 0 && failedItems.length === 0 ? (
                     <p className={styles.smallText}>The queue is empty — add a film and a song with “New reel”.</p>
                 ) : (
                     <div>
@@ -388,7 +406,9 @@ export default function HomePage() {
                         See all
                     </Link>
                 </div>
-                {postedPosts.length === 0 ? (
+                {postsResource.isLoading ? (
+                    <PostedStripSkeleton />
+                ) : postedPosts.length === 0 ? (
                     <p className={styles.smallText}>Reels you approve show up here once they&apos;re queued or live.</p>
                 ) : (
                     <div className={styles.postedStrip}>

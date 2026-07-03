@@ -73,6 +73,79 @@ export function SkeletonList({ count = 3 }: { count?: number }) {
     )
 }
 
+// Geometry-matched loading placeholders: while a resource is loading, sections
+// shimmer in the shape of the content they become — never resolved-empty text.
+
+export function MediaGridSkeleton({ tall = false, count = 8 }: { tall?: boolean; count?: number }) {
+    return (
+        <div
+            className={`${styles.mediaGrid} ${tall ? styles.mediaGridTall : ""}`}
+            role="status"
+            aria-label="Loading"
+        >
+            {Array.from({ length: count }, (_, index) => (
+                <div key={index}>
+                    <span className={`${styles.skeletonThumb} ${tall ? styles.skeletonThumbTall : ""}`} aria-hidden />
+                    <Skeleton className={styles.skeletonTitle} />
+                </div>
+            ))}
+        </div>
+    )
+}
+
+export function ReviewCardsSkeleton({ count = 2 }: { count?: number }) {
+    return (
+        <div className={styles.reviewCardGrid} role="status" aria-label="Loading">
+            {Array.from({ length: count }, (_, index) => (
+                <div key={index} className={styles.reviewCard}>
+                    <span
+                        className={`${styles.skeletonThumb} ${styles.skeletonThumbTall}`}
+                        style={{ width: 64, flex: "none", borderRadius: 8 }}
+                        aria-hidden
+                    />
+                    <div className={styles.reviewCardBody}>
+                        <Skeleton className={styles.skeletonTitle} />
+                        <Skeleton className={styles.skeletonLine} />
+                        <Skeleton className={styles.skeletonLineShort} />
+                    </div>
+                </div>
+            ))}
+        </div>
+    )
+}
+
+export function PostedStripSkeleton({ count = 5 }: { count?: number }) {
+    return (
+        <div className={styles.postedStrip} role="status" aria-label="Loading">
+            {Array.from({ length: count }, (_, index) => (
+                <span
+                    key={index}
+                    className={`${styles.skeletonThumb} ${styles.skeletonThumbTall}`}
+                    style={{ width: 76, flex: "none", borderRadius: 8 }}
+                    aria-hidden
+                />
+            ))}
+        </div>
+    )
+}
+
+export function QueueRowsSkeleton({ count = 2 }: { count?: number }) {
+    return (
+        <div role="status" aria-label="Loading">
+            {Array.from({ length: count }, (_, index) => (
+                <div key={index} className={styles.queueRow}>
+                    <span
+                        className={styles.skeletonThumb}
+                        style={{ width: 32, height: 32, aspectRatio: "auto", borderRadius: 7, flex: "none" }}
+                        aria-hidden
+                    />
+                    <Skeleton className={styles.skeletonLineShort} />
+                </div>
+            ))}
+        </div>
+    )
+}
+
 export function formatBytes(bytes: number | null | undefined) {
     if (bytes === null || bytes === undefined) {
         return "—"

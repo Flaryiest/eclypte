@@ -8,6 +8,7 @@ import {
     DashboardPage,
     Pager,
     Sheet,
+    MediaGridSkeleton,
     SkeletonList,
     Spinner,
     errorMessage,
@@ -86,6 +87,9 @@ function LibraryPage() {
     const hidden = assets.filter((a) => Boolean(a.archived_at))
     const tabItems: AssetSummary[] = tab === "films" ? films : tab === "songs" ? songs : tab === "reels" ? reels : hidden
     const pager = usePagination(tabItems, tab === "songs" ? 10 : 12, tab)
+    // First-load gate: show geometry-matched skeletons instead of flashing the
+    // tab's resolved-empty copy while its resource is still fetching.
+    const tabLoading = tab === "reels" ? reelsResource.isLoading : assetsResource.isLoading
 
     const setTab = (next: LibraryTab) => {
         setSelectedId(null)
@@ -384,7 +388,13 @@ function LibraryPage() {
                 </div>
             )}
 
-            {tabItems.length === 0 && uploads.length === 0 && imports.length === 0 ? (
+            {tabLoading && tabItems.length === 0 ? (
+                tab === "songs" ? (
+                    <SkeletonList count={4} />
+                ) : (
+                    <MediaGridSkeleton tall={tab === "reels"} count={8} />
+                )
+            ) : tabItems.length === 0 && uploads.length === 0 && imports.length === 0 ? (
                 <div className={styles.emptyState}>
                     <p className={styles.emptyStateTitle}>{emptyTitle(tab)}</p>
                     <p className={styles.emptyStateHint}>{emptyHint(tab)}</p>

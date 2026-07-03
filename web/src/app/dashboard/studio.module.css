@@ -619,6 +619,20 @@
 .skeletonLine { width: 90%; }
 .skeletonLineShort { width: 60%; }
 
+/* Thumb-shaped shimmer tiles so loading sections match the geometry of the
+   content they become — no empty-text flash, no layout jump on arrival. */
+.skeletonThumb {
+	display: block;
+	width: 100%;
+	aspect-ratio: 16 / 9;
+	border-radius: var(--radius-card);
+	background: linear-gradient(90deg, var(--surface-sunk) 0%, #EDE8DE 50%, var(--surface-sunk) 100%);
+	background-size: 200% 100%;
+	animation: skeletonShimmer 1.4s ease-in-out infinite;
+}
+
+.skeletonThumbTall { aspect-ratio: 9 / 16; }
+
 @keyframes skeletonShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
 /* --- Empty states: friendly sentence + action, never italic. --- */
@@ -1020,7 +1034,7 @@
 @media (prefers-reduced-motion: reduce) {
 	.progressFill { transition: none; }
 	.disclosureCaret, .selectChevron { transition: none; }
-	.skeleton, .spinner { animation: none; }
+	.skeleton, .skeletonThumb, .spinner { animation: none; }
 }
 
 /* --- Text-overflow utilities --- */
