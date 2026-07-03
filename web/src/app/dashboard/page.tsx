@@ -680,27 +680,43 @@ function ReviewSheet({
         >
             {videoError ? (
                 <p className={styles.smallText} style={{ margin: 0 }}>{videoError}</p>
-            ) : playing && videoUrl ? (
-                <video
-                    className={styles.previewMedia}
-                    controls
-                    autoPlay
-                    src={videoUrl}
-                    style={{ maxWidth: 260 }}
-                    onError={(event) => {
-                        const mediaError = event.currentTarget.error
-                        setVideoError(`Playback failed${mediaError ? ` (media error ${mediaError.code})` : ""}.`)
-                    }}
-                />
             ) : (
-                <button type="button" className={styles.posterButton} style={{ width: 160 }} onClick={() => setPlaying(true)} disabled={!videoUrl}>
-                    {posterUrl ? (
-                        <FadeImg className={styles.posterThumb} style={{ width: 160 }} src={posterUrl} alt="" />
+                // One constant footprint: the poster and the player share this frame,
+                // so pressing play never resizes the sheet.
+                <div className={`${styles.mediaFrame} ${styles.mediaFrameTall}`}>
+                    {playing && videoUrl ? (
+                        <video
+                            className={styles.mediaFrameFill}
+                            controls
+                            autoPlay
+                            src={videoUrl}
+                            onError={(event) => {
+                                const mediaError = event.currentTarget.error
+                                setVideoError(`Playback failed${mediaError ? ` (media error ${mediaError.code})` : ""}.`)
+                            }}
+                        />
                     ) : (
-                        <span className={`${styles.posterThumb} ${styles.posterThumbPlaceholder}`} style={{ width: 160 }} aria-hidden />
+                        <>
+                            {posterUrl && (
+                                <FadeImg
+                                    className={styles.mediaFrameFill}
+                                    style={{ objectFit: "cover" }}
+                                    src={posterUrl}
+                                    alt=""
+                                />
+                            )}
+                            <button
+                                type="button"
+                                className={styles.posterPlayIcon}
+                                onClick={() => setPlaying(true)}
+                                disabled={!videoUrl}
+                                aria-label="Play preview"
+                            >
+                                {videoUrl ? "▶" : <Spinner onInk />}
+                            </button>
+                        </>
                     )}
-                    <span className={styles.posterPlayIcon}>{videoUrl ? "▶" : <Spinner />}</span>
-                </button>
+                </div>
             )}
             {canSend ? (
                 <>

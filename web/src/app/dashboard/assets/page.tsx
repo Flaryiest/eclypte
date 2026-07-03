@@ -681,33 +681,42 @@ function AssetSheet({
         >
             {previewError ? (
                 <p className={styles.smallText} style={{ margin: 0 }}>{previewError}</p>
-            ) : isVideo && previewUrl ? (
-                <video
-                    className={`${styles.previewMedia} ${isReel ? styles.previewMediaTall : ""}`}
-                    controls
-                    preload="metadata"
-                    poster={posterUrl}
-                    src={previewUrl}
-                    onError={(event) => {
-                        const mediaError = event.currentTarget.error
-                        setPreviewError(
-                            `Playback failed${mediaError ? ` (media error ${mediaError.code})` : ""} — Download still works.`,
-                        )
-                    }}
-                />
+            ) : isVideo ? (
+                // One constant footprint: the loading poster and the player share
+                // this frame, so nothing resizes when playback becomes available.
+                <div className={`${styles.mediaFrame} ${isReel ? styles.mediaFrameTall : ""}`}>
+                    {previewUrl ? (
+                        <video
+                            className={styles.mediaFrameFill}
+                            controls
+                            preload="metadata"
+                            poster={posterUrl}
+                            src={previewUrl}
+                            onError={(event) => {
+                                const mediaError = event.currentTarget.error
+                                setPreviewError(
+                                    `Playback failed${mediaError ? ` (media error ${mediaError.code})` : ""} — Download still works.`,
+                                )
+                            }}
+                        />
+                    ) : (
+                        <>
+                            {posterUrl && (
+                                <FadeImg
+                                    className={styles.mediaFrameFill}
+                                    style={{ objectFit: "cover" }}
+                                    src={posterUrl}
+                                    alt=""
+                                />
+                            )}
+                            <span className={styles.posterPlayIcon}>
+                                <Spinner onInk />
+                            </span>
+                        </>
+                    )}
+                </div>
             ) : isAudio && previewUrl ? (
                 <audio className={styles.previewMedia} controls src={previewUrl} />
-            ) : isVideo ? (
-                <span className={styles.mediaThumbFrame} style={isReel ? { maxWidth: 240, alignSelf: "center" } : undefined}>
-                    {posterUrl ? (
-                        <FadeImg className={`${styles.mediaThumb} ${isReel ? styles.mediaThumbTall : ""}`} src={posterUrl} alt="" />
-                    ) : (
-                        <span className={`${styles.mediaThumb} ${isReel ? styles.mediaThumbTall : ""}`} aria-hidden />
-                    )}
-                    <span className={styles.posterPlayIcon}>
-                        <Spinner onInk />
-                    </span>
-                </span>
             ) : (
                 <p className={styles.smallText} style={{ margin: 0 }}>
                     <Spinner /> Getting ready to play…
