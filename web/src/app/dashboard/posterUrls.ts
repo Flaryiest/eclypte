@@ -1,57 +1,48 @@
-import { useEffect, useRef, useState } from "react"
-import type { EclypteApiClient, FileVersionInput } from "@/services/eclypteApi"
+import type { AssetSummary, FileVersionInput, PublishingPost } from "@/services/eclypteApi"
 
 export function posterKey(ref: FileVersionInput) {
     return `${ref.file_id}:${ref.version_id}`
 }
 
-// Resolves signed URLs for poster refs, once per ref. Signed URLs are never
-// cached across sessions (they expire); within the page a fetched URL is kept
-// for the component's lifetime, which is comfortably inside the expiry window.
-// Keys are content-addressed (file id + version id), so a result that arrives
-// after the input list has already changed is still correct — results are
-// always applied. (An earlier cancelled-flag design discarded in-flight results
-// whenever the ref list grew, which silently dropped most thumbnails.)
-export function usePosterUrls(
-    api: EclypteApiClient | null,
-    refs: (FileVersionInput | null | undefined)[],
-): Record<string, string> {
-    const [urls, setUrls] = useState<Record<string, string>>({})
-    const inFlightRef = useRef<Set<string>>(new Set())
-    const resolvedRef = useRef<Set<string>>(new Set())
-    const mountedRef = useRef(true)
-    useEffect(() => {
-        mountedRef.current = true
-        return () => {
-            mountedRef.current = false
-        }
-    }, [])
-    const wanted = refs.filter((ref): ref is FileVersionInput => Boolean(ref)).map(posterKey).sort().join("|")
+// Signed media URLs now arrive inside list payloads, but every refetch re-signs
+// them, and the browser's image/video cache keys on the exact URL string. This
+// module-level cache pins the FIRST URL seen for each content key (file+version)
+// until it nears the 1h signature expiry, so SWR refetches (~30s TTL) and
+// Home ↔ Library navigation keep byte-identical srcs — cache hits, no
+// re-downloads. Content keys are immutable, so a pinned URL is never wrong,
+// only eventually expired (at which point the fresh URL takes over).
+const STABLE_URL_TTL_MS = 50 * 60 * 1000
 
-    useEffect(() => {
-        if (!api || wanted === "") {
-            return
-        }
-        for (const key of wanted.split("|")) {
-            if (resolvedRef.current.has(key) || inFlightRef.current.has(key)) {
-                continue
-            }
-            inFlightRef.current.add(key)
-            const [file_id, version_id] = key.split(":")
-            void api
-                .getDownloadUrl({ file_id, version_id })
-                .then((download) => {
-                    resolvedRef.current.add(key)
-                    if (mountedRef.current) {
-                        setUrls((current) => ({ ...current, [key]: download.download_url }))
-                    }
-                })
-                .catch(() => undefined) // decorative — a missing thumb falls back to the gradient tile
-                .finally(() => {
-                    inFlightRef.current.delete(key)
-                })
-        }
-    }, [api, wanted])
+const stableUrls = new Map<string, { url: string; seenAtMs: number }>()
 
-    return urls
+export function stableMediaUrl(
+    key: string,
+    freshUrl: string | null | undefined,
+): string | undefined {
+    const cached = stableUrls.get(key)
+    if (cached && Date.now() - cached.seenAtMs < STABLE_URL_TTL_MS) {
+        return cached.url
+    }
+    if (!freshUrl) {
+        return undefined
+    }
+    stableUrls.set(key, { url: freshUrl, seenAtMs: Date.now() })
+    return freshUrl
+}
+
+export function postPosterUrl(post: PublishingPost): string | undefined {
+    const key =
+        post.render_poster_file_id && post.render_poster_version_id
+            ? `${post.render_poster_file_id}:${post.render_poster_version_id}`
+            : `post-poster:${post.post_id}`
+    return stableMediaUrl(key, post.poster_url)
+}
+
+export function postRenderUrl(post: PublishingPost): string | undefined {
+    return stableMediaUrl(`${post.render_file_id}:${post.render_version_id}`, post.render_url)
+}
+
+export function assetPosterUrl(asset: AssetSummary): string | undefined {
+    const key = asset.poster ? posterKey(asset.poster) : `asset-poster:${asset.file_id}`
+    return stableMediaUrl(key, asset.poster_url)
 }

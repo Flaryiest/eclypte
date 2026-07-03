@@ -85,6 +85,7 @@ export type AssetSummary = {
     latest_run: RunManifest | null
     analysis: FileVersionInput | null
     poster: FileVersionInput | null
+    poster_url: string | null
     archived_at: string | null
     archived_reason: string | null
 }
@@ -107,6 +108,12 @@ export type PublishingPost = {
     render_file_id: string
     render_version_id: string
     render_display_name: string
+    render_poster_file_id?: string | null
+    render_poster_version_id?: string | null
+    // Signed, per-response media URLs served by the API (never cached in stores;
+    // use stableMediaUrl so img/video srcs stay identical across refetches).
+    poster_url?: string | null
+    render_url?: string | null
     collection_slug: string
     platform: string
     provider: string

@@ -19,7 +19,7 @@ import {
     useToast,
     versionRef,
 } from "../dashboardCommon"
-import { posterKey, usePosterUrls } from "../posterUrls"
+import { assetPosterUrl, stableMediaUrl } from "../posterUrls"
 import styles from "../studio.module.css"
 import { downloadSignedUrl, safeDownloadFilename } from "@/services/downloadFile"
 import {
@@ -86,11 +86,6 @@ function LibraryPage() {
     const hidden = assets.filter((a) => Boolean(a.archived_at))
     const tabItems: AssetSummary[] = tab === "films" ? films : tab === "songs" ? songs : tab === "reels" ? reels : hidden
     const pager = usePagination(tabItems, tab === "songs" ? 10 : 12, tab)
-
-    const posterUrls = usePosterUrls(api, [
-        ...films.map((a) => a.poster),
-        ...reels.map((a) => a.poster),
-    ])
 
     const setTab = (next: LibraryTab) => {
         setSelectedId(null)
@@ -409,7 +404,7 @@ function LibraryPage() {
                                 key={asset.file_id}
                                 asset={asset}
                                 tall={tab === "reels"}
-                                posterUrl={asset.poster ? posterUrls[posterKey(asset.poster)] : undefined}
+                                posterUrl={assetPosterUrl(asset)}
                                 postedLabel={tab === "reels" ? reelPostedLabel(postByRender.get(asset.file_id)) : null}
                                 onOpen={() => setSelectedId(asset.file_id)}
                             />
@@ -424,7 +419,7 @@ function LibraryPage() {
                     key={selected.file_id}
                     api={api}
                     asset={selected}
-                    posterUrl={selected.poster ? posterUrls[posterKey(selected.poster)] : undefined}
+                    posterUrl={assetPosterUrl(selected)}
                     busyAction={busyAction}
                     existingPost={postByRender.get(selected.file_id)}
                     onClose={() => setSelectedId(null)}
@@ -575,9 +570,14 @@ function AssetSheet({
     onRestore: () => void
     onPost: () => void
 }) {
-    const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-    // Lazy init instead of an effect: the sheet is keyed by file id, so a missing
-    // version is known at mount time (and the compiler bans sync setState in effects).
+    // Lazy inits instead of effects: the sheet is keyed by file id, so mount-time
+    // facts (a cached playback URL, a missing version) are known immediately, and
+    // the compiler bans sync setState in effects.
+    const [previewUrl, setPreviewUrl] = useState<string | null>(() =>
+        asset.current_version_id
+            ? stableMediaUrl(`${asset.file_id}:${asset.current_version_id}`, undefined) ?? null
+            : null,
+    )
     const [previewError, setPreviewError] = useState<string | null>(() =>
         asset.current_version_id ? null : "This file isn't ready to preview yet.",
     )
@@ -597,7 +597,7 @@ function AssetSheet({
     const previewFileId = asset.file_id
     const previewVersionId = asset.current_version_id
     useEffect(() => {
-        if (!previewVersionId) {
+        if (!previewVersionId || previewUrl) {
             return
         }
         // No cleanup-based ignore flag: the sheet is keyed by file id, so an asset
@@ -612,12 +612,17 @@ function AssetSheet({
             timeout,
         ])
             .then((download) => {
-                setPreviewUrl(download.download_url)
+                // Pin in the stability cache so reopening this sheet skips the fetch
+                // and the browser reuses its buffered media for the same URL.
+                setPreviewUrl(
+                    stableMediaUrl(`${previewFileId}:${previewVersionId}`, download.download_url)
+                        ?? download.download_url,
+                )
             })
             .catch((caught) => {
                 setPreviewError(`Preview couldn't load (${errorMessage(caught)}) — Download still works.`)
             })
-    }, [api, previewFileId, previewVersionId])
+    }, [api, previewFileId, previewVersionId, previewUrl])
     const canAnalyze = (asset.kind === "song_audio" || asset.kind === "source_video") && !asset.analysis && !isArchived && !status.busy
     // Already-analyzed media can be re-analyzed on demand (e.g. to pick up a
     // thumbnail or credits data added after the original analysis ran).

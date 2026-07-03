@@ -21,13 +21,12 @@ import {
 import styles from "./studio.module.css"
 import { useRunStream } from "./useRunStream"
 import { useNow, useRenderEta } from "./editEta"
-import { posterKey, usePosterUrls } from "./posterUrls"
+import { assetPosterUrl, postPosterUrl, postRenderUrl } from "./posterUrls"
 import {
     AssetSummary,
     AutopilotItem,
     EclypteApiClient,
     EditJobStatus,
-    FileVersionInput,
     PublishingPost,
     RunStreamMessage,
 } from "@/services/eclypteApi"
@@ -92,55 +91,7 @@ export default function HomePage() {
         refresh: revalidateAll,
     })
 
-    // --- Poster refs: publishing posts carry the MP4 ref; the poster ref lives on the
-    // post's source run outputs (render_poster_*). Fetched exactly once per post: the
-    // resolved/in-flight sets are refs, so a resolving sibling never re-triggers or
-    // discards the others' fetches (results are keyed by post id and can't go stale).
-    const [postPosterRefs, setPostPosterRefs] = useState<Record<string, FileVersionInput | null>>({})
-    const postPosterInFlightRef = useRef<Set<string>>(new Set())
-    const postPosterResolvedRef = useRef<Set<string>>(new Set())
-    useEffect(() => {
-        if (!api) {
-            return
-        }
-        const wanted = [...readyPosts, ...postedPosts].filter(
-            (post) =>
-                post.source_run_id
-                && !postPosterResolvedRef.current.has(post.post_id)
-                && !postPosterInFlightRef.current.has(post.post_id),
-        )
-        for (const post of wanted) {
-            postPosterInFlightRef.current.add(post.post_id)
-            void api
-                .getRun(post.source_run_id as string)
-                .then((run) => {
-                    const fileId = run.outputs["render_poster_file_id"]
-                    const versionId = run.outputs["render_poster_version_id"]
-                    postPosterResolvedRef.current.add(post.post_id)
-                    setPostPosterRefs((current) => ({
-                        ...current,
-                        [post.post_id]: fileId && versionId ? { file_id: fileId, version_id: versionId } : null,
-                    }))
-                })
-                .catch(() => {
-                    postPosterResolvedRef.current.add(post.post_id)
-                    setPostPosterRefs((current) => ({ ...current, [post.post_id]: null }))
-                })
-                .finally(() => {
-                    postPosterInFlightRef.current.delete(post.post_id)
-                })
-        }
-    }, [api, readyPosts, postedPosts])
-
     const assetById = useMemo(() => new Map(assets.map((asset) => [asset.file_id, asset])), [assets])
-    const queueSourceRefs = useMemo(
-        () => pendingItems.map((item) => assetById.get(item.source_video_file_id)?.poster ?? null),
-        [pendingItems, assetById],
-    )
-    const posterUrls = usePosterUrls(api, [
-        ...Object.values(postPosterRefs),
-        ...queueSourceRefs,
-    ])
 
     // --- Buffer reconciliation (ported behavior contract from the publish page).
     const pollablePosts = useMemo(
@@ -337,8 +288,7 @@ export default function HomePage() {
                 ) : (
                     <div className={styles.reviewCardGrid}>
                         {readyPosts.map((post) => {
-                            const ref = postPosterRefs[post.post_id]
-                            const url = ref ? posterUrls[posterKey(ref)] : undefined
+                            const url = postPosterUrl(post)
                             return (
                                 <div key={post.post_id} className={styles.reviewCard}>
                                     {url ? (
@@ -401,8 +351,7 @@ export default function HomePage() {
                     <div>
                         {[...pendingItems, ...failedItems].map((item) => {
                             const asset = assetById.get(item.source_video_file_id)
-                            const ref = asset?.poster ?? null
-                            const url = ref ? posterUrls[posterKey(ref)] : undefined
+                            const url = asset ? assetPosterUrl(asset) : undefined
                             return (
                                 <div key={item.item_id} className={styles.queueRow}>
                                     {url ? (
@@ -444,8 +393,7 @@ export default function HomePage() {
                 ) : (
                     <div className={styles.postedStrip}>
                         {postedPosts.map((post) => {
-                            const ref = postPosterRefs[post.post_id]
-                            const url = ref ? posterUrls[posterKey(ref)] : undefined
+                            const url = postPosterUrl(post)
                             return (
                                 <button key={post.post_id} type="button" className={styles.postedCard} onClick={() => setReviewPostId(post.post_id)}>
                                     {url ? (
@@ -466,10 +414,7 @@ export default function HomePage() {
                 <ReviewSheet
                     api={api}
                     post={reviewPost}
-                    posterUrl={(() => {
-                        const ref = postPosterRefs[reviewPost.post_id]
-                        return ref ? posterUrls[posterKey(ref)] : undefined
-                    })()}
+                    posterUrl={postPosterUrl(reviewPost)}
                     onClose={() => setReviewPostId(null)}
                     replacePost={replacePost}
                     onError={setError}
@@ -480,7 +425,6 @@ export default function HomePage() {
                     api={api}
                     open={composerOpen}
                     assets={assets}
-                    posterUrls={posterUrls}
                     onClose={() => setComposerOpen(false)}
                     onQueued={(next) => {
                         setAutopilot(next)
@@ -577,12 +521,12 @@ function ReviewSheet({
     const [caption, setCaption] = useState("")
     const [hashtags, setHashtags] = useState("")
     const [scheduledAt, setScheduledAt] = useState("")
-    const [videoUrl, setVideoUrl] = useState<string | null>(null)
     const [videoError, setVideoError] = useState<string | null>(null)
     const [playing, setPlaying] = useState(false)
     const [busy, setBusy] = useState<string | null>(null) // which action is running
     const syncedPostIdRef = useRef<string | null>(null)
-    const previewKeyRef = useRef<string | null>(null)
+    // The signed render URL arrives with the post itself — no fetch, no spinner wait.
+    const videoUrl = postRenderUrl(post) ?? null
 
     // Dirty-guard (ported): reseed the editor only when the DISPLAYED post changes,
     // never when a background poll swaps the same post's object.
@@ -597,34 +541,6 @@ function ReviewSheet({
         setPlaying(false)
         setVideoError(null)
     }, [post])
-
-    // Preview URL fetched once per rendered media (ported previewKeyRef contract).
-    // Failures surface INSIDE the sheet — the page-level banner sits behind the
-    // overlay, so routing errors there left the play button spinning forever.
-    // Staleness is decided by comparing against the ref (content-addressed), NOT a
-    // cleanup flag: under Strict Mode the remount preserves the ref, so a
-    // cleanup-based ignore flag would discard the only fetch's result while the
-    // ref-guard blocks a refetch — a dev-only permanent spinner.
-    useEffect(() => {
-        const key = `${post.render_file_id}:${post.render_version_id}`
-        if (key === previewKeyRef.current) {
-            return
-        }
-        previewKeyRef.current = key
-        setVideoUrl(null)
-        void api
-            .getDownloadUrl({ file_id: post.render_file_id, version_id: post.render_version_id })
-            .then((download) => {
-                if (previewKeyRef.current === key) {
-                    setVideoUrl(download.download_url)
-                }
-            })
-            .catch((caught) => {
-                if (previewKeyRef.current === key) {
-                    setVideoError(`Preview couldn't load (${errorMessage(caught)}).`)
-                }
-            })
-    }, [api, post.render_file_id, post.render_version_id])
 
     const saveCurrent = async () => {
         const next = await api.updatePublishingPost(post.post_id, {
@@ -818,14 +734,12 @@ function ComposerSheet({
     api,
     open,
     assets,
-    posterUrls,
     onClose,
     onQueued,
 }: {
     api: EclypteApiClient
     open: boolean
     assets: AssetSummary[]
-    posterUrls: Record<string, string>
     onClose: () => void
     onQueued: (next: Awaited<ReturnType<EclypteApiClient["addAutopilotItems"]>>) => void
 }) {
@@ -892,7 +806,7 @@ function ComposerSheet({
                 Film
                 <div className={styles.mediaGrid} role="radiogroup" aria-label="Film">
                     {videos.map((asset) => {
-                        const url = asset.poster ? posterUrls[posterKey(asset.poster)] : undefined
+                        const url = assetPosterUrl(asset)
                         const selected = videoId === asset.file_id
                         return (
                             <button
