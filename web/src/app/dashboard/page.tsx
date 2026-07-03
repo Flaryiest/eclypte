@@ -6,6 +6,7 @@ import Link from "next/link"
 import { Play, Plus, RefreshCw, Zap } from "lucide-react"
 import {
     DashboardPage,
+    FadeImg,
     PostedStripSkeleton,
     ProgressRow,
     QueueRowsSkeleton,
@@ -306,8 +307,7 @@ export default function HomePage() {
                             return (
                                 <div key={post.post_id} className={styles.reviewCard}>
                                     {url ? (
-                                        // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL, next/image can't optimize
-                                        <img className={styles.posterThumb} src={url} alt="" />
+                                        <FadeImg className={styles.posterThumb} src={url} alt="" />
                                     ) : (
                                         <span className={`${styles.posterThumb} ${styles.posterThumbPlaceholder}`} aria-hidden>▶</span>
                                     )}
@@ -373,8 +373,7 @@ export default function HomePage() {
                             return (
                                 <div key={item.item_id} className={styles.queueRow}>
                                     {url ? (
-                                        // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL, next/image can't optimize
-                                        <img className={styles.queueThumb} src={url} alt="" />
+                                        <FadeImg className={styles.queueThumb} src={url} alt="" loading="lazy" />
                                     ) : (
                                         <span className={styles.queueThumb} aria-hidden />
                                     )}
@@ -417,8 +416,7 @@ export default function HomePage() {
                             return (
                                 <button key={post.post_id} type="button" className={styles.postedCard} onClick={() => setReviewPostId(post.post_id)}>
                                     {url ? (
-                                        // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL, next/image can't optimize
-                                        <img className={styles.postedThumb} src={url} alt={postTitle(post)} />
+                                        <FadeImg className={styles.postedThumb} src={url} alt={postTitle(post)} loading="lazy" />
                                     ) : (
                                         <span className={styles.postedThumb} aria-hidden />
                                     )}
@@ -697,8 +695,7 @@ function ReviewSheet({
             ) : (
                 <button type="button" className={styles.posterButton} style={{ width: 160 }} onClick={() => setPlaying(true)} disabled={!videoUrl}>
                     {posterUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL, next/image can't optimize
-                        <img className={styles.posterThumb} style={{ width: 160 }} src={posterUrl} alt="" />
+                        <FadeImg className={styles.posterThumb} style={{ width: 160 }} src={posterUrl} alt="" />
                     ) : (
                         <span className={`${styles.posterThumb} ${styles.posterThumbPlaceholder}`} style={{ width: 160 }} aria-hidden />
                     )}
@@ -839,8 +836,7 @@ function ComposerSheet({
                                 onClick={() => setVideoId(asset.file_id)}
                             >
                                 {url ? (
-                                    // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL, next/image can't optimize
-                                    <img className={styles.mediaThumb} src={url} alt="" />
+                                    <FadeImg className={styles.mediaThumb} src={url} alt="" loading="lazy" />
                                 ) : (
                                     <span className={styles.mediaThumb} aria-hidden />
                                 )}

@@ -633,6 +633,14 @@
 
 .skeletonThumbTall { aspect-ratio: 9 / 16; }
 
+/* Thumbnails fade in over their gradient placeholder instead of popping. */
+.thumbFade { opacity: 0; transition: opacity 180ms ease; }
+.thumbFadeLoaded { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+	.thumbFade { transition: none; opacity: 1; }
+}
+
 @keyframes skeletonShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
 /* --- Empty states: friendly sentence + action, never italic. --- */

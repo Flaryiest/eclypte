@@ -8,6 +8,7 @@ import {
     DashboardPage,
     Pager,
     Sheet,
+    FadeImg,
     MediaGridSkeleton,
     SkeletonList,
     Spinner,
@@ -500,8 +501,7 @@ function MediaCard({
         <button type="button" className={styles.mediaCard} onClick={onOpen}>
             <span className={styles.mediaThumbFrame}>
                 {posterUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL, next/image can't optimize
-                    <img className={`${styles.mediaThumb} ${tall ? styles.mediaThumbTall : ""}`} src={posterUrl} alt="" />
+                    <FadeImg className={`${styles.mediaThumb} ${tall ? styles.mediaThumbTall : ""}`} src={posterUrl} alt="" loading="lazy" />
                 ) : (
                     <span className={`${styles.mediaThumb} ${tall ? styles.mediaThumbTall : ""}`} aria-hidden />
                 )}
@@ -700,8 +700,7 @@ function AssetSheet({
             ) : isVideo ? (
                 <span className={styles.mediaThumbFrame} style={isReel ? { maxWidth: 240, alignSelf: "center" } : undefined}>
                     {posterUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL, next/image can't optimize
-                        <img className={`${styles.mediaThumb} ${isReel ? styles.mediaThumbTall : ""}`} src={posterUrl} alt="" />
+                        <FadeImg className={`${styles.mediaThumb} ${isReel ? styles.mediaThumbTall : ""}`} src={posterUrl} alt="" />
                     ) : (
                         <span className={`${styles.mediaThumb} ${isReel ? styles.mediaThumbTall : ""}`} aria-hidden />
                     )}

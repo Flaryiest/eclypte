@@ -73,6 +73,26 @@ export function SkeletonList({ count = 3 }: { count?: number }) {
     )
 }
 
+// Thumbnail <img> for signed media URLs: fades in over the tile's gradient
+// placeholder on load instead of popping, decodes off the main thread. Wraps a
+// plain <img> because next/image can't optimize expiring signed R2 URLs.
+export function FadeImg({ className, onLoad, alt, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) {
+    const [loaded, setLoaded] = useState(false)
+    return (
+        // eslint-disable-next-line @next/next/no-img-element -- signed R2 URL, next/image can't optimize
+        <img
+            {...props}
+            alt={alt ?? ""}
+            decoding="async"
+            className={`${className ?? ""} ${styles.thumbFade} ${loaded ? styles.thumbFadeLoaded : ""}`}
+            onLoad={(event) => {
+                setLoaded(true)
+                onLoad?.(event)
+            }}
+        />
+    )
+}
+
 // Geometry-matched loading placeholders: while a resource is loading, sections
 // shimmer in the shape of the content they become — never resolved-empty text.
 

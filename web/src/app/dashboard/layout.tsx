@@ -21,6 +21,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
     return (
         <div className={styles.container} data-surface="studio">
+            {/* React hoists this into <head>: warm the API connection before the
+                first data fetch (the media-host preconnect happens at runtime in
+                posterUrls once the first signed URL reveals its origin). */}
+            <link
+                rel="preconnect"
+                href={process.env.NEXT_PUBLIC_ECLYPTE_API_BASE_URL || "http://127.0.0.1:8000"}
+                crossOrigin="anonymous"
+            />
             <ToastProvider>
                 <header className={styles.topBar}>
                     <Link className={styles.brand} href="/dashboard">
