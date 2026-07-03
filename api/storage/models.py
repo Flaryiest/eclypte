@@ -154,6 +154,10 @@ class PublishingPostRecord(BaseModel):
     render_file_id: str
     render_version_id: str
     render_display_name: str
+    # Poster ref captured at creation so list responses can sign a thumbnail URL
+    # without a run lookup. Optional: legacy posts backfill lazily on first list.
+    render_poster_file_id: str | None = None
+    render_poster_version_id: str | None = None
     source_name: str = ""
     song_name: str = ""
     collection_slug: str = ""

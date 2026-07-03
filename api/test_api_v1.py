@@ -1444,3 +1444,52 @@ def test_source_video_asset_carries_poster_ref_from_analysis_run():
         f"users/local_dev/files/{poster['file_id']}/versions/{poster['version_id']}/blob"
         in asset["poster_url"]
     )
+
+
+def test_publishing_list_serves_signed_urls_and_backfills_legacy_poster_refs():
+    client, store, _ = build_client()
+    from api.storage.models import PublishingPostRecord
+    from api.storage.repository import StorageRepository
+
+    repo = StorageRepository(store)
+    render = publish_artifact(
+        repo, user_id="local_dev", file_id="file_render_x", kind="render_output", filename="reel.mp4",
+        body=b"mp4", content_type="video/mp4",
+    )
+    run = repo.create_run(user_id="local_dev", workflow_type="edit_pipeline", inputs={}, steps=["render"])
+    repo.update_run_status(
+        RunRef(user_id="local_dev", run_id=run.run_id),
+        status="completed",
+        outputs={
+            "render_poster_file_id": "file_poster_x",
+            "render_poster_version_id": "ver_poster_x",
+        },
+    )
+    # Legacy record: created before poster refs were stored on posts.
+    now = "2026-07-01T00:00:00+00:00"
+    repo.save_publishing_post(
+        PublishingPostRecord(
+            post_id="pub_legacy",
+            owner_user_id="local_dev",
+            status="ready",
+            render_file_id=render["file_id"],
+            render_version_id=render["version_id"],
+            render_display_name="reel.mp4",
+            source_run_id=run.run_id,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    listing = client.get("/v1/publishing/posts")
+
+    assert listing.status_code == 200
+    post = next(p for p in listing.json() if p["post_id"] == "pub_legacy")
+    assert post["render_url"].startswith("memory://get/")
+    assert f"users/local_dev/files/{render['file_id']}/versions/{render['version_id']}/blob" in post["render_url"]
+    assert post["poster_url"].startswith("memory://get/")
+    assert "users/local_dev/files/file_poster_x/versions/ver_poster_x/blob" in post["poster_url"]
+    # The resolved ref is persisted so future lists skip the run lookup.
+    stored = repo.load_publishing_post(user_id="local_dev", post_id="pub_legacy")
+    assert stored.render_poster_file_id == "file_poster_x"
+    assert stored.render_poster_version_id == "ver_poster_x"

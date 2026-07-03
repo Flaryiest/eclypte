@@ -272,6 +272,17 @@ class AssetSummary(BaseModel):
     archived_reason: str | None
 
 
+class PublishingPostView(PublishingPostRecord):
+    """Response wrapper: the stored record plus per-response signed media URLs.
+
+    Signed URLs expire, so they are computed fresh for every response and are
+    never persisted on the stored record.
+    """
+
+    poster_url: str | None = None
+    render_url: str | None = None
+
+
 class SynthesisReferencesRequest(BaseModel):
     urls: list[str] = Field(min_length=1)
     likes: int = Field(default=0, ge=0)
@@ -1142,40 +1153,99 @@ def create_app(
             buffer_channel=channel,
         )
 
-    @app.get("/v1/publishing/posts", response_model=list[PublishingPostRecord])
+    def publishing_post_view(
+        post: PublishingPostRecord, uid: str, store: ObjectStore
+    ) -> PublishingPostView:
+        poster_url = None
+        if post.render_poster_file_id and post.render_poster_version_id:
+            poster_url = store.presigned_get_url(
+                file_version_blob_key(
+                    user_id=uid,
+                    file_id=post.render_poster_file_id,
+                    version_id=post.render_poster_version_id,
+                ),
+                expires_in=DOWNLOAD_URL_EXPIRES_IN,
+            )
+        render_url = store.presigned_get_url(
+            file_version_blob_key(
+                user_id=uid, file_id=post.render_file_id, version_id=post.render_version_id
+            ),
+            expires_in=DOWNLOAD_URL_EXPIRES_IN,
+        )
+        return PublishingPostView(**post.model_dump(), poster_url=poster_url, render_url=render_url)
+
+    def backfill_render_poster_refs(
+        repo: StorageRepository, uid: str, posts: list[PublishingPostRecord]
+    ) -> list[PublishingPostRecord]:
+        # Legacy posts predate stored poster refs; resolve them from their source
+        # runs once and persist, so future lists skip the run lookup entirely.
+        missing = [
+            post
+            for post in posts
+            if post.source_run_id
+            and not (post.render_poster_file_id and post.render_poster_version_id)
+        ]
+        if not missing:
+            return posts
+        runs = {run.run_id: run for run in repo.list_run_manifests(uid)}
+        updated_by_id: dict[str, PublishingPostRecord] = {}
+        for post in missing:
+            run = runs.get(post.source_run_id or "")
+            if run is None:
+                continue
+            poster_file_id = run.outputs.get("render_poster_file_id")
+            poster_version_id = run.outputs.get("render_poster_version_id")
+            if poster_file_id and poster_version_id:
+                updated_by_id[post.post_id] = repo.save_publishing_post(
+                    post.model_copy(
+                        update={
+                            "render_poster_file_id": poster_file_id,
+                            "render_poster_version_id": poster_version_id,
+                        }
+                    )
+                )
+        return [updated_by_id.get(post.post_id, post) for post in posts]
+
+    @app.get("/v1/publishing/posts", response_model=list[PublishingPostView])
     def list_publishing_posts(
         status_filter: PublishingPostStatus | None = Query(default=None, alias="status"),
         repo: StorageRepository = Depends(repository),
+        resolved_store: ObjectStore = Depends(resolve_store),
         uid: str = Depends(user_id),
-    ) -> list[PublishingPostRecord]:
-        return repo.list_publishing_posts(uid, status=status_filter)
+    ) -> list[PublishingPostView]:
+        posts = repo.list_publishing_posts(uid, status=status_filter)
+        posts = backfill_render_poster_refs(repo, uid, posts)
+        return [publishing_post_view(post, uid, resolved_store) for post in posts]
 
     @app.post(
         "/v1/publishing/posts",
-        response_model=PublishingPostRecord,
+        response_model=PublishingPostView,
         status_code=status.HTTP_201_CREATED,
     )
     def create_publishing_post(
         request: PublishingPostCreateRequest,
         repo: StorageRepository = Depends(repository),
+        resolved_store: ObjectStore = Depends(resolve_store),
         uid: str = Depends(user_id),
-    ) -> PublishingPostRecord:
+    ) -> PublishingPostView:
         load_version(repo, uid, request.render_output, "render_output")
-        return create_publish_post_for_render(
+        post = create_publish_post_for_render(
             repo,
             user_id=uid,
             render_output=request.render_output.model_dump(),
             collection_slug=request.collection_slug,
             auto_created=False,
         )
+        return publishing_post_view(post, uid, resolved_store)
 
-    @app.patch("/v1/publishing/posts/{post_id}", response_model=PublishingPostRecord)
+    @app.patch("/v1/publishing/posts/{post_id}", response_model=PublishingPostView)
     def update_publishing_post(
         post_id: str,
         request: PublishingPostUpdateRequest,
         repo: StorageRepository = Depends(repository),
+        resolved_store: ObjectStore = Depends(resolve_store),
         uid: str = Depends(user_id),
-    ) -> PublishingPostRecord:
+    ) -> PublishingPostView:
         post = publishing_post_or_404(repo, uid, post_id)
         update: dict[str, object] = {
             "updated_at": utc_now(),
@@ -1191,17 +1261,19 @@ def create_app(
             update["scheduled_at"] = request.scheduled_at
         if post.status == "failed":
             update["status"] = "ready"
-        return repo.save_publishing_post(post.model_copy(update=update))
+        saved = repo.save_publishing_post(post.model_copy(update=update))
+        return publishing_post_view(saved, uid, resolved_store)
 
     @app.post(
         "/v1/publishing/posts/{post_id}/regenerate-caption",
-        response_model=PublishingPostRecord,
+        response_model=PublishingPostView,
     )
     def regenerate_publishing_caption(
         post_id: str,
         repo: StorageRepository = Depends(repository),
+        resolved_store: ObjectStore = Depends(resolve_store),
         uid: str = Depends(user_id),
-    ) -> PublishingPostRecord:
+    ) -> PublishingPostView:
         post = publishing_post_or_404(repo, uid, post_id)
         draft = generate_caption_draft(
             render_name=post.render_display_name,
@@ -1209,7 +1281,7 @@ def create_app(
             source_name=post.source_name,
             song_name=post.song_name,
         )
-        return repo.save_publishing_post(
+        saved = repo.save_publishing_post(
             post.model_copy(
                 update={
                     "generated_caption": draft.caption,
@@ -1224,10 +1296,11 @@ def create_app(
                 }
             )
         )
+        return publishing_post_view(saved, uid, resolved_store)
 
     @app.post(
         "/v1/publishing/posts/{post_id}/send-buffer",
-        response_model=PublishingPostRecord,
+        response_model=PublishingPostView,
     )
     def send_publishing_post_to_buffer(
         post_id: str,
@@ -1235,7 +1308,7 @@ def create_app(
         repo: StorageRepository = Depends(repository),
         resolved_store: ObjectStore = Depends(resolve_store),
         uid: str = Depends(user_id),
-    ) -> PublishingPostRecord:
+    ) -> PublishingPostView:
         post = publishing_post_or_404(repo, uid, post_id)
         if post.status == "canceled":
             raise HTTPException(status_code=400, detail="publishing post is canceled")
@@ -1283,7 +1356,7 @@ def create_app(
                 )
             )
             raise HTTPException(status_code=502, detail=str(exc)) from exc
-        return repo.save_publishing_post(
+        saved = repo.save_publishing_post(
             prepared.model_copy(
                 update={
                     "status": queue_status_for_mode(mode),
@@ -1297,19 +1370,21 @@ def create_app(
                 }
             )
         )
+        return publishing_post_view(saved, uid, resolved_store)
 
     @app.post(
         "/v1/publishing/posts/{post_id}/refresh-status",
-        response_model=PublishingPostRecord,
+        response_model=PublishingPostView,
     )
     def refresh_publishing_post_status(
         post_id: str,
         repo: StorageRepository = Depends(repository),
+        resolved_store: ObjectStore = Depends(resolve_store),
         uid: str = Depends(user_id),
-    ) -> PublishingPostRecord:
+    ) -> PublishingPostView:
         post = publishing_post_or_404(repo, uid, post_id)
         if not post.buffer_post_id:
-            return post
+            return publishing_post_view(post, uid, resolved_store)
         client = resolve_buffer_client()
         try:
             result = client.get_post(post_id=post.buffer_post_id)
@@ -1323,19 +1398,22 @@ def create_app(
                 post.buffer_post_id,
                 exc,
             )
-            return repo.save_publishing_post(
+            saved = repo.save_publishing_post(
                 post.model_copy(update={"last_error": str(exc), "updated_at": utc_now()})
             )
-        return repo.save_publishing_post(apply_buffer_status(post, result, now=utc_now()))
+            return publishing_post_view(saved, uid, resolved_store)
+        saved = repo.save_publishing_post(apply_buffer_status(post, result, now=utc_now()))
+        return publishing_post_view(saved, uid, resolved_store)
 
-    @app.post("/v1/publishing/posts/{post_id}/cancel", response_model=PublishingPostRecord)
+    @app.post("/v1/publishing/posts/{post_id}/cancel", response_model=PublishingPostView)
     def cancel_publishing_post(
         post_id: str,
         repo: StorageRepository = Depends(repository),
+        resolved_store: ObjectStore = Depends(resolve_store),
         uid: str = Depends(user_id),
-    ) -> PublishingPostRecord:
+    ) -> PublishingPostView:
         post = publishing_post_or_404(repo, uid, post_id)
-        return repo.save_publishing_post(
+        saved = repo.save_publishing_post(
             post.model_copy(
                 update={
                     "status": "canceled",
@@ -1344,14 +1422,16 @@ def create_app(
                 }
             )
         )
+        return publishing_post_view(saved, uid, resolved_store)
 
-    @app.post("/v1/publishing/posts/{post_id}/mark-posted", response_model=PublishingPostRecord)
+    @app.post("/v1/publishing/posts/{post_id}/mark-posted", response_model=PublishingPostView)
     def mark_publishing_post_posted(
         post_id: str,
         request: PublishingPostMarkPostedRequest,
         repo: StorageRepository = Depends(repository),
+        resolved_store: ObjectStore = Depends(resolve_store),
         uid: str = Depends(user_id),
-    ) -> PublishingPostRecord:
+    ) -> PublishingPostView:
         # Manual override for posts that went live but can't be reconciled from Buffer
         # (e.g. an unqueryable/stale buffer id). Moves the post to the Posted lane and
         # optionally records a permalink the user pasted in.
@@ -1366,7 +1446,8 @@ def create_app(
         }
         if request.post_url:
             update["post_url"] = request.post_url
-        return repo.save_publishing_post(post.model_copy(update=update))
+        saved = repo.save_publishing_post(post.model_copy(update=update))
+        return publishing_post_view(saved, uid, resolved_store)
 
     @app.get("/v1/autopilot", response_model=AutopilotStatusResponse)
     def get_autopilot(

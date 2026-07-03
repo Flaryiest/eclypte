@@ -749,3 +749,45 @@ def test_regenerate_caption_passes_persisted_names(monkeypatch):
     assert resp.status_code == 200
     assert captured.get("source_name") == "Spirited Away"
     assert captured.get("song_name") == "Unravel"
+
+
+def test_create_post_captures_render_poster_ref_from_source_run():
+    from api.storage.refs import FileRef, RunRef
+
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="render",
+        inputs={},
+        steps=["render"],
+    )
+    repo.update_run_status(
+        RunRef(user_id="user_123", run_id=run.run_id),
+        status="completed",
+        outputs={
+            "render_output_file_id": "file_render",
+            "render_output_version_id": "ver_x",
+            "render_poster_file_id": "file_poster",
+            "render_poster_version_id": "ver_poster",
+        },
+    )
+    render_ref = FileRef(user_id="user_123", file_id="file_render")
+    repo.create_file_manifest(
+        file_ref=render_ref, kind="render_output", display_name="run.mp4", source_run_id=run.run_id
+    )
+    version = repo.publish_bytes(
+        file_ref=render_ref, body=b"mp4", content_type="video/mp4",
+        original_filename="run.mp4", created_by_step="render",
+        derived_from_step="render", input_file_version_ids=[],
+    )
+
+    post = create_publish_post_for_render(
+        repo,
+        user_id="user_123",
+        render_output={"file_id": "file_render", "version_id": version.version_id},
+    )
+
+    assert post.render_poster_file_id == "file_poster"
+    assert post.render_poster_version_id == "ver_poster"

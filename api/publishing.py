@@ -456,6 +456,20 @@ def create_publish_post_for_render(
     source_name, song_name = resolve_edit_source_names(
         repo, user_id=user_id, render_manifest=manifest
     )
+    # Capture the render-poster ref now so listings can sign a thumbnail URL
+    # without looking the run up again. Best-effort: a missing run just means
+    # no poster ref (backfilled lazily at list time if it appears later).
+    poster_file_id: str | None = None
+    poster_version_id: str | None = None
+    if manifest.source_run_id:
+        try:
+            source_run = repo.load_run_manifest(
+                RunRef(user_id=user_id, run_id=manifest.source_run_id)
+            )
+            poster_file_id = source_run.outputs.get("render_poster_file_id")
+            poster_version_id = source_run.outputs.get("render_poster_version_id")
+        except KeyError:
+            pass
     draft = generate_caption_draft(
         render_name=manifest.display_name or meta.original_filename,
         collection_slug=resolved_collection,
@@ -470,6 +484,8 @@ def create_publish_post_for_render(
         render_file_id=render_output["file_id"],
         render_version_id=render_output["version_id"],
         render_display_name=manifest.display_name or meta.original_filename,
+        render_poster_file_id=poster_file_id,
+        render_poster_version_id=poster_version_id,
         collection_slug=resolved_collection,
         generated_caption=draft.caption,
         caption=draft.caption,
