@@ -15,11 +15,18 @@ from __future__ import annotations
 from ..synthesis.timeline_schema import Shot, Timeline
 
 DEFAULT_CROSSFADE_SEC = 0.25  # mirrors transitions.CROSSFADE_DURATION_SEC
+PUNCH_IN_END_SCALE = 1.06     # mirrors effects.PUNCH_IN_END_SCALE
+FREEZE_INPUT_SEC = 0.2        # tiny input window for a frozen shot
+FREEZE_PAD_EXTRA_SEC = 0.5    # clone slack before the exact re-trim
 
 # Phase 1 of the native renderer covers the base montage. Per-frame effects
 # (freeze/punch_in), the flash bloom, and overlay skills are not ported yet, so
 # timelines using them fall back to the MoviePy renderer (see render_timeline).
 PHASE1_TRANSITIONS = frozenset({"cut", "crossfade", "whip"})
+
+
+def _has_effect(shot: Shot, effect_type: str) -> bool:
+    return any(e.type == effect_type for e in shot.effects)
 
 
 def can_render_with_ffmpeg(timeline: Timeline) -> bool:
@@ -37,8 +44,12 @@ def can_render_with_ffmpeg(timeline: Timeline) -> bool:
 def _shot_window(shot: Shot) -> tuple[float, float, float]:
     """(source_start_sec, input_seconds_to_read, speed). We read duration*speed
     seconds of source so that setpts=PTS/speed yields the shot's output duration,
-    matching MoviePy's subclipped(...).with_speed_scaled(...).with_duration(...)."""
+    matching MoviePy's subclipped(...).with_speed_scaled(...).with_duration(...).
+    A frozen shot only needs its first frame, so it reads a tiny window and the
+    chain clones that frame out to the shot duration (see _video_chain)."""
     speed = shot.speed or 1.0
+    if _has_effect(shot, "freeze"):
+        return shot.source.start_sec, min(FREEZE_INPUT_SEC, shot.duration_sec), speed
     return shot.source.start_sec, shot.duration_sec * speed, speed
 
 
@@ -46,7 +57,14 @@ def _video_chain(idx: int, shot: Shot, w: int, h: int, fps: int,
                  crop: str, focus_x: float, out_label: str) -> str:
     chain: list[str] = []
     speed = shot.speed or 1.0
-    if speed != 1.0:
+    dur = shot.duration_sec
+    frozen = _has_effect(shot, "freeze")
+    if frozen:
+        # Hold the first frame: keep exactly one frame, clone it past the shot
+        # length, then re-trim to the exact duration after fps normalization.
+        chain.append("trim=end_frame=1")
+        chain.append(f"tpad=stop_mode=clone:stop_duration={dur + FREEZE_PAD_EXTRA_SEC:g}")
+    elif speed != 1.0:
         chain.append(f"setpts=PTS/{speed:g}")
     if crop in ("fill", "center"):
         # Cover the frame then crop; x offset honors crop_focus_x, y centers.
@@ -56,7 +74,17 @@ def _video_chain(idx: int, shot: Shot, w: int, h: int, fps: int,
     else:  # letterbox / per_shot
         chain.append(f"scale={w}:{h}:force_original_aspect_ratio=decrease")
         chain.append(f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2")
+    if _has_effect(shot, "punch_in"):
+        # Slow center zoom 1.0 -> PUNCH_IN_END_SCALE over the shot: shrink a
+        # centered crop with t, then scale back to the output size. Mirrors
+        # effects._punch_in.
+        zoom = f"(1+{PUNCH_IN_END_SCALE - 1.0:g}*t/{dur:.3f})"
+        chain.append(
+            f"crop=w='iw/{zoom}':h='ih/{zoom}':x='(iw-ow)/2':y='(ih-oh)/2',scale={w}:{h}"
+        )
     chain += ["setsar=1", f"fps={fps}", "format=yuv420p"]
+    if frozen:
+        chain.append(f"trim=duration={dur:.3f},setpts=PTS-STARTPTS")
     return f"[{idx}:v]" + ",".join(chain) + f"[{out_label}]"
 
 

@@ -164,6 +164,34 @@ def test_phase1_rejects_flash_transition():
     assert can_render_with_ffmpeg(tl) is False
 
 
+def test_freeze_shot_reads_one_frame_and_clones_it():
+    tl = _timeline([(80.0, 2.0, 1.0, "cut")])
+    tl.shots[0].effects.append(Effect(type="freeze"))
+    argv = build_command(tl, source="/s.mp4", audio="/a.wav", out_path="/o.mp4")
+    # the freeze shot reads a tiny input window, not the full 2s
+    assert "0.200" in argv
+    fc = _filter_complex(argv)
+    # first frame held: trim to 1 frame, clone it past the shot length, then
+    # re-trim to the exact shot duration
+    assert "trim=end_frame=1,tpad=stop_mode=clone:stop_duration=2.5" in fc
+    assert "trim=duration=2.000,setpts=PTS-STARTPTS" in fc
+
+
+def test_punch_in_adds_dynamic_center_crop():
+    tl = _timeline([(80.0, 2.0, 1.0, "cut")])
+    tl.shots[0].effects.append(Effect(type="punch_in"))
+    fc = _filter_complex(build_command(tl, source="/s.mp4", audio="/a.wav", out_path="/o.mp4"))
+    # zoom 1.0 -> 1.06 over the shot via a shrinking centered crop, scaled back
+    assert "crop=w='iw/(1+0.06*t/2.000)':h='ih/(1+0.06*t/2.000)':x='(iw-ow)/2':y='(ih-oh)/2',scale=1080:1920" in fc
+
+
+def test_plain_shot_has_no_effect_chains():
+    tl = _timeline([(80.0, 2.0, 1.0, "cut")])
+    fc = _filter_complex(build_command(tl, source="/s.mp4", audio="/a.wav", out_path="/o.mp4"))
+    assert "tpad" not in fc
+    assert "crop=w='iw/" not in fc
+
+
 def test_tail_fade_adds_afade_and_video_fade():
     tl = _timeline([(80.0, 10.0, 1.0, "cut")], audio_fade=2.5, video_fade=2.5)
     argv = build_command(tl, source="/s.mp4", audio="/a.wav", out_path="/o.mp4")
