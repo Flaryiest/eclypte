@@ -19,8 +19,9 @@ It is deliberately **quality-over-speed**: every scene/frame of video and every 
 analyzed before an edit is composed, so a single finished video can take **hours** (movie analysis
 dominates). It began as a personal/portfolio project (see [`README.md`](README.md)).
 
-**Scale:** ~9k lines of application Python in `api/` (plus a large `api/prototyping/` worker tree),
-~34 TS/TSX files in `web/src`.
+**Scale (post the July 2026 de-bloat):** ~12.7k lines of application Python across `api/` including
+the `api/prototyping/` workers, plus ~8.5k lines of tests; ~6.9k lines of TS/TSX and ~3.6k of CSS
+in `web/src`. Tracked repo is ~200 MB, dominated by the served demo videos under `web/public/demo/`.
 
 ---
 
