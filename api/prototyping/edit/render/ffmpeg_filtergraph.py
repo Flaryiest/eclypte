@@ -220,7 +220,6 @@ def build_command(
     crop = timeline.output.crop
     focus_x = timeline.output.crop_focus_x
     shots = timeline.shots
-    n = len(shots)
 
     args = ["ffmpeg", "-y"]
     input_map: list[list[int]] = []

@@ -347,4 +347,4 @@ Deferred, in rough priority order:
 - Do not commit secrets, `.env` files, cookies, Modal tokens, or OpenAI keys.
 - Do not install heavy ML stacks locally unless the task is explicitly dependency work.
 - Keep `AGENTS.md`, `web/AGENTS.md`, `api/COMMANDS.md`, and this file reconciled when architecture or commands change.
-- Preserve unrelated local changes. At the time this guide was refreshed, `README.md` already had local modifications and was intentionally left alone.
+- Preserve unrelated local changes.

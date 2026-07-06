@@ -99,9 +99,9 @@ This is still very much an active project. The MVP currently works for fairly ch
 
 Current limitations include:
 
-- uplaods current focus of WAV audio and MP4 video
+- uploads accept most common audio formats (auto-converted to WAV server-side) but video is still MP4 only
 - speed issues, especially on movie analysis and synthesis, can take a few hours
-- no unique edit types, purely relies on what it's fed right now - in the future I want to add masks, layers, colour grading etc and turn it into a full-fledged editor
+- the editing vocabulary is growing but still curated: colour grades, text overlays, a vignette mask, camera-shake accents, flash/crossfade transitions, and freeze/punch-in/speed-ramp effects exist (agent-placed, with a deterministic "rhythm engine" keeping cuts musical) - still a ways from a full-fledged editor with arbitrary layers
 
 ## AI Usage and Disclaimer
 

@@ -319,6 +319,7 @@ python -m pytest api/storage -v
 python -m pytest api/prototyping/edit/synthesis/ -v
 python -m pytest api/prototyping/edit/index/ -v
 python -m pytest api/prototyping/edit/skills/ -v
+python -m pytest api/prototyping/edit/render/ -v
 python -m pytest api/prototyping/video/test_credits.py -v
 python -m pytest api/prototyping/video/test_poster.py -v
 ```

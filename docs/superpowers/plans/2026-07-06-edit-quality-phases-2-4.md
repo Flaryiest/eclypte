@@ -1,5 +1,12 @@
 # Edit Quality Phases 2–4 Implementation Plan
 
+> **STATUS: COMPLETED 2026-07-06.** All 11 tasks implemented via TDD, verified end-to-end with a
+> real ffmpeg render exercising every feature, committed to main, and `eclypte-render-r2`
+> redeployed. Three real-ffmpeg issues surfaced by end-to-end verification and fixed along the
+> way: two-level filtergraph escaping for drawtext, `crop` w/h being config-time-only (punch_in
+> moved to `zoompan`), and xfade timebase mismatches (`settb=AVTB` on every shot chain).
+> Kept as a historical record.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Port visual polish onto the fast native ffmpeg render path (Phase 2), ship the polish catalog — grades, impact shake, real speed ramp (Phase 3), and parameterize the rhythm engine from reference metrics (Phase 4).
