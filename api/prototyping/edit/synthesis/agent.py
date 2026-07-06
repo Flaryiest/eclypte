@@ -150,18 +150,22 @@ def _format_song_context(song: dict) -> str:
     return "\n".join(lines)
 
 
-def _format_pacing_context(song: dict) -> str | None:
+def _format_pacing_context(song: dict, style_profile: dict | None = None) -> str | None:
     """Section-aware pacing targets, derived from tempo + segment labels.
 
     Returned as per-run user content (not baked into the system prompt) so it
-    applies regardless of the user's active prompt version. The adapter's
-    rhythm engine enforces a backstop on fast sections; this guidance is what
-    lets the agent hit the bands on its own.
+    applies regardless of the user's active prompt version. A reference-derived
+    style profile overrides matching section bands. The adapter's rhythm engine
+    enforces a backstop on fast sections; this guidance is what lets the agent
+    hit the bands on its own.
     """
     segments = song.get("segments", []) or []
     if not segments:
         return None
-    bands = pacing_bands_for(song.get("tempo_bpm"))
+    bands = pacing_bands_for(
+        song.get("tempo_bpm"),
+        (style_profile or {}).get("pacing_bands_beats"),
+    )
     lines = ["Pacing targets (shot lengths per song section):"]
     for seg in segments:
         try:
@@ -277,6 +281,7 @@ def run_synthesis_loop(
     system_prompt: str | None = None,
     query_clips_fn: Callable[[str, str, int], list[dict]] | None = None,
     source_duration_sec: float | None = None,
+    style_profile: dict | None = None,
 ) -> list[dict]:
     """
     Runs an LLM agent loop to construct an AMV timeline based on instructions.
@@ -302,7 +307,7 @@ def run_synthesis_loop(
     context_blocks: list[str] = []
     if song is not None:
         context_blocks.append(_format_song_context(song))
-        pacing_block = _format_pacing_context(song)
+        pacing_block = _format_pacing_context(song, style_profile)
         if pacing_block:
             context_blocks.append(pacing_block)
     if source_duration_sec is not None and float(source_duration_sec) > 0:

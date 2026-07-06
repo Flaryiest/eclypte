@@ -43,6 +43,7 @@ def adapt(
     overlays: list[dict] | None = None,
     grade: str | None = None,
     content_end_sec: float | None = None,
+    style_profile: dict | None = None,
     report_sink: dict | None = None,
 ) -> Timeline:
     """
@@ -181,12 +182,13 @@ def adapt(
         for s in song.get("segments", [])
     ]
 
+    profile = style_profile or {}
     downbeats = [float(d) for d in song.get("downbeats_sec") or []]
     shots, split_records = split_overlong_section_shots(
         shots,
         sections,
         downbeats,
-        pacing_bands_for(song.get("tempo_bpm")),
+        pacing_bands_for(song.get("tempo_bpm"), profile.get("pacing_bands_beats")),
         video=video,
         effective_source_end=effective_source_end,
     )
@@ -198,6 +200,7 @@ def adapt(
         [float(b) for b in song.get("beats_sec") or []],
         downbeats_sec=downbeats,
         source_duration_sec=effective_source_end,
+        lead_sec=profile.get("cut_lead_sec"),
     )
 
     shots, impact_registrations = register_impacts_to_downbeats(
@@ -339,6 +342,7 @@ def snap_shots_to_beats(
     downbeats_sec: list[float] | None = None,
     source_duration_sec: float,
     tolerance_sec: float = BEAT_SNAP_TOLERANCE_SEC,
+    lead_sec: float | None = None,
 ) -> tuple[list[Shot], list[float]]:
     """Snap interior shot boundaries onto musical anchors within `tolerance_sec`.
 
@@ -372,7 +376,13 @@ def snap_shots_to_beats(
         ):
             continue
         boundary = out_shot.timeline_end_sec
-        picked = pick_snap_beat(boundary, beats, downbeats, tolerance_sec=tolerance_sec)
+        if lead_sec is not None:
+            picked = pick_snap_beat(
+                boundary, beats, downbeats,
+                tolerance_sec=tolerance_sec, lead_sec=lead_sec,
+            )
+        else:
+            picked = pick_snap_beat(boundary, beats, downbeats, tolerance_sec=tolerance_sec)
         if picked is None:
             continue
         target, anchor = picked

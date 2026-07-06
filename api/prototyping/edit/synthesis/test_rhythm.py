@@ -95,6 +95,14 @@ def test_pacing_bands_bad_tempo_falls_back():
     assert bands == pacing_bands_for(120.0)
 
 
+def test_pacing_bands_apply_style_overrides():
+    bands = pacing_bands_for(120.0, overrides_beats={"chorus": (1.0, 2.0)})
+    # overridden label converts the override beats (0.5s/beat at 120bpm)
+    assert bands["chorus"] == pytest.approx((0.5, 1.0))
+    # untouched labels keep their defaults
+    assert bands["verse"] == pytest.approx((2.0, 4.0))
+
+
 # ------------------------------------------------- register_impacts_to_downbeats
 
 

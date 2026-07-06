@@ -594,6 +594,18 @@ def test_snap_skips_boundaries_touching_ramp_shots():
     assert tl.markers.beats_used_sec == []
 
 
+def test_adapt_style_profile_overrides_cut_lead():
+    song = {"source": {"duration_sec": 180.0}, "beats_sec": [2.0]}
+    agent = [
+        {"start_time": 0.0, "end_time": 2.0, "source_timestamp": 10.0},
+        {"start_time": 2.0, "end_time": 4.0, "source_timestamp": 60.0},
+    ]
+    tl = adapt(agent, song, VIDEO, SRC_PATH, AUDIO_PATH,
+               style_profile={"cut_lead_sec": 0.08})
+    # boundary lands the profile's lead ahead of the beat, not the default 0.04
+    assert tl.shots[0].timeline_end_sec == pytest.approx(1.92)
+
+
 def test_adapt_report_sink_always_has_sync_report():
     report: dict = {}
     tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH, report_sink=report)

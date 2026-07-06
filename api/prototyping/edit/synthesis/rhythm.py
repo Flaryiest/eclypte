@@ -110,15 +110,22 @@ def pick_snap_beat(
     return None
 
 
-def pacing_bands_for(tempo_bpm: float | None) -> dict[str, tuple[float, float]]:
-    """Per-section shot-duration bands in seconds, derived from the tempo."""
+def pacing_bands_for(
+    tempo_bpm: float | None,
+    overrides_beats: dict[str, tuple[float, float]] | None = None,
+) -> dict[str, tuple[float, float]]:
+    """Per-section shot-duration bands in seconds, derived from the tempo.
+
+    `overrides_beats` (label -> (lo, hi) in beats, e.g. from a reference-derived
+    style profile) replaces matching labels; everything else keeps defaults."""
     bpm = float(tempo_bpm or 0.0)
     if bpm <= 0:
         bpm = DEFAULT_TEMPO_BPM
     spb = 60.0 / bpm
+    beats_bands = {**PACING_BANDS_BEATS, **(overrides_beats or {})}
     bands = {
         label: (round(lo * spb, 3), round(hi * spb, 3))
-        for label, (lo, hi) in PACING_BANDS_BEATS.items()
+        for label, (lo, hi) in beats_bands.items()
     }
     lo, hi = DEFAULT_PACING_BAND_BEATS
     bands["default"] = (round(lo * spb, 3), round(hi * spb, 3))
