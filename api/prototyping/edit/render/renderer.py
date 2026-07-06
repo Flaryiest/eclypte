@@ -104,9 +104,15 @@ def render_timeline(
     target_size, target_fps = _resolve_output(timeline.output, preview=preview)
 
     # Fast path: a single native ffmpeg filtergraph (no per-frame Python pump).
-    # Covers the common montage (cuts/crossfade, no overlays/effects); anything
-    # else falls through to the MoviePy renderer below.
+    # Covers cuts/crossfade/whip/flash, freeze/punch_in, and every overlay
+    # skill with an ffmpeg port; anything else falls through to MoviePy below.
     if can_render_with_ffmpeg(timeline):
+        font_path = None
+        if timeline.overlays:
+            try:
+                font_path = _resolve_font_path()
+            except FileNotFoundError:
+                font_path = None  # drawtext raises a clear error only if needed
         render_with_ffmpeg(
             timeline,
             source=timeline.source.video,
@@ -118,6 +124,7 @@ def render_timeline(
             fps=target_fps,
             progress_callback=progress_callback,
             poster_path=poster_path,
+            font_path=font_path,
         )
         _log_timing("total render_timeline (ffmpeg)", total_started)
         return out_path

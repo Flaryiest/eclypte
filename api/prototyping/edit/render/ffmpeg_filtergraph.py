@@ -24,10 +24,11 @@ FLASH_DURATION_SEC = 0.12     # mirrors transitions.BLOOM_DURATION_SEC
 # is an additive luma shift, so +0.09 approximates that peak on mid-gray.
 FLASH_PEAK_BRIGHTNESS = 0.09
 
-# Phase 1 of the native renderer covers the base montage. Per-frame effects
-# (freeze/punch_in), the flash bloom, and overlay skills are not ported yet, so
-# timelines using them fall back to the MoviePy renderer (see render_timeline).
-PHASE1_TRANSITIONS = frozenset({"cut", "crossfade", "whip"})
+# Features the native renderer implements. Transitions/effects outside these
+# sets — and overlay skills without an ffmpeg port (ffmpeg_supported=False) —
+# fall back to the MoviePy renderer (see render_timeline).
+FFMPEG_TRANSITIONS = frozenset({"cut", "crossfade", "whip", "flash"})
+FFMPEG_EFFECTS = frozenset({"freeze", "punch_in"})
 
 
 def _has_effect(shot: Shot, effect_type: str) -> bool:
@@ -48,13 +49,23 @@ def _flash_steps(duration_sec: float) -> list[str]:
 
 
 def can_render_with_ffmpeg(timeline: Timeline) -> bool:
-    """True when the timeline only uses features the native renderer supports."""
+    """True when the timeline only uses features the native renderer supports.
+
+    Capability-driven: overlay skills declare their own ffmpeg support in the
+    registry, so a newly ported skill extends the fast path without touching
+    this gate."""
     if timeline.overlays:
-        return False
+        from .. import skills  # registry (moviepy-free metadata)
+
+        known = skills.ids()
+        for ov in timeline.overlays:
+            if ov.skill_id not in known or not skills.get(ov.skill_id).ffmpeg_supported:
+                return False
     for shot in timeline.shots:
-        if shot.effects:
-            return False
-        if shot.transition_in.type not in PHASE1_TRANSITIONS:
+        for effect in shot.effects:
+            if effect.type not in FFMPEG_EFFECTS:
+                return False
+        if shot.transition_in.type not in FFMPEG_TRANSITIONS:
             return False
     return True
 

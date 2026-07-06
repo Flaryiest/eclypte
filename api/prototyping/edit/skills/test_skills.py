@@ -46,18 +46,22 @@ def _overlay(skill_id, params, start=0.0, end=1.5):
     )
 
 
-def test_escape_drawtext_text_neutralizes_filter_specials():
+def test_escape_drawtext_text_double_escapes_for_both_parsers():
     from api.prototyping.edit.skills.text_common import escape_drawtext_text
 
-    assert escape_drawtext_text("50%: it's a,b;c") == "50\\%\\: it\\'s a\\,b\\;c"
-    assert escape_drawtext_text("a\\b") == "a\\\\b"
+    # option-level escape then graph-level escape (ffmpeg parses twice):
+    # ":" -> "\:" -> "\\:" ; "'" -> "\'" -> "\\\'" ; "," -> "," -> "\,"
+    assert escape_drawtext_text("50: it's a,b;c") == "50\\\\: it\\\\\\'s a\\,b\\;c"
+    assert escape_drawtext_text("a\\b") == "a\\\\\\\\b"
     assert escape_drawtext_text("line\nbreak") == "line break"
+    # drawtext expansion syntax is defused, a lone % passes through
+    assert escape_drawtext_text("100%{x}") == "100% {x}"
 
 
 def test_escape_drawtext_path_handles_windows_fonts():
     from api.prototyping.edit.skills.text_common import escape_drawtext_path
 
-    assert escape_drawtext_path(r"C:\Windows\Fonts\arialbd.ttf") == "C\\:/Windows/Fonts/arialbd.ttf"
+    assert escape_drawtext_path(r"C:\Windows\Fonts\arialbd.ttf") == "C\\\\:/Windows/Fonts/arialbd.ttf"
 
 
 def test_text_hook_ffmpeg_fragment():

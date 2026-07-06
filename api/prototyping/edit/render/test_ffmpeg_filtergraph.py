@@ -139,28 +139,35 @@ def test_crossfade_defaults_to_quarter_second_when_unset():
     assert "duration=0.25:offset=1.75" in fc
 
 
-def test_phase1_supports_cuts_crossfade_whip_speed():
+def test_native_path_supports_cuts_crossfade_whip_speed():
     tl = _timeline([(80.0, 2.0, 1.5, "cut"),
                     (200.0, 3.0, 1.0, "crossfade"),
                     (400.0, 4.0, 1.0, "whip")])
     assert can_render_with_ffmpeg(tl) is True
 
 
-def test_phase1_rejects_overlays():
-    tl = _timeline([(80.0, 2.0, 1.0, "cut")])
+def test_native_path_supports_ported_polish():
+    # flash + freeze + punch_in + ffmpeg-supported overlays all stay fast-path.
+    tl = _timeline([(80.0, 2.0, 1.0, "cut"), (200.0, 3.0, 1.0, "flash")])
+    tl.shots[0].effects.append(Effect(type="freeze"))
+    tl.shots[1].effects.append(Effect(type="punch_in"))
     tl.overlays.append(Overlay(skill_id="text.hook", timeline_start_sec=0.0,
                                timeline_end_sec=1.0, params={"text": "hi"}))
-    assert can_render_with_ffmpeg(tl) is False
+    tl.overlays.append(Overlay(skill_id="mask.vignette", timeline_start_sec=0.0,
+                               timeline_end_sec=5.0, params={}))
+    assert can_render_with_ffmpeg(tl) is True
 
 
-def test_phase1_rejects_effects():
+def test_native_path_rejects_unknown_overlay_skill():
     tl = _timeline([(80.0, 2.0, 1.0, "cut")])
-    tl.shots[0].effects.append(Effect(type="freeze"))
+    tl.overlays.append(Overlay(skill_id="mask.bogus", timeline_start_sec=0.0,
+                               timeline_end_sec=1.0, params={}))
     assert can_render_with_ffmpeg(tl) is False
 
 
-def test_phase1_rejects_flash_transition():
-    tl = _timeline([(80.0, 2.0, 1.0, "cut"), (200.0, 3.0, 1.0, "flash")])
+def test_native_path_rejects_unported_effects():
+    tl = _timeline([(80.0, 2.0, 1.0, "cut")])
+    tl.shots[0].effects.append(Effect(type="speed_ramp"))
     assert can_render_with_ffmpeg(tl) is False
 
 

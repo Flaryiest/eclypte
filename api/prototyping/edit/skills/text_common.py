@@ -15,21 +15,31 @@ from .base import RenderContext, ResolvedOverlay
 # Keep text inside a horizontal safe margin so nothing clips on 9:16.
 SAFE_WIDTH_FRAC = 0.86
 
-# Characters the ffmpeg filter/option parsers treat specially inside a
-# -filter_complex string; each gets a backslash so drawtext renders them
-# literally instead of splitting the graph.
-_DRAWTEXT_SPECIALS = "\\'%:,;[]="
+# ffmpeg parses -filter_complex twice: the graph parser (quotes/backslashes,
+# and `[ ] , ;` as structure) runs first, then the per-filter option parser
+# (`:` separates options, `\` escapes, `'` quotes). A literal value therefore
+# needs TWO rounds of escaping — option-level first, then graph-level — per
+# the "Notes on filtergraph escaping" section of the ffmpeg-utils docs.
+_OPTION_SPECIALS = "\\':"
+_GRAPH_SPECIALS = "\\'[],;"
+
+
+def _escape(value: str, specials: str) -> str:
+    return "".join(f"\\{ch}" if ch in specials else ch for ch in value)
 
 
 def escape_drawtext_text(text: str) -> str:
-    """Escape user text for use as a drawtext `text=` option value."""
-    flattened = " ".join(text.splitlines())
-    return "".join(f"\\{ch}" if ch in _DRAWTEXT_SPECIALS else ch for ch in flattened)
+    """Double-escape user text for a drawtext `text=` option value.
+
+    Newlines flatten to spaces; `%{` (drawtext's expansion syntax) is defused
+    with a space since there is no reliable literal escape for it."""
+    flattened = " ".join(text.splitlines()).replace("%{", "% {")
+    return _escape(_escape(flattened, _OPTION_SPECIALS), _GRAPH_SPECIALS)
 
 
 def escape_drawtext_path(path: str) -> str:
-    """Escape a font path for drawtext `fontfile=` (Windows drives included)."""
-    return path.replace("\\", "/").replace(":", "\\:")
+    """Double-escape a font path for drawtext `fontfile=` (Windows drives too)."""
+    return _escape(_escape(path.replace("\\", "/"), _OPTION_SPECIALS), _GRAPH_SPECIALS)
 
 
 def drawtext_fragment(
