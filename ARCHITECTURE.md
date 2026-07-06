@@ -124,7 +124,7 @@ already-completed analyses. **Autopilot** drives this same pipeline on a schedul
   **Redis** (best-effort — swallows failures, never breaks persistence).
 - Supporting: `keys.py` (canonical object-key layout), `r2_client.py` (boto3 + presign + parallel
   `get_json_many`), `postgres_run_store.py`, `redis_run_broadcast.py` (user + run channels, 15s
-  heartbeat), `factory.py`, `staging.py`, `backfill_runs.py` (R2→Postgres migration CLI).
+  heartbeat), `factory.py`, `staging.py`.
 - **Asset listing** hides internal kinds (render/source posters, render outputs) and archived assets
   by default, and presigns poster URLs **locally** from the deterministic version blob key (no extra
   round-trip). Prefer archive/restore over hard-delete.
@@ -139,8 +139,8 @@ already-completed analyses. **Autopilot** drives this same pipeline on a schedul
   only in `requirements-modal.txt`.
 
 ### Video pipeline — `api/prototyping/video/`
-- **`analysis.py`** (CPU reference) vs **`analysis_cuda.py`** (single-pass GPU decode) — only the
-  CUDA path produces `credits` + `poster` and takes a progress callback.
+- **`analysis_cuda.py`** — the orchestrator (single-pass GPU decode); produces `credits` + `poster`
+  and reports progress. (The old CPU reference orchestrator was removed.)
 - **`scenes.py`** (PySceneDetect), **`motion.py`** (Farneback flow → motion curve + camera-movement
   class), **`impact.py`** (impacts / stillness / visual energy), **`credits.py`** (pure
   `decide_content_end` + OCR `detect_content_end` → `content_end_sec`), **`poster.py`** (pure
@@ -148,7 +148,7 @@ already-completed analyses. **Autopilot** drives this same pipeline on a schedul
 - **Modal apps:** `eclypte-video` (no OCR) and `eclypte-video-r2` (`analyze_r2`, bundles tesseract).
   Real credit trimming happens only on the R2 app.
 
-### Edit — synthesis / patterns / skills — `api/prototyping/edit/`
+### Edit — synthesis / skills — `api/prototyping/edit/`
 - **`synthesis/agent.py`** — OpenAI Responses API loop (`gpt-5.5`, `reasoning_effort="high"`).
   Tools: `query_clips` and `finish_edit`. The system prompt is sent **once**; state is carried by
   `previous_response_id`.
@@ -158,7 +158,6 @@ already-completed analyses. **Autopilot** drives this same pipeline on a schedul
   `Timeline`, the deterministic adapter (dedupe within 1.0s, **re-time all positions contiguously
   from 0** — the agent's absolute offsets are discarded, only per-shot durations survive — beat-snap
   ±0.15s, song-trim, tail fade, overlay resolution), and structural validation.
-- **`patterns/`** — a declarative pattern catalog (currently **decoupled** from the live agent path).
 - **`skills/`** — self-registering creative skills in three kinds: windowed overlays (`text.hook`,
   `text.caption`, `text.lower_third`, `mask.vignette`), whole-reel grades (`grade.cinematic`/
   `vibrant`/`moody`), and moment accents (`impact.shake`). Metadata is moviepy-free; `build_layers`
@@ -179,14 +178,14 @@ already-completed analyses. **Autopilot** drives this same pipeline on a schedul
 - `render_storage_modal.py` = `eclypte-render-r2` (`render_r2`, bundles ffmpeg).
 
 ### Edit — reference learning — `api/prototyping/edit/reference/`
-An offline CLI that ingests viral reference reels, runs the same Modal analyzers, computes
-pure-Python metrics (cut-to-downbeat offsets, per-section cut density, motion-at-cuts, impact→cut
-lag), and consolidates them (one OpenAI call) into `knowledge/references.md` with pattern
-weight-multipliers. **Two parallel pipelines** share only download+analysis+metrics: the CLI (→
-`store/*.json` + `references.md`) and the runtime path in `workflows.py` (→ Postgres records + a
-deterministic guidance string that feeds active **synthesis prompt versions**). Completed runtime
-references also parameterize the rhythm engine at plan time (`synthesis/style_profile.py` — cut lead
-+ pacing bands from the metrics); the CLI's weight-multiplier loop remains unwired and superseded.
+Ingests viral reference reels (yt_dlp download → the same Modal analyzers) and computes pure-Python
+metrics: cut-to-downbeat offsets, per-section cut density, motion-at-cuts, impact→cut lag. The
+runtime path in `workflows.py` stores completed references (with metrics) and feeds them into
+active **synthesis prompt versions** (`run_synthesis_consolidation`) and, at plan time, into the
+rhythm engine via `synthesis/style_profile.py` (cut lead + pacing-band overrides). A small
+`python -m api.prototyping.edit.reference` CLI remains for local ingest/list/show. (The old
+offline LLM-consolidation CLI, pattern catalog, and weight-multiplier loop were removed —
+superseded by the runtime loop.)
 
 ### Frontend — `web/`
 - **Marketing** (dark "Building Dreams" theme): `/`, `/pricing`, `/demo`.
@@ -253,7 +252,5 @@ Breaking any of these silently breaks another layer:
   renders exist, no upload integration); a single-scene vs. full-source-montage retention
   experiment; per-shot crop focus for fill-mode reels.
 - **Notable soft spots:** temp auth is effectively no auth; the autopilot state lock is
-  single-replica only; the pattern catalog and the CLI weight-multiplier loop
-  (`reference/annotations.py`) remain unwired (superseded by the plan-time style-profile loop in
-  `synthesis/style_profile.py`); a couple of stale Modal references / unused profiles exist in the
-  edit prototype.
+  single-replica only; git history still carries ~600 MB of media blobs (working-tree media was
+  trimmed, but clone-size relief would need a history rewrite or LFS — a deliberate deferral).
