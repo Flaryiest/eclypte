@@ -984,6 +984,19 @@ class DefaultWorkflowRunner:
             # footage energy to song energy (fields absent on old analyses).
             return _enrich_clip_results(results, video)
 
+        # Reference-derived style profile: how the ingested viral reels cut
+        # against their music parameterizes the rhythm engine + agent pacing.
+        # Computed fresh at plan time — new references shape the next edit.
+        from api.prototyping.edit.synthesis.style_profile import derive_style_profile
+
+        style_profile = derive_style_profile([
+            record.metrics
+            for record in repo.list_synthesis_references(user_id)
+            if record.status == "completed" and record.metrics
+        ])
+        if style_profile:
+            print(f"[timeline] style profile from references: {style_profile}")
+
         creative_brief = str(kwargs.get("creative_brief") or "").strip() or DEFAULT_CREATIVE_BRIEF
         self._append_progress_context(repo, progress_context, 55, "Running agent timeline planner")
         agent_output = _run_agent_synthesis(
@@ -993,6 +1006,7 @@ class DefaultWorkflowRunner:
             system_prompt=active_prompt.prompt_text,
             query_clips_fn=query_clip_index,
             source_duration_sec=content_end_sec,
+            style_profile=style_profile or None,
         )
         self._append_progress_context(repo, progress_context, 70, "Adapting agent timeline")
         rhythm_report: dict = {}
@@ -1009,8 +1023,11 @@ class DefaultWorkflowRunner:
             overlays=agent_output["overlays"],
             grade=agent_output.get("grade"),
             content_end_sec=content_end_sec,
+            style_profile=style_profile or None,
             report_sink=rhythm_report,
         )
+        if style_profile:
+            rhythm_report["style_profile"] = style_profile
         _record_timeline_sync_report(repo, user_id, run_id, rhythm_report)
         self._append_progress_context(repo, progress_context, 75, "Validating timeline coverage")
         _validate_agent_timeline_coverage(timeline, song)
@@ -1487,6 +1504,7 @@ def _run_agent_synthesis(
     system_prompt: str,
     query_clips_fn,
     source_duration_sec: float | None = None,
+    style_profile: dict | None = None,
 ) -> dict:
     from api.prototyping.edit.synthesis.agent import run_synthesis_loop
 
@@ -1497,6 +1515,7 @@ def _run_agent_synthesis(
         system_prompt=system_prompt,
         query_clips_fn=query_clips_fn,
         source_duration_sec=source_duration_sec,
+        style_profile=style_profile,
     )
 
 

@@ -33,16 +33,21 @@ Brainstormed 2026-07-06. Goal: push Eclypte's reel quality as high as possible.
    - `sync_report` telemetry persisted as a `timeline_sync_report` run event (on-beat %,
      on-downbeat %, impact registrations, pacing splits, per-section duration conformity).
    - Stays entirely on the fast native ffmpeg render path.
-2. **ffmpeg polish foundation** — generalize the skills registry beyond overlays (kinds:
-   `overlay` / `grade` / `moment`), port flash/freeze/punch_in/vignette/grain/grade/drawtext to
-   `render/ffmpeg_filtergraph.py`, make `can_render_with_ffmpeg` registry-driven. Redeploy
-   `eclypte-render-r2`.
-3. **Polish catalog** — `grade.*` presets (agent picks one per reel by mood), `impact.shake`,
-   upgraded punch, real `motion.speed_ramp` into downbeats; moment effects ride the existing
-   overlays channel (window + skill_id); optional deterministic auto-placement at
-   impact+downbeat coincidences.
-4. **Reference-derived style profiles** — wire the (currently dead) reference metrics/weight
-   loop into the rhythm engine's constants.
+2. **ffmpeg polish foundation** (implemented 2026-07-06) — skills registry generalized to kinds
+   (`overlay` / `grade` / `moment`) with per-skill `ffmpeg_supported` + `ffmpeg_filter`
+   fragments; flash (stepped eq bloom), freeze (1-frame + tpad clone), punch_in (zoompan),
+   vignette, and drawtext (double-escaped) ported to `render/ffmpeg_filtergraph.py`;
+   `can_render_with_ffmpeg` is capability-driven; every chain normalizes `settb=AVTB` so
+   xfade accepts mixed effect chains. Requires an `eclypte-render-r2` redeploy.
+3. **Polish catalog** (implemented 2026-07-06) — `grade.cinematic`/`vibrant`/`moody` presets
+   (finish_edit's optional `grade` field → full-reel overlay under the others), `impact.shake`
+   moment skill + adapter auto-accents on the strongest impact registrations, and a real
+   `speed_ramp` (1x → 1.5x into the next cut; adapter extends the source window to 1.25×,
+   beat-snap and impact registration skip ramp shots).
+4. **Reference-derived style profiles** (implemented 2026-07-06) —
+   `synthesis/style_profile.py::derive_style_profile` turns completed reference metrics into
+   `cut_lead_sec` + per-section pacing-band overrides, computed fresh at plan time and threaded
+   into the agent's pacing context, `adapt`, and the `timeline_sync_report` payload.
 
 ## Phase 1 design notes
 

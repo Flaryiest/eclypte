@@ -159,17 +159,20 @@ already-completed analyses. **Autopilot** drives this same pipeline on a schedul
   from 0** — the agent's absolute offsets are discarded, only per-shot durations survive — beat-snap
   ±0.15s, song-trim, tail fade, overlay resolution), and structural validation.
 - **`patterns/`** — a declarative pattern catalog (currently **decoupled** from the live agent path).
-- **`skills/`** — self-registering creative overlay skills (`text.hook`, `text.caption`,
-  `text.lower_third`, `mask.vignette`); metadata is moviepy-free, `build_layers` imports moviepy
-  lazily.
+- **`skills/`** — self-registering creative skills in three kinds: windowed overlays (`text.hook`,
+  `text.caption`, `text.lower_third`, `mask.vignette`), whole-reel grades (`grade.cinematic`/
+  `vibrant`/`moody`), and moment accents (`impact.shake`). Metadata is moviepy-free; `build_layers`
+  (MoviePy) imports lazily, and skills with `ffmpeg_supported = True` provide an `ffmpeg_filter`
+  fragment so they render on the fast native path.
 
 ### Edit — render + CLIP index — `api/prototyping/edit/render/`, `.../index/`
-- **Dual render dispatch** in `render/renderer.py` via `can_render_with_ffmpeg()`:
-  - **Native ffmpeg** (`ffmpeg_filtergraph.py` pure builder + `ffmpeg_run.py`) for cuts/crossfade/
-    whip with no overlays/effects — one process, ~17× faster (frame-parity verified with MoviePy).
-  - **MoviePy fallback** for effects/overlays (`flash`, `freeze`, `punch_in`, any text/mask overlay).
+- **Dual render dispatch** in `render/renderer.py` via `can_render_with_ffmpeg()` (capability-driven):
+  - **Native ffmpeg** (`ffmpeg_filtergraph.py` pure builder + `ffmpeg_run.py`) covers cuts/crossfade/
+    whip/flash, freeze/punch_in/speed_ramp, and every ffmpeg-supported skill — one process, ~17×
+    faster (frame-parity verified with MoviePy on the base montage).
+  - **MoviePy fallback** only for features without a native port (now effectively legacy).
   - Both paths encode identically: **H.264 CRF 18, `-tune animation`, yuv420p, +faststart, AAC 192k**.
-  - `whip` is silently a hard cut everywhere; `speed_ramp` / `hold` are no-op stubs.
+  - `whip` is silently a hard cut everywhere; `hold` is a no-op stub.
 - **CLIP index** — `frames.py`, `embed.py` (ViT-L/14, 768-dim), `query.py`
   (`rank_with_content_filter` drops near-black/flat frames). `storage_modal.py` =
   `eclypte-clip-index-r2` (`build_index_r2`, `query_index_r2`).
@@ -181,9 +184,9 @@ pure-Python metrics (cut-to-downbeat offsets, per-section cut density, motion-at
 lag), and consolidates them (one OpenAI call) into `knowledge/references.md` with pattern
 weight-multipliers. **Two parallel pipelines** share only download+analysis+metrics: the CLI (→
 `store/*.json` + `references.md`) and the runtime path in `workflows.py` (→ Postgres records + a
-deterministic guidance string that feeds active **synthesis prompt versions**). The runtime path is
-the one that actually shapes edits today; the weight-multiplier feedback loop is **built but not yet
-wired** to the planner.
+deterministic guidance string that feeds active **synthesis prompt versions**). Completed runtime
+references also parameterize the rhythm engine at plan time (`synthesis/style_profile.py` — cut lead
++ pacing bands from the metrics); the CLI's weight-multiplier loop remains unwired and superseded.
 
 ### Frontend — `web/`
 - **Marketing** (dark "Building Dreams" theme): `/`, `/pricing`, `/demo`.
@@ -240,14 +243,17 @@ Breaking any of these silently breaks another layer:
 
 ## Current focus & known gaps
 
-- **Active push:** Instagram Reels growth via autopilot (`reels_cinematic`, ~25s energy windows,
-  beat-snapped cuts, real flash/crossfade/freeze/punch_in effects, an audio+video tail fade, a CRF18
-  encode, and AI captions naming the source film + song).
-- **Deferred:** impact-aligned shot selection (line up video impacts with musical downbeats);
-  `whip` / `speed_ramp` / `hold` (still no-op stubs); a YouTube publishing path (16:9 renders exist,
-  no upload integration); a single-scene vs. full-source-montage retention experiment; per-shot crop
-  focus for fill-mode reels.
+- **Active push:** edit quality. All four phases of the July 2026 roadmap are implemented: the
+  rhythm engine (downbeat-preferred early snapping, impact→downbeat registration, section pacing),
+  the ffmpeg polish foundation (skill kinds + capability-driven dispatch), the polish catalog
+  (grades, impact.shake + auto-accents, real speed_ramp), and plan-time reference-derived style
+  profiles. Autopilot Reels growth continues underneath (`reels_cinematic`, ~25s energy windows,
+  review-gated Buffer publishing, AI captions).
+- **Deferred:** `whip` transition and `hold` effect (cut/no-op); a YouTube publishing path (16:9
+  renders exist, no upload integration); a single-scene vs. full-source-montage retention
+  experiment; per-shot crop focus for fill-mode reels.
 - **Notable soft spots:** temp auth is effectively no auth; the autopilot state lock is
-  single-replica only; the pattern catalog and the reference weight-multiplier loop are built but not
-  wired into the live planner; a couple of stale Modal references / unused profiles exist in the edit
-  prototype.
+  single-replica only; the pattern catalog and the CLI weight-multiplier loop
+  (`reference/annotations.py`) remain unwired (superseded by the plan-time style-profile loop in
+  `synthesis/style_profile.py`); a couple of stale Modal references / unused profiles exist in the
+  edit prototype.

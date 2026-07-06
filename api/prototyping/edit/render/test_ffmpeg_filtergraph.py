@@ -213,19 +213,20 @@ def test_freeze_shot_reads_one_frame_and_clones_it():
     assert "trim=duration=2.000,setpts=PTS-STARTPTS" in fc
 
 
-def test_punch_in_adds_dynamic_center_crop():
+def test_punch_in_zooms_center_via_zoompan():
     tl = _timeline([(80.0, 2.0, 1.0, "cut")])
     tl.shots[0].effects.append(Effect(type="punch_in"))
     fc = _filter_complex(build_command(tl, source="/s.mp4", audio="/a.wav", out_path="/o.mp4"))
-    # zoom 1.0 -> 1.06 over the shot via a shrinking centered crop, scaled back
-    assert "crop=w='iw/(1+0.06*t/2.000)':h='ih/(1+0.06*t/2.000)':x='(iw-ow)/2':y='(ih-oh)/2',scale=1080:1920" in fc
+    # zoom 1.0 -> 1.06 across the shot's 60 frames (2s @ 30fps), centered
+    assert ("zoompan=z='1+0.06*on/60':d=1:"
+            "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30") in fc
 
 
 def test_plain_shot_has_no_effect_chains():
     tl = _timeline([(80.0, 2.0, 1.0, "cut")])
     fc = _filter_complex(build_command(tl, source="/s.mp4", audio="/a.wav", out_path="/o.mp4"))
     assert "tpad" not in fc
-    assert "crop=w='iw/" not in fc
+    assert "zoompan" not in fc
     assert "eq=brightness" not in fc
 
 

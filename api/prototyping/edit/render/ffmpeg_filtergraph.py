@@ -120,18 +120,23 @@ def _video_chain(input_idx: int, shot: Shot, w: int, h: int, fps: int,
         chain.append(f"setpts=PTS/{speed:g}")
     chain += _fit_chain(w, h, crop, focus_x)
     if _has_effect(shot, "punch_in"):
-        # Slow center zoom 1.0 -> PUNCH_IN_END_SCALE over the shot: shrink a
-        # centered crop with t, then scale back to the output size. Mirrors
+        # Slow center zoom 1.0 -> PUNCH_IN_END_SCALE over the shot. crop can't
+        # animate its w/h (config-time only), so zoompan does the zoom: `on` is
+        # the output frame index, d=1 emits one frame per input frame. Mirrors
         # effects._punch_in.
-        zoom = f"(1+{PUNCH_IN_END_SCALE - 1.0:g}*t/{dur:.3f})"
+        frames = max(1, round(dur * fps))
         chain.append(
-            f"crop=w='iw/{zoom}':h='ih/{zoom}':x='(iw-ow)/2':y='(ih-oh)/2',scale={w}:{h}"
+            f"zoompan=z='1+{PUNCH_IN_END_SCALE - 1.0:g}*on/{frames}':d=1:"
+            f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={w}x{h}:fps={fps}"
         )
     if shot.transition_in.type == "flash":
         chain += _flash_steps(shot.transition_in.duration_sec or FLASH_DURATION_SEC)
     chain += ["setsar=1", f"fps={fps}", "format=yuv420p"]
     if frozen:
         chain.append(f"trim=duration={dur:.3f},setpts=PTS-STARTPTS")
+    # Normalize the timebase: effect chains (tpad/zoompan) emit different
+    # timebases than plain ones, and xfade refuses mismatched inputs.
+    chain.append("settb=AVTB")
     return f"[{input_idx}:v]" + ",".join(chain) + f"[{out_label}]"
 
 
@@ -140,7 +145,7 @@ def _ramp_chains(shot_idx: int, in_a: int, in_b: int, shot: Shot,
     """Two fitted halves — the second retimed to SPEED_RAMP_END x — concatenated
     back into the shot's `[v{shot_idx}]` stream."""
     fit = _fit_chain(w, h, crop, focus_x)
-    tail = ["setsar=1", f"fps={fps}", "format=yuv420p"]
+    tail = ["setsar=1", f"fps={fps}", "format=yuv420p", "settb=AVTB"]
     first = list(fit)
     if shot.transition_in.type == "flash":
         first += _flash_steps(shot.transition_in.duration_sec or FLASH_DURATION_SEC)

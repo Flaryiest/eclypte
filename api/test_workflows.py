@@ -515,6 +515,72 @@ def test_agent_timeline_enriches_query_results_and_emits_sync_report(monkeypatch
     assert "pacing_splits" in payload
 
 
+def test_agent_timeline_derives_style_profile_from_references(monkeypatch):
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    audio, source_video, music_analysis, video_analysis = _publish_timeline_inputs(repo)
+    _publish_artifact(
+        repo,
+        file_id="file_clip_index",
+        kind="clip_index",
+        filename="source.npz",
+        body=b"npz",
+        content_type="application/x-numpy-data",
+        input_file_version_ids=[source_video["version_id"]],
+        created_by_step=CLIP_INDEX_BUILD_STEP,
+    )
+    # one completed reference whose editors cut 0.05s before the downbeat
+    ref = repo.create_synthesis_reference(user_id="user_123", url="https://x/reel")
+    repo.update_synthesis_reference(
+        user_id="user_123",
+        reference_id=ref.reference_id,
+        status="completed",
+        metrics={
+            "cut_offsets_to_downbeats": {"n": 12, "median": -0.05},
+            "cut_density_per_section": {"chorus": {"cuts_per_downbeat": 2.0}},
+        },
+    )
+    run = _create_timeline_agent_run(repo)
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setattr(runner, "_r2_config_payload", lambda: {"bucket": "test"})
+    monkeypatch.setattr(
+        "api.workflows._build_clip_index_r2",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("clip index should be reused")),
+    )
+
+    captured = {}
+
+    def fake_synthesis(**kwargs):
+        captured.update(kwargs)
+        return {
+            "shots": [{"start_time": 0.0, "end_time": 4.0, "source_timestamp": 2.0}],
+            "overlays": [],
+        }
+
+    monkeypatch.setattr("api.workflows._run_agent_synthesis", fake_synthesis)
+
+    runner.run_timeline_plan(
+        user_id="user_123",
+        run_id=run.run_id,
+        audio=audio,
+        source_video=source_video,
+        music_analysis=music_analysis,
+        video_analysis=video_analysis,
+        creative_brief="Cut like the references.",
+    )
+
+    # the derived profile reaches the agent...
+    assert captured["style_profile"]["cut_lead_sec"] == 0.05
+    assert captured["style_profile"]["pacing_bands_beats"]["chorus"][0] > 0
+    # ...and is recorded on the sync-report telemetry event
+    events = [
+        e for e in repo.list_run_events(RunRef(user_id="user_123", run_id=run.run_id))
+        if e.event_type == "timeline_sync_report"
+    ]
+    assert events and events[0].payload["style_profile"]["reference_count"] == 1
+
+
 def test_agent_timeline_emits_parent_progress_milestones(monkeypatch):
     store = InMemoryObjectStore()
     repo = StorageRepository(store)
