@@ -83,16 +83,19 @@ TOOLS = [
                 "overlays": {
                     "type": "array",
                     "description": (
-                        "Optional text/mask overlay layers composited over the reel. "
-                        "Omit entirely if none. Use sparingly."
+                        "Optional windowed skill layers (text, masks, moment accents) "
+                        "composited over the reel. Omit entirely if none. Use sparingly."
                     ),
                     "items": {
                         "type": "object",
                         "properties": {
                             "skill_id": {
                                 "type": "string",
-                                "enum": sorted(skills.ids()),
-                                "description": "Which overlay skill to apply.",
+                                "enum": sorted(
+                                    sid for sid in skills.ids()
+                                    if skills.get(sid).kind != "grade"
+                                ),
+                                "description": "Which windowed skill to apply.",
                             },
                             "text": {
                                 "type": "string",
@@ -103,6 +106,16 @@ TOOLS = [
                         },
                         "required": ["skill_id", "start_time", "end_time"],
                     },
+                },
+                "grade": {
+                    "type": "string",
+                    "enum": sorted(
+                        sid for sid in skills.ids() if skills.get(sid).kind == "grade"
+                    ),
+                    "description": (
+                        "Optional whole-reel color grade. Pick the one matching the "
+                        "footage's mood, or omit for an ungraded look."
+                    ),
                 },
             },
             "required": ["timeline"],
@@ -181,18 +194,26 @@ def _format_short_edit_context(song_duration_sec: float) -> str:
 
 
 def _format_overlay_skills() -> str:
+    catalog = skills.agent_catalog()
+    windowed = [e for e in catalog if e["kind"] != "grade"]
+    grades = [e for e in catalog if e["kind"] == "grade"]
     lines = [
-        "Available overlay skills (optional text/mask layers added via the "
-        "`overlays` field of finish_edit):"
+        "Available creative skills.",
+        "Windowed skills (via the `overlays` field of finish_edit):",
     ]
-    for entry in skills.agent_catalog():
+    for entry in windowed:
         lines.append(f"- {entry['id']}: {entry['description']}")
+    if grades:
+        lines.append("Whole-reel color grades (via the optional `grade` field, pick at most one):")
+        for entry in grades:
+            lines.append(f"- {entry['id']}: {entry['description']}")
     lines.append(
         "Do not add any overlay by default — most edits should ship with NO "
         "overlays at all. Only add a text overlay when the user's brief "
         "explicitly asks for on-screen text. When you do, keep it short and "
         "legible and give each overlay a start_time/end_time inside the song "
-        "duration. text.* skills need a `text` value; mask.* skills do not."
+        "duration. text.* skills need a `text` value; mask.* skills do not. "
+        "A grade is encouraged when the footage has a clear mood."
     )
     return "\n".join(lines)
 
@@ -328,7 +349,11 @@ def run_synthesis_loop(
                 issued_query = True
             elif tc.name == "finish_edit":
                 print("Agent finished editing.")
-                return {"shots": args["timeline"], "overlays": args.get("overlays") or []}
+                return {
+                    "shots": args["timeline"],
+                    "overlays": args.get("overlays") or [],
+                    "grade": args.get("grade"),
+                }
 
         next_input: list[dict] = list(tool_outputs)
         if issued_query:

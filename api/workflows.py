@@ -1007,6 +1007,7 @@ class DefaultWorkflowRunner:
             crop_focus_x=export_options.crop_focus_x,
             audio_start_sec=export_options.audio_start_sec,
             overlays=agent_output["overlays"],
+            grade=agent_output.get("grade"),
             content_end_sec=content_end_sec,
             report_sink=rhythm_report,
         )

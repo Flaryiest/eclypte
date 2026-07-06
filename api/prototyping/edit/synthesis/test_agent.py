@@ -208,6 +208,39 @@ def test_pacing_targets_skipped_without_segments():
         assert "Pacing targets" not in first_input
 
 
+def test_finish_edit_returns_grade():
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai, \
+         patch("api.prototyping.edit.synthesis.agent.query_clips"):
+
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        finish = _fake_response(
+            [_function_call(
+                "finish_edit",
+                '{"timeline": [{"start_time": 0, "end_time": 2, "source_timestamp": 5.0}], '
+                '"grade": "grade.cinematic"}',
+                "call_1",
+            )],
+            response_id="resp_1",
+        )
+        mock_client.responses.create = MagicMock(side_effect=[finish])
+
+        result = run_synthesis_loop("dummy.mp4", "make a cool video")
+
+        assert result["grade"] == "grade.cinematic"
+
+
+def test_grade_enum_exposed_in_finish_edit_tool():
+    from api.prototyping.edit.synthesis.agent import TOOLS
+
+    finish = next(t for t in TOOLS if t["name"] == "finish_edit")
+    grade_prop = finish["parameters"]["properties"]["grade"]
+    assert "grade.cinematic" in grade_prop["enum"]
+    assert "grade.vibrant" in grade_prop["enum"]
+    # only grade-kind skills belong in this enum
+    assert "text.hook" not in grade_prop["enum"]
+
+
 def test_overlay_skill_catalog_injected_into_user_prompt():
     with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai, \
          patch("api.prototyping.edit.synthesis.agent.query_clips"):

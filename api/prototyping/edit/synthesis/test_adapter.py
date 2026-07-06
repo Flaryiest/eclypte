@@ -497,6 +497,32 @@ def test_adapt_splits_overlong_chorus_shot_end_to_end():
     validate_timeline(tl, source_duration_sec=SOURCE_DURATION)
 
 
+def test_adapt_maps_grade_to_full_reel_overlay():
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH,
+               grade="grade.cinematic")
+    assert tl.overlays[0].skill_id == "grade.cinematic"
+    assert tl.overlays[0].timeline_start_sec == 0.0
+    assert tl.overlays[0].timeline_end_sec == pytest.approx(tl.output.duration_sec)
+
+
+def test_adapt_grade_renders_under_other_overlays():
+    overlays = [{"skill_id": "text.hook", "text": "yo", "start_time": 0.0, "end_time": 1.0}]
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH,
+               overlays=overlays, grade="grade.moody")
+    # grade first so text draws over graded footage
+    assert [o.skill_id for o in tl.overlays] == ["grade.moody", "text.hook"]
+
+
+def test_adapt_drops_unknown_or_nongrade_grade():
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH,
+               grade="grade.bogus")
+    assert tl.overlays == []
+    # a non-grade skill id can't sneak in through the grade channel
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH,
+               grade="text.hook")
+    assert tl.overlays == []
+
+
 def test_adapt_report_sink_always_has_sync_report():
     report: dict = {}
     tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH, report_sink=report)

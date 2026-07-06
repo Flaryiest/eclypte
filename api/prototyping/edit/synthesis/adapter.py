@@ -39,6 +39,7 @@ def adapt(
     crop_focus_x: float = 0.5,
     audio_start_sec: float = 0.0,
     overlays: list[dict] | None = None,
+    grade: str | None = None,
     content_end_sec: float | None = None,
     report_sink: dict | None = None,
 ) -> Timeline:
@@ -195,6 +196,10 @@ def adapt(
             f"{record['downbeat_sec']}s (shift {record['shift_sec']:+.3f}s)"
         )
 
+    resolved_overlays = _resolve_grade(grade, round(last_end, 3)) + _resolve_overlays(
+        overlays or [], round(last_end, 3)
+    )
+
     fade = tail_fade_for(round(last_end, 3))
     timeline = Timeline(
         source=SourceRef(video=source_video_path, audio=audio_path),
@@ -210,7 +215,7 @@ def adapt(
         audio=AudioSpec(path=audio_path, start_sec=round(audio_start_sec, 3), fade_out_sec=fade),
         shots=shots,
         markers=Markers(beats_used_sec=beats_used, sections=sections),
-        overlays=_resolve_overlays(overlays or [], round(last_end, 3)),
+        overlays=resolved_overlays,
     )
 
     validate_timeline(timeline, source_duration_sec=effective_source_end)
@@ -221,6 +226,29 @@ def adapt(
         report_sink["pacing_splits"] = split_records
 
     return timeline
+
+
+def _resolve_grade(grade_id: str | None, duration_sec: float) -> list[Overlay]:
+    """Turn the agent's optional grade choice into a full-reel overlay.
+
+    Placed FIRST in the overlay list so text/moment skills render on top of
+    the graded footage. Like overlays, a bad grade is dropped with a log —
+    grading is decorative, never worth failing the edit."""
+    if not grade_id:
+        return []
+    from .. import skills  # registry (moviepy-free metadata)
+
+    if grade_id not in skills.ids() or skills.get(grade_id).kind != "grade":
+        print(f"adapter: dropped unknown grade {grade_id!r}")
+        return []
+    return [
+        Overlay(
+            skill_id=grade_id,
+            timeline_start_sec=0.0,
+            timeline_end_sec=duration_sec,
+            params={},
+        )
+    ]
 
 
 def _resolve_overlays(raw_overlays: list[dict], duration_sec: float) -> list[Overlay]:

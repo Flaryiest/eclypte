@@ -99,3 +99,35 @@ def test_vignette_ffmpeg_fragment_maps_strength_to_angle():
     frag = skill.ffmpeg_filter(_overlay("mask.vignette", {"strength": 0.6}, end=6.0), _ctx())
     # a = 0.2 + 0.9*0.6 = 0.74
     assert frag == "vignette=a=0.7400:enable='between(t,0.000,6.000)'"
+
+
+GRADE_IDS = {"grade.cinematic", "grade.vibrant", "grade.moody"}
+
+
+def test_grade_skills_registered_with_grade_kind():
+    assert GRADE_IDS <= skills.ids()
+    for gid in GRADE_IDS:
+        skill = skills.get(gid)
+        assert skill.kind == "grade"
+        assert skill.ffmpeg_supported is True
+
+
+def test_grade_fragments_are_windowed_eq_chains():
+    frag = skills.get("grade.cinematic").ffmpeg_filter(
+        _overlay("grade.cinematic", {}, end=25.0), _ctx()
+    )
+    assert frag.startswith("eq=contrast=1.05:saturation=1.08:enable=")
+    assert "colorbalance=" in frag
+    assert "between(t,0.000,25.000)" in frag
+
+    vibrant = skills.get("grade.vibrant").ffmpeg_filter(
+        _overlay("grade.vibrant", {}, end=25.0), _ctx()
+    )
+    assert "saturation=1.22" in vibrant
+
+
+def test_grade_build_layers_is_noop_on_moviepy_path():
+    layers = skills.get("grade.moody").build_layers(
+        _overlay("grade.moody", {}, end=25.0), _ctx()
+    )
+    assert layers == []
