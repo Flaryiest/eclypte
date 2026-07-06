@@ -9,27 +9,6 @@ RADIAL_RATIO = 0.55
 FLOW_NORM_PERCENTILE = 95
 
 
-def motion_per_scene(video_path, scene, fps_hz):
-    start_sec, end_sec = scene
-    start_frame = int(round(start_sec * fps_hz))
-    end_frame = int(round(end_sec * fps_hz))
-
-    mags, vxs, vys, rads, diffs = [], [], [], [], []
-    prev = None
-    for gray in _iter_gray_small(video_path, start_frame, end_frame):
-        if prev is not None:
-            flow = cv2.calcOpticalFlowFarneback(prev, gray, None, 0.5, 3, 15, 3, 5, 1.2, 0)
-            m, vx, vy, rad = flow_stats(flow)
-            mags.append(m)
-            vxs.append(vx)
-            vys.append(vy)
-            rads.append(rad)
-            diffs.append(float(np.mean(np.abs(gray.astype(np.int16) - prev.astype(np.int16)))))
-        prev = gray
-
-    return build_motion_dict(mags, vxs, vys, rads, diffs, start_sec, fps_hz)
-
-
 def build_motion_dict(mags, vxs, vys, rads, diffs, start_sec, fps_hz):
     if not mags:
         return _empty_motion(fps_hz)
@@ -83,21 +62,6 @@ def to_gray_small(frame):
         new_h = int(round(h * scale))
         frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
     return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-
-def _iter_gray_small(video_path, start_frame, end_frame):
-    cap = cv2.VideoCapture(str(video_path))
-    try:
-        if start_frame > 0:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-        count = max(0, end_frame - start_frame)
-        for _ in range(count):
-            ret, frame = cap.read()
-            if not ret:
-                break
-            yield to_gray_small(frame)
-    finally:
-        cap.release()
 
 
 def _normalize(mags):

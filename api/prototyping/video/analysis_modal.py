@@ -34,20 +34,6 @@ image = (
 )
 
 app = modal.App("eclypte-video")
-input_volume = modal.Volume.from_name("eclypte-video-input", create_if_missing=True)
-
-
-@app.cls(
-    image=image,
-    gpu="T4",
-    timeout=14400,
-    volumes={"/input": input_volume},
-)
-class VideoAnalyzer:
-    @modal.method()
-    def analyze(self, filename: str) -> dict:
-        from analysis_cuda import analyze_cuda
-        return analyze_cuda(f"/input/{filename}")
 
 
 @app.function(image=image, gpu="T4", timeout=1800)
@@ -64,16 +50,3 @@ def analyze_remote_bytes(video_bytes: bytes, filename: str = "clip.mp4") -> dict
         return analyze_cuda(tmp)
     finally:
         os.unlink(tmp)
-
-
-@app.local_entrypoint()
-def main(filename: str = "movie.mp4", out: str = None, gpu: str = "T4"):
-    import json
-
-    result = VideoAnalyzer.with_options(gpu=gpu)().analyze.remote(filename)
-    if out is None:
-        out = f"./content/{Path(filename).stem}.json"
-    Path(out).write_text(json.dumps(result, indent=2))
-    scenes = len(result["scenes"])
-    impacts = sum(len(s["impacts"]["impact_frames"]) for s in result["scenes"])
-    print(f"wrote {out}  ({scenes} scenes, {impacts} impacts, gpu={gpu})")

@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from api.prototyping.edit import skills
-from api.prototyping.edit.index.query import query_clips
 from api.prototyping.edit.synthesis.rhythm import pacing_bands_for
 from api.prototyping.edit.synthesis.system_prompt import SYSTEM_PROMPT
 
@@ -302,7 +301,7 @@ def run_synthesis_loop(
     load_dotenv(_ENV_PATH)
     client = OpenAI(api_key=openai_api_key or os.environ.get("OPENAI_API_KEY"))
     active_system_prompt = system_prompt or SYSTEM_PROMPT
-    clip_query = query_clips_fn or query_clips
+    clip_query = query_clips_fn
 
     context_blocks: list[str] = []
     if song is not None:
@@ -350,6 +349,11 @@ def run_synthesis_loop(
             print(f"Agent called tool: {tc.name} with args: {args}")
 
             if tc.name == "query_clips":
+                if clip_query is None:
+                    raise RuntimeError(
+                        "query_clips_fn is required to answer query_clips tool calls "
+                        "(production passes the eclypte-clip-index-r2 closure from workflows.py)"
+                    )
                 result = clip_query(args["query"], video_filename, args.get("top_k", 5))
                 tool_outputs.append({
                     "type": "function_call_output",

@@ -10,7 +10,6 @@ class TimelineError(ValueError):
 def validate_timeline(
     timeline: Timeline,
     *,
-    known_pattern_ids: set[str] | None = None,
     source_duration_sec: float | None = None,
 ) -> None:
     errors: list[str] = []
@@ -73,18 +72,6 @@ def validate_timeline(
                     f"overlay[{i}] end {ov.timeline_end_sec} exceeds "
                     f"output.duration_sec {timeline.output.duration_sec}"
                 )
-
-    if known_pattern_ids is not None:
-        for i, shot in enumerate(timeline.shots):
-            refs = list(shot.pattern_refs)
-            if shot.transition_in.pattern_ref:
-                refs.append(shot.transition_in.pattern_ref)
-            for eff in shot.effects:
-                if eff.pattern_ref:
-                    refs.append(eff.pattern_ref)
-            for r in refs:
-                if r not in known_pattern_ids:
-                    errors.append(f"shot[{i}] references unknown pattern_id {r!r}")
 
     if errors:
         raise TimelineError("invalid timeline:\n  - " + "\n  - ".join(errors))

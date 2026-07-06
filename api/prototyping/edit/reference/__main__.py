@@ -3,9 +3,11 @@
 
 Subcommands:
     ingest        — download a viral AMV, run analyses, write store JSON
-    consolidate   — single LLM call over all stored refs → references.md
     list          — list stored refs
     show <ref_id> — print a stored ref's meta + metrics
+
+(Reference-derived guidance now flows through the runtime style-profile loop
+— synthesis/style_profile.py — not an offline consolidation step.)
 """
 from __future__ import annotations
 
@@ -15,17 +17,11 @@ import logging
 import sys
 from pathlib import Path
 
-from .consolidate import (
-    ConsolidationValidationError,
-    consolidate as run_consolidate,
-    DEFAULT_MODEL,
-)
 from .download import ReferenceDownloadError
 from .ingest import AlreadyIngestedError, ingest as run_ingest
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 DEFAULT_STORE_DIR = PACKAGE_DIR / "store"
-DEFAULT_REFS_MD = PACKAGE_DIR.parent / "knowledge" / "references.md"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -51,13 +47,6 @@ def main(argv: list[str] | None = None) -> int:
     p_ingest.add_argument("--force", action="store_true",
                           help="overwrite an existing ref_id")
 
-    p_cons = sub.add_parser("consolidate", help="rewrite references.md via LLM")
-    p_cons.add_argument("--store-dir", type=Path, default=DEFAULT_STORE_DIR)
-    p_cons.add_argument("--references-md", type=Path, default=DEFAULT_REFS_MD)
-    p_cons.add_argument("--model", default=DEFAULT_MODEL)
-    p_cons.add_argument("--dry-run", action="store_true",
-                        help="build prompt + validate inputs, skip LLM + write")
-
     p_list = sub.add_parser("list", help="list stored references")
     p_list.add_argument("--store-dir", type=Path, default=DEFAULT_STORE_DIR)
 
@@ -69,8 +58,6 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "ingest":
         return _cmd_ingest(args)
-    if args.cmd == "consolidate":
-        return _cmd_consolidate(args)
     if args.cmd == "list":
         return _cmd_list(args)
     if args.cmd == "show":
@@ -96,25 +83,6 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
         return 1
 
     print(f"ingested → {out}")
-    return 0
-
-
-def _cmd_consolidate(args: argparse.Namespace) -> int:
-    try:
-        out = run_consolidate(
-            store_dir=args.store_dir,
-            references_md_path=args.references_md,
-            model=args.model,
-            dry_run=args.dry_run,
-        )
-    except ConsolidationValidationError as exc:
-        print(f"LLM output rejected: {exc}", file=sys.stderr)
-        return 1
-
-    if args.dry_run:
-        print(f"dry-run complete (would write {out})")
-    else:
-        print(f"consolidated → {out}")
     return 0
 
 

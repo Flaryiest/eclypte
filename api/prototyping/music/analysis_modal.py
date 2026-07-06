@@ -45,15 +45,3 @@ def analyze_remote(audio_bytes: bytes, filename: str = "input.wav", progress_con
                 detail,
             ),
         )
-
-
-@app.local_entrypoint()
-def main(wav: str = "./content/output.wav", out: str = "./content/output.json"):
-    import json
-
-    result = analyze_remote.remote(Path(wav).read_bytes(), Path(wav).name)
-    Path(out).write_text(json.dumps(result, indent=2))
-    print(
-        f"wrote {out}  ({len(result['beats_sec'])} beats, "
-        f"tempo {result['tempo_bpm']} BPM)"
-    )

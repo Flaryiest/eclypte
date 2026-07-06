@@ -121,20 +121,6 @@ Invoke-RestMethod http://127.0.0.1:8000/healthz
 curl http://127.0.0.1:8000/healthz
 ```
 
-Backfill existing R2 run history into Postgres after `DATABASE_URL` is set:
-
-```powershell
-python -m api.storage.backfill_runs
-# or one user only:
-python -m api.storage.backfill_runs --user-id local_dev
-```
-
-```bash
-python -m api.storage.backfill_runs
-# or one user only:
-python -m api.storage.backfill_runs --user-id local_dev
-```
-
 Routes:
 
 - `POST /v1/uploads` reserves a file/version/blob key and returns a presigned R2 PUT URL.
@@ -240,38 +226,13 @@ Modal function from `api/prototyping/music/analysis_modal.py`.
 
 ---
 
-## Music analysis (Modal GPU)
+## Music / video analysis (Modal GPU)
 
-Analyze an existing WAV with allin1 on Modal:
-
-```powershell
-cd api/prototyping/music
-modal run analysis_modal.py::main --wav content/output.wav
-```
-
-Output: `api/prototyping/music/content/output.json`. Production music analysis
-calls `eclypte-analysis::analyze_remote` directly from the cloud API.
-
----
-
-## Video analysis (Modal GPU)
-
-Upload the source once:
-
-```powershell
-modal volume put eclypte-video-input "api/prototyping/video/content/Project Hail Mary.mp4"
-```
-
-Run the analysis:
-
-```powershell
-cd api/prototyping/video
-modal run analysis_modal.py --filename "Project Hail Mary.mp4"
-```
-
-First run builds an OpenCV-CUDA image (~20–40 min). Subsequent runs skip to GPU inference.
-
-Output: `api/prototyping/video/content/<name>.json`.
+Production analysis calls `eclypte-analysis::analyze_remote` and
+`eclypte-video-r2::analyze_r2` directly from the cloud API; the prototype
+`eclypte-video` app's `analyze_remote_bytes` serves reference ingest. (The old
+`modal run` local entrypoints were removed — exercise the analyzers through
+the API or the reference-ingest CLI below.)
 
 ---
 
@@ -291,7 +252,7 @@ The cloud API builds missing `clip_index` artifacts on demand, reuses existing o
 
 ---
 
-## Phase-2: ingest + consolidate reference AMVs
+## Reference AMVs (local ingest CLI)
 
 ```powershell
 # Ingest one viral reference (downloads, runs music + video analysis on Modal)
@@ -303,10 +264,11 @@ python -m api.prototyping.edit.reference ingest `
 # Inspect store
 python -m api.prototyping.edit.reference list
 python -m api.prototyping.edit.reference show <ref_id>
-
-# Consolidate via LLM → rewrites knowledge/references.md
-python -m api.prototyping.edit.reference consolidate
 ```
+
+Production reference guidance flows through `POST /v1/synthesis/references` +
+`POST /v1/synthesis/consolidations` and the plan-time style-profile loop; the
+old offline LLM consolidate subcommand was removed.
 
 ---
 

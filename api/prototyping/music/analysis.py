@@ -103,7 +103,3 @@ def _assemble(*, source_path, duration_sec, sample_rate, tempo_bpm,
         },
         "segments": segments,
     }
-
-
-if __name__ == "__main__":
-    analyze("./content/output.wav", "./content/output.json")

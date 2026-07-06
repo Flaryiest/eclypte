@@ -16,7 +16,6 @@ python-dotenv
 pydantic>=2
 psycopg[binary,pool]
 redis
-pyyaml
 moviepy>=2
 boto3
 imageio-ffmpeg

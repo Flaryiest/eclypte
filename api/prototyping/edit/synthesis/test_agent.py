@@ -21,8 +21,8 @@ def _function_call(name, arguments, call_id):
 
 
 def test_run_synthesis_loop():
-    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai, \
-         patch("api.prototyping.edit.synthesis.agent.query_clips") as mock_query:
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
+        mock_query = MagicMock()
 
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
@@ -45,7 +45,7 @@ def test_run_synthesis_loop():
 
         mock_query.return_value = [{"timestamp": 5.0, "score": 0.9}]
 
-        result = run_synthesis_loop("dummy.mp4", "make a cool video")
+        result = run_synthesis_loop("dummy.mp4", "make a cool video", query_clips_fn=mock_query)
 
         assert len(result["shots"]) == 1
         assert result["shots"][0]["source_timestamp"] == 5.0
@@ -69,8 +69,7 @@ def test_run_synthesis_loop():
 
 
 def test_source_duration_added_to_user_prompt():
-    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai, \
-         patch("api.prototyping.edit.synthesis.agent.query_clips"):
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
 
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
@@ -128,8 +127,7 @@ def test_run_synthesis_loop_accepts_injected_prompt_and_query_function():
 
 
 def test_finish_edit_returns_overlays():
-    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai, \
-         patch("api.prototyping.edit.synthesis.agent.query_clips"):
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
 
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
@@ -153,8 +151,7 @@ def test_finish_edit_returns_overlays():
 
 
 def test_pacing_targets_injected_into_user_prompt():
-    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai, \
-         patch("api.prototyping.edit.synthesis.agent.query_clips"):
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
 
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
@@ -187,8 +184,7 @@ def test_pacing_targets_injected_into_user_prompt():
 
 
 def test_pacing_targets_honor_style_profile_overrides():
-    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai, \
-         patch("api.prototyping.edit.synthesis.agent.query_clips"):
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
 
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
@@ -218,8 +214,7 @@ def test_pacing_targets_honor_style_profile_overrides():
 
 
 def test_pacing_targets_skipped_without_segments():
-    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai, \
-         patch("api.prototyping.edit.synthesis.agent.query_clips"):
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
 
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
@@ -240,8 +235,7 @@ def test_pacing_targets_skipped_without_segments():
 
 
 def test_finish_edit_returns_grade():
-    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai, \
-         patch("api.prototyping.edit.synthesis.agent.query_clips"):
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
 
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
@@ -273,8 +267,7 @@ def test_grade_enum_exposed_in_finish_edit_tool():
 
 
 def test_overlay_skill_catalog_injected_into_user_prompt():
-    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai, \
-         patch("api.prototyping.edit.synthesis.agent.query_clips"):
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
 
         mock_client = MagicMock()
         mock_openai.return_value = mock_client

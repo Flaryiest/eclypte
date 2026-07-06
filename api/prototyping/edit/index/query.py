@@ -1,21 +1,12 @@
 """
-Clip retrieval for the synthesis agent.
+Clip-result ranking for the synthesis agent.
 
-- `query_clips`: CLIP semantic similarity via Modal.
-- `rank_with_content_filter`: ranks CLIP results and drops dead frames
-  (near-black / flat) so black intros, title cards, and credits are never picked.
+`rank_with_content_filter` ranks CLIP results and drops dead frames
+(near-black / flat) so black intros, title cards, and credits are never
+picked. It runs inside the `eclypte-clip-index-r2` Modal app
+(index/storage_modal.py); the control plane reaches it through
+`query_index_r2`, passed into the agent as `query_clips_fn`.
 """
-from types import SimpleNamespace
-
-try:
-    import modal
-except ImportError:  # pragma: no cover - exercised only in lightweight test envs.
-    modal = SimpleNamespace(
-        Function=SimpleNamespace(from_name=None),
-        exception=SimpleNamespace(NotFoundError=RuntimeError),
-    )
-
-_QUERY_FUNC = None
 
 # Content-filter thresholds (0-255 scale) for excluding dead frames from CLIP
 # results: frames dimmer than MIN_BRIGHTNESS (black/dark credits) or flatter than
@@ -65,30 +56,3 @@ def rank_with_content_filter(
         {"timestamp": float(timestamps[i]), "score": float(sims[i])}
         for i in order
     ]
-
-
-def _lookup_query_func(function_name: str):
-    if getattr(modal.Function, "from_name", None) is None:
-        raise RuntimeError(
-            "Modal is not installed in this environment. Install the `modal` package "
-            "or run the query paths where it is available."
-        )
-    try:
-        return modal.Function.from_name("eclypte-query", function_name)
-    except modal.exception.NotFoundError as exc:
-        raise RuntimeError(
-            f"Could not find Modal function eclypte-query::{function_name}. "
-            "Have you deployed it?"
-        ) from exc
-
-
-def query_clips(query: str, video_filename: str, top_k: int = 5) -> list[dict]:
-    """
-    Locally callable proxy to the Modal CLIP query endpoint.
-    Retrieves the top K matching timestamps for the text query from the
-    video's prebuilt CLIP index on the eclypte-edit volume.
-    """
-    global _QUERY_FUNC
-    if _QUERY_FUNC is None:
-        _QUERY_FUNC = _lookup_query_func("query_index")
-    return _QUERY_FUNC.remote(query, video_filename, top_k)

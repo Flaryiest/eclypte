@@ -7,7 +7,6 @@ import modal
 
 RENDER_PROFILES = {
     "standard": {"cpu": 16, "memory": 16384, "threads": 16},
-    "boosted": {"cpu": 24, "memory": 32768, "threads": 24},
 }
 
 image = (
@@ -15,7 +14,7 @@ image = (
     # fonts-dejavu-core gives moviepy TextClip a guaranteed font for text overlays
     # (renderer._resolve_font_path finds /usr/share/fonts/truetype/dejavu/...).
     .apt_install("ffmpeg", "fonts-dejavu-core")
-    .pip_install("moviepy>=2", "pydantic>=2", "pyyaml", "numpy", "imageio-ffmpeg", "boto3")
+    .pip_install("moviepy>=2", "pydantic>=2", "numpy", "imageio-ffmpeg", "boto3")
     .add_local_python_source("edit", "modal_s3", "progress_events")
 )
 
