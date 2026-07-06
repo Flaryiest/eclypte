@@ -190,6 +190,23 @@ def test_plain_shot_has_no_effect_chains():
     fc = _filter_complex(build_command(tl, source="/s.mp4", audio="/a.wav", out_path="/o.mp4"))
     assert "tpad" not in fc
     assert "crop=w='iw/" not in fc
+    assert "eq=brightness" not in fc
+
+
+def test_flash_transition_becomes_stepped_brightness_bloom():
+    tl = _timeline([(80.0, 2.0, 1.0, "cut"), (200.0, 3.0, 1.0, "flash")])
+    fc = _filter_complex(build_command(tl, source="/s.mp4", audio="/a.wav", out_path="/o.mp4"))
+    # rise / peak / fall over the default 0.12s, in the incoming shot's local time
+    assert "eq=brightness=0.045:enable='between(t,0.000,0.040)'" in fc
+    assert "eq=brightness=0.09:enable='between(t,0.040,0.080)'" in fc
+    assert "eq=brightness=0.045:enable='between(t,0.080,0.120)'" in fc
+
+
+def test_flash_honors_custom_duration():
+    tl = _timeline([(80.0, 2.0, 1.0, "cut"), (200.0, 3.0, 1.0, "flash")])
+    tl.shots[1].transition_in.duration_sec = 0.3
+    fc = _filter_complex(build_command(tl, source="/s.mp4", audio="/a.wav", out_path="/o.mp4"))
+    assert "eq=brightness=0.09:enable='between(t,0.100,0.200)'" in fc
 
 
 def test_tail_fade_adds_afade_and_video_fade():

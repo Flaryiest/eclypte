@@ -18,6 +18,10 @@ DEFAULT_CROSSFADE_SEC = 0.25  # mirrors transitions.CROSSFADE_DURATION_SEC
 PUNCH_IN_END_SCALE = 1.06     # mirrors effects.PUNCH_IN_END_SCALE
 FREEZE_INPUT_SEC = 0.2        # tiny input window for a frozen shot
 FREEZE_PAD_EXTRA_SEC = 0.5    # clone slack before the exact re-trim
+FLASH_DURATION_SEC = 0.12     # mirrors transitions.BLOOM_DURATION_SEC
+# transitions.py lifts brightness multiplicatively (peak x1.18); eq=brightness
+# is an additive luma shift, so +0.09 approximates that peak on mid-gray.
+FLASH_PEAK_BRIGHTNESS = 0.09
 
 # Phase 1 of the native renderer covers the base montage. Per-frame effects
 # (freeze/punch_in), the flash bloom, and overlay skills are not ported yet, so
@@ -27,6 +31,19 @@ PHASE1_TRANSITIONS = frozenset({"cut", "crossfade", "whip"})
 
 def _has_effect(shot: Shot, effect_type: str) -> bool:
     return any(e.type == effect_type for e in shot.effects)
+
+
+def _flash_steps(duration_sec: float) -> list[str]:
+    """Discrete approximation of transitions._bloom's sine envelope: three
+    equal windows lifting luma half-peak / peak / half-peak, gated with
+    ffmpeg's `enable` in the incoming shot's local time (pre-concat)."""
+    third = duration_sec / 3.0
+    half = FLASH_PEAK_BRIGHTNESS / 2.0
+    steps = []
+    for i, level in enumerate((half, FLASH_PEAK_BRIGHTNESS, half)):
+        lo, hi = i * third, (i + 1) * third
+        steps.append(f"eq=brightness={level:g}:enable='between(t,{lo:.3f},{hi:.3f})'")
+    return steps
 
 
 def can_render_with_ffmpeg(timeline: Timeline) -> bool:
@@ -82,6 +99,8 @@ def _video_chain(idx: int, shot: Shot, w: int, h: int, fps: int,
         chain.append(
             f"crop=w='iw/{zoom}':h='ih/{zoom}':x='(iw-ow)/2':y='(ih-oh)/2',scale={w}:{h}"
         )
+    if shot.transition_in.type == "flash":
+        chain += _flash_steps(shot.transition_in.duration_sec or FLASH_DURATION_SEC)
     chain += ["setsar=1", f"fps={fps}", "format=yuv420p"]
     if frozen:
         chain.append(f"trim=duration={dur:.3f},setpts=PTS-STARTPTS")
