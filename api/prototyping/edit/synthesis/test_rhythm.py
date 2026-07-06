@@ -275,6 +275,47 @@ def test_split_preserves_transition_on_first_piece_only():
     assert all(s.transition_in.type == "cut" for s in out[1:])
 
 
+# ----------------------------------------------------------- auto_accent_overlays
+
+
+def test_auto_accents_pick_strongest_registrations():
+    from api.prototyping.edit.synthesis.rhythm import auto_accent_overlays
+
+    registrations = [
+        {"shot_index": 0, "impact_sec": 101.0, "downbeat_sec": 2.0, "shift_sec": 0.1, "intensity": 0.4},
+        {"shot_index": 1, "impact_sec": 201.0, "downbeat_sec": 6.0, "shift_sec": 0.0, "intensity": 0.9},
+        {"shot_index": 2, "impact_sec": 301.0, "downbeat_sec": 10.0, "shift_sec": 0.2, "intensity": 0.7},
+    ]
+    accents = auto_accent_overlays(registrations, 12.0, max_accents=2)
+
+    assert len(accents) == 2
+    assert accents[0]["skill_id"] == "impact.shake"
+    # strongest first: downbeats 6.0 then 10.0; window is [d-0.05, d+0.40]
+    assert accents[0]["start_time"] == pytest.approx(5.95)
+    assert accents[0]["end_time"] == pytest.approx(6.4)
+    assert accents[1]["start_time"] == pytest.approx(9.95)
+
+
+def test_auto_accents_clamp_to_reel_bounds():
+    from api.prototyping.edit.synthesis.rhythm import auto_accent_overlays
+
+    registrations = [
+        {"shot_index": 0, "impact_sec": 1.0, "downbeat_sec": 0.02, "shift_sec": 0.0, "intensity": 0.9},
+    ]
+    accents = auto_accent_overlays(registrations, 0.3, max_accents=2)
+    assert accents[0]["start_time"] == pytest.approx(0.0)
+    assert accents[0]["end_time"] == pytest.approx(0.3)
+
+
+def test_registration_records_carry_intensity():
+    shots = [_shot(0, 0.0, 4.0, 100.0)]
+    video = _video_with_impacts([(102.5, 0.9)])
+    _, regs = register_impacts_to_downbeats(
+        shots, video, [2.0], effective_source_end=300.0
+    )
+    assert regs[0]["intensity"] == pytest.approx(0.9)
+
+
 # ------------------------------------------------------------------ sync_report
 
 

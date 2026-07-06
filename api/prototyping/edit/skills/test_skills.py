@@ -131,3 +131,23 @@ def test_grade_build_layers_is_noop_on_moviepy_path():
         _overlay("grade.moody", {}, end=25.0), _ctx()
     )
     assert layers == []
+
+
+def test_impact_shake_registered_as_moment_kind():
+    skill = skills.get("impact.shake")
+    assert skill.kind == "moment"
+    assert skill.ffmpeg_supported is True
+    assert skill.params_model().intensity == pytest.approx(0.5)
+
+
+def test_impact_shake_fragment_jitters_only_inside_window():
+    frag = skills.get("impact.shake").ffmpeg_filter(
+        _overlay("impact.shake", {"intensity": 0.5}, start=2.0, end=2.45), _ctx()
+    )
+    # amplitude scales with output height: (4 + 10*0.5) * 1920/1080 = 16.0
+    assert frag == (
+        "pad=w=iw+32:h=ih+32:x=16:y=16,"
+        "crop=w=iw-32:h=ih-32:"
+        "x='if(between(t,2.000,2.450),16+16.0*sin(t*73),16)':"
+        "y='if(between(t,2.000,2.450),16+12.8*cos(t*61),16)'"
+    )

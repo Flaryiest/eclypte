@@ -9,6 +9,6 @@ from .registry import agent_catalog, default_registry, get, ids, register  # noq
 
 # Importing each skill module runs its register(...) call. Add a skill = new
 # module + one import line here; remove a skill = delete the module + its line.
-from . import grade_presets, mask_vignette, text_caption, text_hook, text_lower_third  # noqa: E402,F401
+from . import grade_presets, impact_shake, mask_vignette, text_caption, text_hook, text_lower_third  # noqa: E402,F401
 
 __all__ = ["agent_catalog", "default_registry", "get", "ids", "register"]

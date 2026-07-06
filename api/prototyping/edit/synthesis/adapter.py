@@ -1,4 +1,5 @@
 from .rhythm import (
+    auto_accent_overlays,
     pacing_bands_for,
     pick_snap_beat,
     register_impacts_to_downbeats,
@@ -196,8 +197,15 @@ def adapt(
             f"{record['downbeat_sec']}s (shift {record['shift_sec']:+.3f}s)"
         )
 
+    raw_overlays = list(overlays or [])
+    if impact_registrations and not _has_moment_overlay(raw_overlays):
+        accents = auto_accent_overlays(impact_registrations, round(last_end, 3))
+        if accents:
+            print(f"adapter: auto-placed {len(accents)} impact.shake accent(s)")
+            raw_overlays += accents
+
     resolved_overlays = _resolve_grade(grade, round(last_end, 3)) + _resolve_overlays(
-        overlays or [], round(last_end, 3)
+        raw_overlays, round(last_end, 3)
     )
 
     fade = tail_fade_for(round(last_end, 3))
@@ -226,6 +234,19 @@ def adapt(
         report_sink["pacing_splits"] = split_records
 
     return timeline
+
+
+def _has_moment_overlay(raw_overlays: list[dict]) -> bool:
+    """True when the agent already placed a moment-kind skill itself — the
+    deterministic accent floor then stands down to respect its choices."""
+    from .. import skills  # registry (moviepy-free metadata)
+
+    known = skills.ids()
+    return any(
+        str(raw.get("skill_id") or "") in known
+        and skills.get(str(raw["skill_id"])).kind == "moment"
+        for raw in raw_overlays
+    )
 
 
 def _resolve_grade(grade_id: str | None, duration_sec: float) -> list[Overlay]:

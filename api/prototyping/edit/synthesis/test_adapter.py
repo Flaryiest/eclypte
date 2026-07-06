@@ -523,6 +523,41 @@ def test_adapt_drops_unknown_or_nongrade_grade():
     assert tl.overlays == []
 
 
+def test_adapt_auto_places_shake_accents_on_registered_downbeats():
+    song = {
+        "source": {"duration_sec": 6.0},
+        "downbeats_sec": [2.0],
+    }
+    agent = [
+        {"start_time": 0.0, "end_time": 4.0, "source_timestamp": 100.0},
+        {"start_time": 4.0, "end_time": 6.0, "source_timestamp": 200.0},
+    ]
+    tl = adapt(agent, song, _video_with_impacts([(102.5, 0.9)]), SRC_PATH, AUDIO_PATH)
+
+    shakes = [o for o in tl.overlays if o.skill_id == "impact.shake"]
+    assert len(shakes) == 1
+    assert shakes[0].timeline_start_sec == pytest.approx(1.95)
+    assert shakes[0].timeline_end_sec == pytest.approx(2.4)
+
+
+def test_adapt_skips_auto_accents_when_agent_placed_a_moment_skill():
+    song = {
+        "source": {"duration_sec": 6.0},
+        "downbeats_sec": [2.0],
+    }
+    agent = [
+        {"start_time": 0.0, "end_time": 4.0, "source_timestamp": 100.0},
+        {"start_time": 4.0, "end_time": 6.0, "source_timestamp": 200.0},
+    ]
+    overlays = [{"skill_id": "impact.shake", "start_time": 4.5, "end_time": 5.0}]
+    tl = adapt(agent, song, _video_with_impacts([(102.5, 0.9)]), SRC_PATH, AUDIO_PATH,
+               overlays=overlays)
+
+    shakes = [o for o in tl.overlays if o.skill_id == "impact.shake"]
+    assert len(shakes) == 1
+    assert shakes[0].timeline_start_sec == pytest.approx(4.5)
+
+
 def test_adapt_report_sink_always_has_sync_report():
     report: dict = {}
     tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH, report_sink=report)

@@ -160,15 +160,15 @@ def register_impacts_to_downbeats(
         if not in_downs:
             continue
         src = shot.source
-        chosen: tuple[float, float, float] | None = None
-        for impact_ts, _intensity in impacts:
+        chosen: tuple[float, float, float, float] | None = None
+        for impact_ts, intensity in impacts:
             if not (src.start_sec - budget_sec <= impact_ts <= src.end_sec + budget_sec):
                 continue
             landing = shot.timeline_start_sec + (impact_ts - src.start_sec)
             downbeat = min(in_downs, key=lambda d: abs(landing - d))
             delta = round(landing - downbeat, 3)
             if abs(delta) <= tolerance_sec:
-                chosen = (impact_ts, downbeat, 0.0)
+                chosen = (impact_ts, downbeat, 0.0, intensity)
                 break
             if abs(delta) > budget_sec:
                 continue
@@ -179,11 +179,11 @@ def register_impacts_to_downbeats(
             other_starts = [o.source.start_sec for j, o in enumerate(out) if j != i]
             if any(abs(new_start - other) <= uniqueness_sec for other in other_starts):
                 continue
-            chosen = (impact_ts, downbeat, delta)
+            chosen = (impact_ts, downbeat, delta, intensity)
             break
         if chosen is None:
             continue
-        impact_ts, downbeat, delta = chosen
+        impact_ts, downbeat, delta, intensity = chosen
         if delta != 0.0:
             out[i] = shot.model_copy(update={
                 "source": ShotSource(
@@ -196,6 +196,7 @@ def register_impacts_to_downbeats(
             "impact_sec": round(impact_ts, 3),
             "downbeat_sec": round(downbeat, 3),
             "shift_sec": delta,
+            "intensity": round(intensity, 3),
         })
     return out, registrations
 
@@ -312,6 +313,33 @@ def split_overlong_section_shots(
     if records:
         out = [s.model_copy(update={"index": i}) for i, s in enumerate(out)]
     return out, records
+
+
+ACCENT_PRE_SEC = 0.05
+ACCENT_POST_SEC = 0.40
+MAX_AUTO_ACCENTS = 2
+
+
+def auto_accent_overlays(
+    registrations: list[dict],
+    duration_sec: float,
+    *,
+    max_accents: int = MAX_AUTO_ACCENTS,
+) -> list[dict]:
+    """Deterministic accent floor: shake windows on the strongest registered
+    impact+downbeat coincidences, as raw overlay dicts for the adapter's
+    normal overlay resolution. Used only when the agent placed no moment
+    skills itself."""
+    ranked = sorted(registrations, key=lambda r: -(r.get("intensity") or 0.0))
+    accents: list[dict] = []
+    for reg in ranked[:max_accents]:
+        downbeat = float(reg["downbeat_sec"])
+        start = max(0.0, round(downbeat - ACCENT_PRE_SEC, 3))
+        end = min(float(duration_sec), round(downbeat + ACCENT_POST_SEC, 3))
+        if end - start <= 0:
+            continue
+        accents.append({"skill_id": "impact.shake", "start_time": start, "end_time": end})
+    return accents
 
 
 def sync_report(shots: list[Shot], song: dict, video: dict | None) -> dict:
