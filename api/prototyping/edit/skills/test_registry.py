@@ -41,9 +41,20 @@ def test_get_unknown_raises():
         reg.get("text.nope")
 
 
-def test_agent_catalog_lists_id_and_description():
+def test_agent_catalog_lists_id_description_and_kind():
     reg = Registry()
     reg.register(_DummySkill())
     assert reg.agent_catalog() == [
-        {"id": "text.dummy", "description": "A dummy skill for tests."}
+        {"id": "text.dummy", "description": "A dummy skill for tests.", "kind": "overlay"}
     ]
+
+
+def test_skill_defaults_to_overlay_kind_without_ffmpeg_support():
+    skill = _DummySkill()
+    assert skill.kind == "overlay"
+    assert skill.ffmpeg_supported is False
+
+
+def test_ffmpeg_filter_raises_unless_overridden():
+    with pytest.raises(NotImplementedError):
+        _DummySkill().ffmpeg_filter(None, None)

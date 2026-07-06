@@ -27,7 +27,7 @@ class Registry:
 
     def agent_catalog(self) -> list[dict]:
         return [
-            {"id": s.id, "description": s.description}
+            {"id": s.id, "description": s.description, "kind": s.kind}
             for s in self._skills.values()
         ]
 
