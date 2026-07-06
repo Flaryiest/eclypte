@@ -49,6 +49,7 @@ def render_with_ffmpeg(
     fps: int | None = None,
     progress_callback=None,
     poster_path: str | Path | None = None,
+    font_path: str | None = None,
 ) -> Path:
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -58,7 +59,7 @@ def render_with_ffmpeg(
 
     cmd = build_command(
         timeline, source=str(source), audio=str(audio), out_path=str(out_path),
-        preset=preset, threads=threads, size=size, fps=fps,
+        preset=preset, threads=threads, size=size, fps=fps, font_path=font_path,
     )
     cmd[0] = _ffmpeg_exe()
     # Insert progress/quiet flags before the trailing output path.

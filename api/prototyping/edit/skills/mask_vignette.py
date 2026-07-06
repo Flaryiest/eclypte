@@ -17,6 +17,15 @@ class MaskVignette(OverlaySkill):
         "center — no text. Optional param: strength (0-1, default 0.6)."
     )
     params_model = VignetteParams
+    ffmpeg_supported = True
+
+    def ffmpeg_filter(self, overlay: ResolvedOverlay, ctx: RenderContext) -> str:
+        strength = self.params_model(**overlay.params).strength
+        angle = 0.2 + 0.9 * strength  # radians; stronger strength = darker edges
+        return (
+            f"vignette=a={angle:.4f}:"
+            f"enable='between(t,{overlay.timeline_start_sec:.3f},{overlay.timeline_end_sec:.3f})'"
+        )
 
     def build_layers(self, overlay: ResolvedOverlay, ctx: RenderContext) -> list:
         import numpy as np

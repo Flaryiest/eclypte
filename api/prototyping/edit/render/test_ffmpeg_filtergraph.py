@@ -209,6 +209,26 @@ def test_flash_honors_custom_duration():
     assert "eq=brightness=0.09:enable='between(t,0.100,0.200)'" in fc
 
 
+def test_overlay_fragments_apply_after_assembly_before_fade():
+    tl = _timeline([(80.0, 2.0, 1.0, "cut"), (200.0, 4.0, 1.0, "cut")], video_fade=2.0)
+    tl.overlays.append(Overlay(skill_id="mask.vignette", timeline_start_sec=0.0,
+                               timeline_end_sec=6.0, params={"strength": 0.6}))
+    argv = build_command(tl, source="/s.mp4", audio="/a.wav", out_path="/o.mp4")
+    fc = _filter_complex(argv)
+    assert "vignette=a=0.7400:enable='between(t,0.000,6.000)'[ov0]" in fc
+    # the fade consumes the overlay output, so overlays fade to black too
+    assert "[ov0]fade=t=out" in fc
+
+
+def test_text_overlay_uses_provided_font_path():
+    tl = _timeline([(80.0, 2.0, 1.0, "cut")])
+    tl.overlays.append(Overlay(skill_id="text.hook", timeline_start_sec=0.0,
+                               timeline_end_sec=1.0, params={"text": "go"}))
+    fc = _filter_complex(build_command(tl, source="/s.mp4", audio="/a.wav",
+                                       out_path="/o.mp4", font_path="/fonts/overlay.otf"))
+    assert "drawtext=fontfile=/fonts/overlay.otf:text=go" in fc
+
+
 def test_tail_fade_adds_afade_and_video_fade():
     tl = _timeline([(80.0, 10.0, 1.0, "cut")], audio_fade=2.5, video_fade=2.5)
     argv = build_command(tl, source="/s.mp4", audio="/a.wav", out_path="/o.mp4")

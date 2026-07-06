@@ -12,6 +12,7 @@ yuv420p / faststart / 192k AAC).
 """
 from __future__ import annotations
 
+from ..skills.base import RenderContext, ResolvedOverlay
 from ..synthesis.timeline_schema import Shot, Timeline
 
 DEFAULT_CROSSFADE_SEC = 0.25  # mirrors transitions.CROSSFADE_DURATION_SEC
@@ -164,6 +165,7 @@ def build_command(
     threads: int | None = None,
     size: tuple[int, int] | None = None,
     fps: int | None = None,
+    font_path: str | None = None,
 ) -> list[str]:
     w, h = size or (timeline.output.width, timeline.output.height)
     out_fps = fps or timeline.output.fps
@@ -184,6 +186,24 @@ def build_command(
         for i, shot in enumerate(shots)
     ]
     video_label = _assemble_video(parts, shots)
+
+    # Skill fragments (vignette/text/grade/...) apply to the assembled stream,
+    # before the tail fade so overlays fade to black with the picture.
+    if timeline.overlays:
+        from .. import skills  # registry (moviepy-free metadata)
+
+        ctx = RenderContext(output_size=(w, h), fps=out_fps, font_path=font_path or "")
+        for k, ov in enumerate(timeline.overlays):
+            resolved = ResolvedOverlay(
+                skill_id=ov.skill_id,
+                timeline_start_sec=ov.timeline_start_sec,
+                timeline_end_sec=ov.timeline_end_sec,
+                params=ov.params,
+            )
+            fragment = skills.get(ov.skill_id).ffmpeg_filter(resolved, ctx)
+            parts.append(f"{video_label}{fragment}[ov{k}]")
+            video_label = f"[ov{k}]"
+
     fade_v = timeline.output.fade_out_sec
     if fade_v and fade_v > 0:
         # st uses the nominal duration_sec; if crossfades shrink the real video
