@@ -13,7 +13,7 @@ yuv420p / faststart / 192k AAC).
 from __future__ import annotations
 
 from ..skills.base import RenderContext, ResolvedOverlay
-from ..synthesis.timeline_schema import Shot, Timeline
+from ..synthesis.timeline_schema import SPEED_RAMP_END, Shot, Timeline
 
 DEFAULT_CROSSFADE_SEC = 0.25  # mirrors transitions.CROSSFADE_DURATION_SEC
 PUNCH_IN_END_SCALE = 1.06     # mirrors effects.PUNCH_IN_END_SCALE
@@ -28,7 +28,7 @@ FLASH_PEAK_BRIGHTNESS = 0.09
 # sets — and overlay skills without an ffmpeg port (ffmpeg_supported=False) —
 # fall back to the MoviePy renderer (see render_timeline).
 FFMPEG_TRANSITIONS = frozenset({"cut", "crossfade", "whip", "flash"})
-FFMPEG_EFFECTS = frozenset({"freeze", "punch_in"})
+FFMPEG_EFFECTS = frozenset({"freeze", "punch_in", "speed_ramp"})
 
 
 def _has_effect(shot: Shot, effect_type: str) -> bool:
@@ -70,19 +70,42 @@ def can_render_with_ffmpeg(timeline: Timeline) -> bool:
     return True
 
 
-def _shot_window(shot: Shot) -> tuple[float, float, float]:
-    """(source_start_sec, input_seconds_to_read, speed). We read duration*speed
-    seconds of source so that setpts=PTS/speed yields the shot's output duration,
-    matching MoviePy's subclipped(...).with_speed_scaled(...).with_duration(...).
-    A frozen shot only needs its first frame, so it reads a tiny window and the
-    chain clones that frame out to the shot duration (see _video_chain)."""
+def _shot_input_windows(shot: Shot) -> list[tuple[float, float]]:
+    """Per-shot (source_start_sec, input_seconds_to_read) windows.
+
+    Normal shots read duration*speed seconds so setpts=PTS/speed yields the
+    output duration. A frozen shot reads a tiny window (its chain clones the
+    first frame). A speed_ramp shot reads TWO windows — the first half at 1x,
+    the second half's footage (duration/2 * SPEED_RAMP_END) retimed to fit —
+    which _ramp_chains concatenates back into one shot stream."""
     speed = shot.speed or 1.0
     if _has_effect(shot, "freeze"):
-        return shot.source.start_sec, min(FREEZE_INPUT_SEC, shot.duration_sec), speed
-    return shot.source.start_sec, shot.duration_sec * speed, speed
+        return [(shot.source.start_sec, min(FREEZE_INPUT_SEC, shot.duration_sec))]
+    if _has_effect(shot, "speed_ramp"):
+        half = shot.duration_sec / 2.0
+        return [
+            (shot.source.start_sec, half),
+            (shot.source.start_sec + half, half * SPEED_RAMP_END),
+        ]
+    return [(shot.source.start_sec, shot.duration_sec * speed)]
 
 
-def _video_chain(idx: int, shot: Shot, w: int, h: int, fps: int,
+def _fit_chain(w: int, h: int, crop: str, focus_x: float) -> list[str]:
+    if crop in ("fill", "center"):
+        # Cover the frame then crop; x offset honors crop_focus_x, y centers.
+        # Mirrors geometry.cover_crop_offsets: x = (scaled_w - W) * focus_x.
+        return [
+            f"scale={w}:{h}:force_original_aspect_ratio=increase",
+            f"crop={w}:{h}:(iw-{w})*{focus_x:g}:(ih-{h})/2",
+        ]
+    # letterbox / per_shot
+    return [
+        f"scale={w}:{h}:force_original_aspect_ratio=decrease",
+        f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2",
+    ]
+
+
+def _video_chain(input_idx: int, shot: Shot, w: int, h: int, fps: int,
                  crop: str, focus_x: float, out_label: str) -> str:
     chain: list[str] = []
     speed = shot.speed or 1.0
@@ -95,14 +118,7 @@ def _video_chain(idx: int, shot: Shot, w: int, h: int, fps: int,
         chain.append(f"tpad=stop_mode=clone:stop_duration={dur + FREEZE_PAD_EXTRA_SEC:g}")
     elif speed != 1.0:
         chain.append(f"setpts=PTS/{speed:g}")
-    if crop in ("fill", "center"):
-        # Cover the frame then crop; x offset honors crop_focus_x, y centers.
-        # Mirrors geometry.cover_crop_offsets: x = (scaled_w - W) * focus_x.
-        chain.append(f"scale={w}:{h}:force_original_aspect_ratio=increase")
-        chain.append(f"crop={w}:{h}:(iw-{w})*{focus_x:g}:(ih-{h})/2")
-    else:  # letterbox / per_shot
-        chain.append(f"scale={w}:{h}:force_original_aspect_ratio=decrease")
-        chain.append(f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2")
+    chain += _fit_chain(w, h, crop, focus_x)
     if _has_effect(shot, "punch_in"):
         # Slow center zoom 1.0 -> PUNCH_IN_END_SCALE over the shot: shrink a
         # centered crop with t, then scale back to the output size. Mirrors
@@ -116,7 +132,23 @@ def _video_chain(idx: int, shot: Shot, w: int, h: int, fps: int,
     chain += ["setsar=1", f"fps={fps}", "format=yuv420p"]
     if frozen:
         chain.append(f"trim=duration={dur:.3f},setpts=PTS-STARTPTS")
-    return f"[{idx}:v]" + ",".join(chain) + f"[{out_label}]"
+    return f"[{input_idx}:v]" + ",".join(chain) + f"[{out_label}]"
+
+
+def _ramp_chains(shot_idx: int, in_a: int, in_b: int, shot: Shot,
+                 w: int, h: int, fps: int, crop: str, focus_x: float) -> list[str]:
+    """Two fitted halves — the second retimed to SPEED_RAMP_END x — concatenated
+    back into the shot's `[v{shot_idx}]` stream."""
+    fit = _fit_chain(w, h, crop, focus_x)
+    tail = ["setsar=1", f"fps={fps}", "format=yuv420p"]
+    first = list(fit)
+    if shot.transition_in.type == "flash":
+        first += _flash_steps(shot.transition_in.duration_sec or FLASH_DURATION_SEC)
+    return [
+        f"[{in_a}:v]" + ",".join(first + tail) + f"[r{shot_idx}a]",
+        f"[{in_b}:v]" + ",".join([f"setpts=PTS/{SPEED_RAMP_END:g}"] + fit + tail) + f"[r{shot_idx}b]",
+        f"[r{shot_idx}a][r{shot_idx}b]concat=n=2:v=1[v{shot_idx}]",
+    ]
 
 
 def _assemble_video(parts: list[str], shots: list[Shot]) -> str:
@@ -186,16 +218,26 @@ def build_command(
     n = len(shots)
 
     args = ["ffmpeg", "-y"]
+    input_map: list[list[int]] = []
+    next_input = 0
     for shot in shots:
-        start, in_secs, _ = _shot_window(shot)
-        args += ["-ss", f"{start:.3f}", "-t", f"{in_secs:.3f}", "-i", source]
+        indices: list[int] = []
+        for start, in_secs in _shot_input_windows(shot):
+            args += ["-ss", f"{start:.3f}", "-t", f"{in_secs:.3f}", "-i", source]
+            indices.append(next_input)
+            next_input += 1
+        input_map.append(indices)
+    audio_idx = next_input
     args += ["-ss", f"{timeline.audio.start_sec:.3f}",
              "-t", f"{timeline.output.duration_sec:.3f}", "-i", audio]
 
-    parts = [
-        _video_chain(i, shot, w, h, out_fps, crop, focus_x, f"v{i}")
-        for i, shot in enumerate(shots)
-    ]
+    parts: list[str] = []
+    for i, shot in enumerate(shots):
+        indices = input_map[i]
+        if len(indices) == 2:
+            parts += _ramp_chains(i, indices[0], indices[1], shot, w, h, out_fps, crop, focus_x)
+        else:
+            parts.append(_video_chain(indices[0], shot, w, h, out_fps, crop, focus_x, f"v{i}"))
     video_label = _assemble_video(parts, shots)
 
     # Skill fragments (vignette/text/grade/...) apply to the assembled stream,
@@ -234,10 +276,10 @@ def build_command(
         st = max(0.0, timeline.output.duration_sec - fade_a)
         audio_filters.append(f"afade=t=out:st={st:.3f}:d={fade_a:g}")
     if audio_filters:
-        parts.append(f"[{n}:a]" + ",".join(audio_filters) + "[aout]")
+        parts.append(f"[{audio_idx}:a]" + ",".join(audio_filters) + "[aout]")
         audio_label = "[aout]"
     else:
-        audio_label = f"{n}:a"
+        audio_label = f"{audio_idx}:a"
 
     args += ["-filter_complex", ";".join(parts), "-map", video_label, "-map", audio_label]
     args += _encode_tail(preset, threads, out_path)

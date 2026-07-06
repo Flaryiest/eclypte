@@ -151,7 +151,9 @@ def register_impacts_to_downbeats(
     out = list(shots)
     registrations: list[dict] = []
     for i, shot in enumerate(out):
-        if shot.speed != 1.0:
+        # Registration math assumes a 1:1 source->timeline mapping, which
+        # non-unit speed and speed_ramp (accelerated second half) both break.
+        if shot.speed != 1.0 or any(e.type == "speed_ramp" for e in shot.effects):
             continue
         in_downs = [
             d for d in downs

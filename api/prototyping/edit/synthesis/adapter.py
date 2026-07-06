@@ -7,6 +7,7 @@ from .rhythm import (
     sync_report,
 )
 from .timeline_schema import (
+    SPEED_RAMP_SOURCE_FACTOR,
     AudioSpec,
     Effect,
     Markers,
@@ -25,7 +26,7 @@ SOURCE_TIMESTAMP_UNIQUENESS_SEC = 1.0
 BEAT_SNAP_TOLERANCE_SEC = 0.15
 MIN_SNAPPED_SHOT_SEC = 0.4
 AGENT_TRANSITIONS = {"cut", "flash", "crossfade"}
-AGENT_EFFECTS = {"freeze", "punch_in"}
+AGENT_EFFECTS = {"freeze", "punch_in", "speed_ramp"}
 
 
 def adapt(
@@ -89,12 +90,28 @@ def adapt(
                 f"usable source duration {effective_source_end:.3f}s"
             )
 
-        src_start = max(0.0, min(src_ts, effective_source_end - duration))
-        src_end = src_start + duration
-
         # Optional agent-chosen styling; unknown values fall back to plain cuts.
         transition_raw = str(raw.get("transition_in") or "cut")
         effect_raw = str(raw.get("effect") or "")
+        effect_type = effect_raw if effect_raw in AGENT_EFFECTS else ""
+
+        # A speed_ramp consumes extra source footage (its second half plays at
+        # SPEED_RAMP_END x); extend the window, or drop the effect when the
+        # usable source can't cover it.
+        src_len = duration
+        if effect_type == "speed_ramp":
+            needed = duration * SPEED_RAMP_SOURCE_FACTOR
+            if needed <= effective_source_end:
+                src_len = needed
+            else:
+                print(
+                    f"adapter: dropped speed_ramp on agent_output[{i}] — needs "
+                    f"{needed:.3f}s of source, only {effective_source_end:.3f}s usable"
+                )
+                effect_type = ""
+
+        src_start = max(0.0, min(src_ts, effective_source_end - src_len))
+        src_end = src_start + src_len
 
         shots.append(
             Shot(
@@ -105,9 +122,7 @@ def adapt(
                 transition_in=Transition(
                     type=transition_raw if transition_raw in AGENT_TRANSITIONS else "cut"
                 ),
-                effects=(
-                    [Effect(type=effect_raw)] if effect_raw in AGENT_EFFECTS else []
-                ),
+                effects=([Effect(type=effect_type)] if effect_type else []),
             )
         )
 
@@ -349,6 +364,13 @@ def snap_shots_to_beats(
     for i in range(len(snapped) - 1):
         out_shot = snapped[i]
         in_shot = snapped[i + 1]
+        # A speed_ramp's source window was sized from its pre-snap duration;
+        # moving its boundary would desync the two-window render math.
+        if any(
+            e.type == "speed_ramp"
+            for e in (*out_shot.effects, *in_shot.effects)
+        ):
+            continue
         boundary = out_shot.timeline_end_sec
         picked = pick_snap_beat(boundary, beats, downbeats, tolerance_sec=tolerance_sec)
         if picked is None:

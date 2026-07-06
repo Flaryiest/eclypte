@@ -6,6 +6,12 @@ SCHEMA_VERSION = 1
 
 TAIL_FADE_SEC = 2.5
 
+# speed_ramp contract shared by the adapter (source-window sizing) and both
+# renderers (re-timing): 1x first half, SPEED_RAMP_END x second half, so a
+# ramped shot consumes SPEED_RAMP_SOURCE_FACTOR x its duration of source.
+SPEED_RAMP_END = 1.5
+SPEED_RAMP_SOURCE_FACTOR = 0.5 + 0.5 * SPEED_RAMP_END
+
 
 def tail_fade_for(duration_sec: float) -> float:
     """End-of-reel audio+video fade length, clamped so it never exceeds a third

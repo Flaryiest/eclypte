@@ -558,6 +558,42 @@ def test_adapt_skips_auto_accents_when_agent_placed_a_moment_skill():
     assert shakes[0].timeline_start_sec == pytest.approx(4.5)
 
 
+def test_adapt_extends_source_window_for_speed_ramp():
+    agent = [
+        {"start_time": 0.0, "end_time": 2.0, "source_timestamp": 10.0, "effect": "speed_ramp"},
+        {"start_time": 2.0, "end_time": 4.0, "source_timestamp": 60.0},
+    ]
+    tl = adapt(agent, SONG, VIDEO, SRC_PATH, AUDIO_PATH)
+
+    ramp = tl.shots[0]
+    assert [e.type for e in ramp.effects] == ["speed_ramp"]
+    # source window covers 1.25x the shot duration (second half plays at 1.5x)
+    assert ramp.source.end_sec - ramp.source.start_sec == pytest.approx(2.5)
+    validate_timeline(tl, source_duration_sec=SOURCE_DURATION)
+
+
+def test_adapt_drops_speed_ramp_when_source_cannot_extend():
+    # duration 2.0 needs 2.5s of source, but only 2.2s exist before content end
+    agent = [{"start_time": 0.0, "end_time": 2.0, "source_timestamp": 0.0, "effect": "speed_ramp"}]
+    tl = adapt(agent, SONG, VIDEO, SRC_PATH, AUDIO_PATH, content_end_sec=2.2)
+
+    assert tl.shots[0].effects == []
+    assert tl.shots[0].source.end_sec - tl.shots[0].source.start_sec == pytest.approx(2.0)
+
+
+def test_snap_skips_boundaries_touching_ramp_shots():
+    # Boundary at 2.1 would normally snap to beat 2.0, but the outgoing shot
+    # is a speed_ramp (its source window math depends on final duration).
+    song = {"source": {"duration_sec": 180.0}, "beats_sec": [2.0]}
+    agent = [
+        {"start_time": 0.0, "end_time": 2.1, "source_timestamp": 10.0, "effect": "speed_ramp"},
+        {"start_time": 2.1, "end_time": 4.0, "source_timestamp": 60.0},
+    ]
+    tl = adapt(agent, song, VIDEO, SRC_PATH, AUDIO_PATH)
+    assert tl.shots[0].timeline_end_sec == pytest.approx(2.1)
+    assert tl.markers.beats_used_sec == []
+
+
 def test_adapt_report_sink_always_has_sync_report():
     report: dict = {}
     tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH, report_sink=report)

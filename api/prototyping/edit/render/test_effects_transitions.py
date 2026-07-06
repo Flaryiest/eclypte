@@ -96,3 +96,14 @@ def test_unknown_effect_is_skipped():
     clip = _clip((50, 50, 50))
     out = apply_effects(clip, _shot(effects=[Effect(type="speed_ramp")]))
     assert out is clip
+
+
+def test_speed_ramp_time_warp_accelerates_second_half():
+    from api.prototyping.edit.render.effects import speed_ramp_time_warp
+
+    warp = speed_ramp_time_warp(2.0)
+    assert warp(0.0) == pytest.approx(0.0)
+    assert warp(0.5) == pytest.approx(0.5)     # first half plays 1:1
+    assert warp(1.0) == pytest.approx(1.0)
+    assert warp(1.5) == pytest.approx(1.75)    # second half runs at 1.5x
+    assert warp(2.0) == pytest.approx(2.5)     # consumes 1.25x duration of source

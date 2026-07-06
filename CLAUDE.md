@@ -235,7 +235,8 @@ Rendering notes:
 
 - `render_timeline` depends on timeline JSON, source video, and song audio, and auto-dispatches between the native ffmpeg path and the MoviePy fallback (see above). The native path is verified frame-parity with MoviePy on the same timeline (deep-in-shot frames pixel-near-identical; deviations of ≤~1 frame only at cut boundaries / high motion, within the ±0.15s beat-snap tolerance).
 - MoviePy v2 (fallback path) methods include `subclipped`, `with_duration`, `resized`, `concatenate_videoclips(method="compose")`, and `with_audio`.
-- Implemented effects/transitions: `flash` and `crossfade` transitions, `freeze` and `punch_in` effects — all supported on BOTH render paths (native ffmpeg chains + MoviePy frame transforms). `whip` renders as a hard cut everywhere; `speed_ramp` and `hold` are still no-op stubs. The agent opts in per shot via optional `transition_in`/`effect` fields on `finish_edit` items, mapped in `synthesis/adapter.py`.
+- Implemented effects/transitions: `flash`/`crossfade` transitions and `freeze`/`punch_in`/`speed_ramp` effects — all supported on BOTH render paths. `speed_ramp` plays the shot's first half at 1x and accelerates the second half to 1.5x into the next cut (`SPEED_RAMP_END`/`SPEED_RAMP_SOURCE_FACTOR` in `timeline_schema.py` are the shared contract): the adapter extends the shot's source window to 1.25× its duration (dropping the effect with a log when the usable source can't cover it), beat-snap skips ramp-adjacent boundaries, and impact registration skips ramp shots (their second half breaks the 1:1 time mapping). On ffmpeg it renders as two input windows (`_ramp_chains`) concatenated; on MoviePy as a `time_transform` warp applied before the duration is pinned. `whip` renders as a hard cut everywhere; `hold` is still a no-op stub. The agent opts in per shot via optional `transition_in`/`effect` fields on `finish_edit` items, mapped in `synthesis/adapter.py`.
+- Creative skill catalog beyond text/vignette: three `grade.*` presets (`cinematic`/`vibrant`/`moody` — whole-reel eq/colorbalance fragments; the agent picks at most one via finish_edit's optional `grade` field, and the adapter maps it to a full-reel overlay placed FIRST so text/moments draw over graded footage) and `impact.shake` (`kind="moment"` — a ~0.4s pad+crop jitter gated to its window). Grades and shake are ffmpeg-only (`build_layers` returns `[]` with a log on the MoviePy path — effectively unreachable since everything else is ported). When the agent places no moment skill itself, the adapter auto-accents the strongest impact+downbeat registrations with up to 2 `impact.shake` windows (`rhythm.auto_accent_overlays`; registrations now carry `intensity`).
 - The adapter beat-snaps interior shot boundaries within ±0.15s (`snap_shots_to_beats` via `rhythm.pick_snap_beat`: downbeats beat nearer plain beats, and the boundary lands `CUT_LEAD_SEC`=0.04s ahead of the anchor), records the anchors in `markers.beats_used_sec`, and never collapses a shot below 0.4s. A `timeline_sync_report` run event on the timeline run records on-beat/on-downbeat percentages, impact registrations, and pacing splits per plan.
 - Both render paths apply an end-of-reel tail fade (audio fade-out + video fade-to-black) over the reel's final seconds: native ffmpeg emits `afade`/`fade`; the MoviePy fallback uses `render/fades.py` (`audio_fade_out`/`video_fade_out` via `clip.transform`). Length comes from `timeline.audio.fade_out_sec`/`timeline.output.fade_out_sec`, set by the adapter through `tail_fade_for` (≤ ⅓ of the reel). The fade is just filters/transforms, so it does not push a cuts/crossfade timeline off the fast native path, and the mid-clip poster is unaffected.
 - The encoder writes CRF 18 / `-tune animation` / yuv420p with 192k AAC so Instagram/YouTube re-encodes start from a high-quality source (identical flags on both paths).
@@ -329,15 +330,15 @@ Operational checklist:
 - QA the first post-rhythm-engine reel: cuts should land a hair *before* beats (deliberate — `CUT_LEAD_SEC`), choruses should visibly cut faster than verses, and at least one visual hit should land on a downbeat. Check the run's `timeline_sync_report` event for the numbers.
 - Confirm `ECLYPTE_AUTOPILOT=1` (and optionally `ECLYPTE_AUTOPILOT_INTERVAL_SEC`) is set on Railway; `/healthz` reports `autopilot_loop_configured`. Without it, ticks are manual.
 
-Planned next phases (user-approved roadmap, in order):
+Phases 2 and 3 of the roadmap are implemented: the ffmpeg polish foundation (skill kinds, capability-driven dispatch, flash/freeze/punch_in/vignette/drawtext ported native) and the polish catalog (grade presets, impact.shake + auto-accents, real speed_ramp). **Redeploy `eclypte-render-r2` before the next real render** — the bundled render/skills/schema code changed.
 
-- Phase 2 — ffmpeg polish foundation: generalize the skills registry beyond overlays (kinds: `overlay`/`grade`/`moment`), port flash/freeze/punch_in/vignette/grain/grade/drawtext into `ffmpeg_filtergraph.py`, make `can_render_with_ffmpeg` registry-driven. Redeploy `eclypte-render-r2`.
-- Phase 3 — polish catalog: `grade.*` presets, `impact.shake`, upgraded punch, real `motion.speed_ramp` into downbeats; moment effects ride the existing overlays channel.
-- Phase 4 — reference-derived style profiles: wire the reference metrics/weight loop into `rhythm.py` parameters.
+Remaining phase:
+
+- Phase 4 — reference-derived style profiles: wire the reference metrics loop into `rhythm.py` parameters (derive cut lead + pacing bands from completed reference metrics at plan time).
 
 Deferred, in rough priority order:
 
-- `whip` transition and `speed_ramp`/`hold` effects (still no-op stubs; real versions arrive with Phase 2/3).
+- `whip` transition and `hold` effect (still cut/no-op).
 - YouTube publishing path (16:9 renders already exist; no upload integration).
 - Retention experiment: the "span the full source" prompt rule turns a ~25s reel into a whole-film montage — once IG insights accumulate, test single-scene reels against it and revisit the rule.
 - Per-shot crop focus for fill-mode reels; posting-time optimization stays in Buffer.

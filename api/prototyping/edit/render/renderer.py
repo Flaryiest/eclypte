@@ -23,7 +23,7 @@ from .. import skills
 from ..skills.base import RenderContext, ResolvedOverlay
 from ..synthesis.timeline_schema import OutputSpec, Shot, Timeline
 from ..synthesis.validators import validate_timeline
-from .effects import apply_effects
+from .effects import apply_effects, apply_speed_ramp, has_speed_ramp
 from .fades import audio_fade_out, video_fade_out
 from .ffmpeg_filtergraph import can_render_with_ffmpeg
 from .ffmpeg_run import render_with_ffmpeg
@@ -291,6 +291,10 @@ def _build_shot_clips(
         sub = sub.without_audio()
         if shot.speed != 1.0:
             sub = sub.with_speed_scaled(factor=shot.speed)
+        if has_speed_ramp(shot):
+            # re-time while the subclip still has its full (1.25x) source
+            # length; with_duration then pins the ramped output length.
+            sub = apply_speed_ramp(sub, shot)
         sub = sub.with_duration(shot.duration_sec)
         sub = _fit(sub, size, crop_mode, crop_focus_x)
         sub = apply_effects(sub, shot)

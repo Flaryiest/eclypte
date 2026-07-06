@@ -167,8 +167,37 @@ def test_native_path_rejects_unknown_overlay_skill():
 
 def test_native_path_rejects_unported_effects():
     tl = _timeline([(80.0, 2.0, 1.0, "cut")])
-    tl.shots[0].effects.append(Effect(type="speed_ramp"))
+    tl.shots[0].effects.append(Effect(type="hold"))
     assert can_render_with_ffmpeg(tl) is False
+
+
+def test_speed_ramp_uses_two_input_windows():
+    # A 2s ramp shot reads (start, 1.0s) at 1x and (start+1.0, 1.5s) at 1.5x,
+    # then concats the halves; the audio input index shifts accordingly.
+    tl = _timeline([(80.0, 2.0, 1.0, "cut"), (200.0, 3.0, 1.0, "cut")])
+    tl.shots[0].effects.append(Effect(type="speed_ramp"))
+    tl.shots[0].source.end_sec = 82.5  # adapter extends the window to 1.25x dur
+    argv = build_command(tl, source="/s.mp4", audio="/a.wav", out_path="/o.mp4")
+
+    # 3 video inputs (2 for the ramp shot, 1 for the plain shot) + audio
+    assert argv.count("/s.mp4") == 3
+    fc = _filter_complex(argv)
+    assert "setpts=PTS/1.5" in fc
+    assert "[r0a][r0b]concat=n=2:v=1[v0]" in fc
+    # audio is the 4th input now (index 3)
+    assert "[3:a]" in fc or "-map" in argv and "3:a" in argv
+    assert can_render_with_ffmpeg(tl) is True
+
+
+def test_speed_ramp_input_windows_math():
+    tl = _timeline([(80.0, 2.0, 1.0, "cut")])
+    tl.shots[0].effects.append(Effect(type="speed_ramp"))
+    tl.shots[0].source.end_sec = 82.5
+    argv = build_command(tl, source="/s.mp4", audio="/a.wav", out_path="/o.mp4")
+    joined = " ".join(argv)
+    # first half: -ss 80.000 -t 1.000 ; second half: -ss 81.000 -t 1.500
+    assert "-ss 80.000 -t 1.000 -i /s.mp4" in joined
+    assert "-ss 81.000 -t 1.500 -i /s.mp4" in joined
 
 
 def test_freeze_shot_reads_one_frame_and_clones_it():
