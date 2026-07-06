@@ -62,13 +62,13 @@ def _publish_artifact(
     return {"file_id": file_id, "version_id": version_ref.version_id}
 
 
-def _publish_timeline_inputs(repo: StorageRepository):
+def _publish_timeline_inputs(repo: StorageRepository, video: dict | None = None):
     song = {
         "source": {"duration_sec": 4.0},
         "tempo_bpm": 120,
         "segments": [{"start_sec": 0.0, "end_sec": 4.0, "label": "chorus"}],
     }
-    video = {
+    video = video or {
         "source": {"duration_sec": 12.0},
         "scenes": [{"index": 0, "start_sec": 0.0, "end_sec": 12.0, "duration_sec": 12.0}],
     }
@@ -394,6 +394,125 @@ def test_agent_timeline_reuses_existing_clip_index_and_active_prompt(monkeypatch
     assert completed.outputs["timeline_file_id"] == f"file_timeline_{run.run_id}"
     assert captured["system_prompt"] == "CUSTOM SYSTEM PROMPT"
     assert captured["instructions"] == "Make it cinematic."
+
+
+def test_enrich_clip_results_attaches_scene_metadata():
+    from api.workflows import _enrich_clip_results
+
+    video = {
+        "source": {"duration_sec": 12.0},
+        "scenes": [
+            {
+                "index": 0,
+                "start_sec": 0.0,
+                "end_sec": 6.0,
+                "motion": {"avg_intensity": 0.72, "camera_movement": "pan"},
+                "impacts": {"impact_frames": [{"timestamp_sec": 5.2, "intensity": 0.8}]},
+            },
+            {
+                "index": 1,
+                "start_sec": 6.0,
+                "end_sec": 12.0,
+                "motion": {"avg_intensity": 0.1, "camera_movement": "static"},
+                "impacts": {"impact_frames": []},
+            },
+        ],
+    }
+    results = [{"timestamp": 5.0, "score": 0.9}, {"timestamp": 8.0, "score": 0.5}]
+
+    enriched = _enrich_clip_results(results, video)
+
+    assert enriched[0]["motion"] == 0.72
+    assert enriched[0]["camera"] == "pan"
+    assert enriched[0]["impact_near"] is True
+    assert enriched[1]["motion"] == 0.1
+    assert enriched[1]["impact_near"] is False
+    # originals untouched (score/timestamp preserved)
+    assert enriched[0]["score"] == 0.9
+    assert results[0].get("motion") is None
+
+
+def test_enrich_clip_results_noop_without_scene_metadata():
+    from api.workflows import _enrich_clip_results
+
+    video = {"source": {"duration_sec": 12.0}, "scenes": [{"index": 0, "start_sec": 0.0, "end_sec": 12.0}]}
+    enriched = _enrich_clip_results([{"timestamp": 5.0, "score": 0.9}], video)
+
+    assert enriched == [{"timestamp": 5.0, "score": 0.9}]
+
+
+def test_agent_timeline_enriches_query_results_and_emits_sync_report(monkeypatch):
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    video = {
+        "source": {"duration_sec": 12.0},
+        "scenes": [
+            {
+                "index": 0,
+                "start_sec": 0.0,
+                "end_sec": 12.0,
+                "motion": {"avg_intensity": 0.6, "camera_movement": "handheld"},
+                "impacts": {"impact_frames": [{"timestamp_sec": 5.2, "intensity": 0.8}]},
+            }
+        ],
+    }
+    audio, source_video, music_analysis, video_analysis = _publish_timeline_inputs(repo, video=video)
+    _publish_artifact(
+        repo,
+        file_id="file_clip_index",
+        kind="clip_index",
+        filename="source.npz",
+        body=b"npz",
+        content_type="application/x-numpy-data",
+        input_file_version_ids=[source_video["version_id"]],
+        created_by_step=CLIP_INDEX_BUILD_STEP,
+    )
+    run = _create_timeline_agent_run(repo)
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setattr(runner, "_r2_config_payload", lambda: {"bucket": "test"})
+    monkeypatch.setattr(
+        "api.workflows._query_clip_index_r2",
+        lambda **_kwargs: [{"timestamp": 5.0, "score": 0.9}],
+    )
+
+    seen_results = {}
+
+    def fake_synthesis(**kwargs):
+        seen_results["query"] = kwargs["query_clips_fn"]("action", "source.mp4", 5)
+        return {
+            "shots": [{"start_time": 0.0, "end_time": 4.0, "source_timestamp": 2.0}],
+            "overlays": [],
+        }
+
+    monkeypatch.setattr("api.workflows._run_agent_synthesis", fake_synthesis)
+
+    runner.run_timeline_plan(
+        user_id="user_123",
+        run_id=run.run_id,
+        audio=audio,
+        source_video=source_video,
+        music_analysis=music_analysis,
+        video_analysis=video_analysis,
+        creative_brief="Make it hit.",
+    )
+
+    # Query results reaching the agent carry the scene metadata.
+    assert seen_results["query"][0]["motion"] == 0.6
+    assert seen_results["query"][0]["camera"] == "handheld"
+    assert seen_results["query"][0]["impact_near"] is True
+
+    # The run records a sync-report telemetry event.
+    events = [
+        event for event in repo.list_run_events(RunRef(user_id="user_123", run_id=run.run_id))
+        if event.event_type == "timeline_sync_report"
+    ]
+    assert len(events) == 1
+    payload = events[0].payload
+    assert "sync" in payload
+    assert payload["sync"]["shot_count"] >= 1
+    assert "impact_registrations" in payload
+    assert "pacing_splits" in payload
 
 
 def test_agent_timeline_emits_parent_progress_milestones(monkeypatch):

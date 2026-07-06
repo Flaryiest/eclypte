@@ -1,5 +1,10 @@
-from bisect import bisect_left
-
+from .rhythm import (
+    pacing_bands_for,
+    pick_snap_beat,
+    register_impacts_to_downbeats,
+    split_overlong_section_shots,
+    sync_report,
+)
 from .timeline_schema import (
     AudioSpec,
     Effect,
@@ -35,6 +40,7 @@ def adapt(
     audio_start_sec: float = 0.0,
     overlays: list[dict] | None = None,
     content_end_sec: float | None = None,
+    report_sink: dict | None = None,
 ) -> Timeline:
     """
     Convert `run_synthesis_loop` output into a validated renderable Timeline.
@@ -44,6 +50,12 @@ def adapt(
     the anchor+duration would run past the end of the source. Shot durations
     are preserved; timeline positions are rewritten contiguously (sorted by
     start_time) so the validator's no-gap/no-overlap rule is always met.
+
+    The rhythm engine then runs: overlong fast-section shots are split at
+    downbeats, boundaries snap to downbeat-preferred anchors slightly ahead of
+    the beat, and source windows shift so visual impacts land on downbeats.
+    When `report_sink` is given it is filled with {"sync", "impact_registrations",
+    "pacing_splits"} telemetry (never part of the timeline contract).
     """
     if not agent_output:
         raise ValueError("agent_output is empty")
@@ -143,12 +155,6 @@ def adapt(
         })
         last_end = round(new_end, 3)
 
-    shots, beats_used = snap_shots_to_beats(
-        shots,
-        [float(b) for b in song.get("beats_sec") or []],
-        source_duration_sec=effective_source_end,
-    )
-
     sections = [
         {
             "start_sec": float(s["start_sec"]),
@@ -157,6 +163,37 @@ def adapt(
         }
         for s in song.get("segments", [])
     ]
+
+    downbeats = [float(d) for d in song.get("downbeats_sec") or []]
+    shots, split_records = split_overlong_section_shots(
+        shots,
+        sections,
+        downbeats,
+        pacing_bands_for(song.get("tempo_bpm")),
+        video=video,
+        effective_source_end=effective_source_end,
+    )
+    for record in split_records:
+        print(f"adapter: split overlong shot {record['shot_index']} into {record['pieces']} pieces")
+
+    shots, beats_used = snap_shots_to_beats(
+        shots,
+        [float(b) for b in song.get("beats_sec") or []],
+        downbeats_sec=downbeats,
+        source_duration_sec=effective_source_end,
+    )
+
+    shots, impact_registrations = register_impacts_to_downbeats(
+        shots,
+        video,
+        downbeats,
+        effective_source_end=effective_source_end,
+    )
+    for record in impact_registrations:
+        print(
+            f"adapter: registered impact {record['impact_sec']}s onto downbeat "
+            f"{record['downbeat_sec']}s (shift {record['shift_sec']:+.3f}s)"
+        )
 
     fade = tail_fade_for(round(last_end, 3))
     timeline = Timeline(
@@ -177,6 +214,12 @@ def adapt(
     )
 
     validate_timeline(timeline, source_duration_sec=effective_source_end)
+
+    if report_sink is not None:
+        report_sink["sync"] = sync_report(shots, song, video)
+        report_sink["impact_registrations"] = impact_registrations
+        report_sink["pacing_splits"] = split_records
+
     return timeline
 
 
@@ -229,28 +272,28 @@ def snap_shots_to_beats(
     shots: list[Shot],
     beats_sec: list[float],
     *,
+    downbeats_sec: list[float] | None = None,
     source_duration_sec: float,
     tolerance_sec: float = BEAT_SNAP_TOLERANCE_SEC,
 ) -> tuple[list[Shot], list[float]]:
-    """Snap interior shot boundaries to the nearest beat within `tolerance_sec`.
+    """Snap interior shot boundaries onto musical anchors within `tolerance_sec`.
 
-    Cuts that land exactly on beats are what make an edit read as "on beat";
-    the agent aims for this but its timestamps drift. The first boundary (0.0)
-    and the final boundary (song end) stay fixed. Each snapped boundary moves
-    the outgoing shot's timeline/source end and the incoming shot's timeline
+    Cuts that land on beats are what make an edit read as "on beat"; the agent
+    aims for this but its timestamps drift. Anchor choice and the early-cut
+    lead come from `rhythm.pick_snap_beat`: a downbeat within tolerance beats
+    a nearer plain beat, and the boundary lands CUT_LEAD_SEC ahead of the
+    anchor (editors cut ~1 frame early). The first boundary (0.0) and the
+    final boundary (song end) stay fixed. Each snapped boundary moves the
+    outgoing shot's timeline/source end and the incoming shot's timeline
     start + source end together, so contiguity and source-range/duration
     parity are preserved. A snap is skipped when it would push either shot
     below MIN_SNAPPED_SHOT_SEC or run the outgoing source range past the end
-    of the source video. Returns the adjusted shots and the beat times used.
+    of the source video. Returns the adjusted shots and the anchor beats used.
     """
     beats = sorted(b for b in beats_sec if b > 0)
-    if not beats or len(shots) < 2:
+    downbeats = sorted(d for d in (downbeats_sec or []) if d > 0)
+    if (not beats and not downbeats) or len(shots) < 2:
         return shots, []
-
-    def nearest_beat(t: float) -> float:
-        i = bisect_left(beats, t)
-        candidates = beats[max(0, i - 1):i + 1]
-        return min(candidates, key=lambda b: abs(b - t))
 
     snapped = list(shots)
     beats_used: list[float] = []
@@ -258,12 +301,13 @@ def snap_shots_to_beats(
         out_shot = snapped[i]
         in_shot = snapped[i + 1]
         boundary = out_shot.timeline_end_sec
-        beat = nearest_beat(boundary)
-        delta = round(beat - boundary, 3)
-        if abs(beat - boundary) > tolerance_sec:
+        picked = pick_snap_beat(boundary, beats, downbeats, tolerance_sec=tolerance_sec)
+        if picked is None:
             continue
+        target, anchor = picked
+        delta = round(target - boundary, 3)
         if delta == 0.0:
-            beats_used.append(round(beat, 3))
+            beats_used.append(round(anchor, 3))
             continue
         new_out_dur = (boundary + delta) - out_shot.timeline_start_sec
         new_in_dur = in_shot.timeline_end_sec - (boundary + delta)
@@ -287,6 +331,6 @@ def snap_shots_to_beats(
                 end_sec=new_in_src_end,
             ),
         })
-        beats_used.append(round(beat, 3))
+        beats_used.append(round(anchor, 3))
 
     return snapped, sorted(set(beats_used))

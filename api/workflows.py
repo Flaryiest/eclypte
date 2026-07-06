@@ -979,7 +979,10 @@ class DefaultWorkflowRunner:
                 top_k=top_k,
             )
             # Never offer credit-region timestamps to the agent.
-            return [r for r in results if float(r.get("timestamp", 0.0)) <= content_end_sec]
+            results = [r for r in results if float(r.get("timestamp", 0.0)) <= content_end_sec]
+            # Attach scene motion/impact metadata so the agent can match
+            # footage energy to song energy (fields absent on old analyses).
+            return _enrich_clip_results(results, video)
 
         creative_brief = str(kwargs.get("creative_brief") or "").strip() or DEFAULT_CREATIVE_BRIEF
         self._append_progress_context(repo, progress_context, 55, "Running agent timeline planner")
@@ -992,6 +995,7 @@ class DefaultWorkflowRunner:
             source_duration_sec=content_end_sec,
         )
         self._append_progress_context(repo, progress_context, 70, "Adapting agent timeline")
+        rhythm_report: dict = {}
         timeline = adapt(
             agent_output=agent_output["shots"],
             song=song,
@@ -1004,7 +1008,9 @@ class DefaultWorkflowRunner:
             audio_start_sec=export_options.audio_start_sec,
             overlays=agent_output["overlays"],
             content_end_sec=content_end_sec,
+            report_sink=rhythm_report,
         )
+        _record_timeline_sync_report(repo, user_id, run_id, rhythm_report)
         self._append_progress_context(repo, progress_context, 75, "Validating timeline coverage")
         _validate_agent_timeline_coverage(timeline, song)
 
@@ -1532,6 +1538,82 @@ def _record_youtube_download_attempts(
                 "detail": attempt.detail,
             },
         )
+
+
+IMPACT_NEAR_WINDOW_SEC = 0.5
+
+
+def _enrich_clip_results(results: list[dict], video: dict) -> list[dict]:
+    """Attach scene motion/camera/impact metadata to CLIP query results.
+
+    Lets the agent match footage energy to song energy when picking shots.
+    Pure dict enrichment: fields are simply omitted when the video analysis
+    predates them, so older analyses degrade to the unenriched shape.
+    """
+    scenes = video.get("scenes") or []
+    impact_times: list[float] = []
+    for scene in scenes:
+        for frame in (scene.get("impacts") or {}).get("impact_frames") or []:
+            try:
+                impact_times.append(float(frame["timestamp_sec"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+
+    enriched: list[dict] = []
+    for result in results:
+        entry = dict(result)
+        try:
+            ts = float(result.get("timestamp", 0.0))
+        except (TypeError, ValueError):
+            enriched.append(entry)
+            continue
+        scene = next(
+            (
+                s for s in scenes
+                if float(s.get("start_sec", 0.0)) <= ts < float(s.get("end_sec", 0.0))
+            ),
+            None,
+        )
+        if scene is not None:
+            motion = scene.get("motion") or {}
+            if motion.get("avg_intensity") is not None:
+                entry["motion"] = round(float(motion["avg_intensity"]), 3)
+            if motion.get("camera_movement"):
+                entry["camera"] = str(motion["camera_movement"])
+        if impact_times:
+            entry["impact_near"] = any(
+                abs(t - ts) <= IMPACT_NEAR_WINDOW_SEC for t in impact_times
+            )
+        enriched.append(entry)
+    return enriched
+
+
+def _record_timeline_sync_report(
+    repo: StorageRepository,
+    user_id: str,
+    run_id: str,
+    report: dict,
+) -> None:
+    """Persist the adapter's rhythm telemetry as a run event (best-effort)."""
+    if not report:
+        return
+    sync = report.get("sync") or {}
+    print(
+        f"[timeline] sync report: on_beat={sync.get('cuts_on_beat_pct')}% "
+        f"on_downbeat={sync.get('cuts_on_downbeat_pct')}% "
+        f"impacts_on_downbeats={sync.get('impact_on_downbeat_shots')}/{sync.get('shot_count')} "
+        f"splits={len(report.get('pacing_splits') or [])}"
+    )
+    try:
+        repo.append_run_event(
+            run_ref=RunRef(user_id=user_id, run_id=run_id),
+            event_type="timeline_sync_report",
+            timestamp=_utc_now(),
+            event_id=f"evt_sync_{uuid.uuid4().hex[:12]}",
+            payload=report,
+        )
+    except Exception as exc:  # telemetry must never fail the run
+        print(f"[timeline] failed to record sync report: {exc}")
 
 
 @contextmanager

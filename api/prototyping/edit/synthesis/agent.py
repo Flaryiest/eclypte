@@ -8,6 +8,7 @@ from openai import OpenAI
 
 from api.prototyping.edit import skills
 from api.prototyping.edit.index.query import query_clips
+from api.prototyping.edit.synthesis.rhythm import pacing_bands_for
 from api.prototyping.edit.synthesis.system_prompt import SYSTEM_PROMPT
 
 _ENV_PATH = Path(__file__).resolve().parent / ".env"
@@ -131,6 +132,42 @@ def _format_song_context(song: dict) -> str:
     return "\n".join(lines)
 
 
+def _format_pacing_context(song: dict) -> str | None:
+    """Section-aware pacing targets, derived from tempo + segment labels.
+
+    Returned as per-run user content (not baked into the system prompt) so it
+    applies regardless of the user's active prompt version. The adapter's
+    rhythm engine enforces a backstop on fast sections; this guidance is what
+    lets the agent hit the bands on its own.
+    """
+    segments = song.get("segments", []) or []
+    if not segments:
+        return None
+    bands = pacing_bands_for(song.get("tempo_bpm"))
+    lines = ["Pacing targets (shot lengths per song section):"]
+    for seg in segments:
+        try:
+            start = float(seg["start_sec"])
+            end = float(seg["end_sec"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        label = str(seg.get("label", "")).lower()
+        lo, hi = bands.get(label, bands["default"])
+        lines.append(
+            f"- {label or 'section'} ({start:.1f}s-{end:.1f}s): aim for {lo:.1f}-{hi:.1f}s shots"
+        )
+    if len(lines) == 1:
+        return None
+    lines.append(
+        "Cut faster in high-energy sections (chorus/drop) and let shots breathe "
+        "in verses. Each query_clips result may include `motion` (0-1 scene "
+        "motion), `camera` (camera movement), and `impact_near` (a visual hit "
+        "lands there) — prefer high-motion, impact_near moments for high-energy "
+        "sections and calmer footage for quiet ones."
+    )
+    return "\n".join(lines)
+
+
 SHORT_EDIT_MAX_SEC = 40.0
 
 
@@ -239,6 +276,9 @@ def run_synthesis_loop(
     context_blocks: list[str] = []
     if song is not None:
         context_blocks.append(_format_song_context(song))
+        pacing_block = _format_pacing_context(song)
+        if pacing_block:
+            context_blocks.append(pacing_block)
     if source_duration_sec is not None and float(source_duration_sec) > 0:
         context_blocks.append(_format_source_context(source_duration_sec))
     song_duration = float((song or {}).get("source", {}).get("duration_sec", 0.0) or 0.0)

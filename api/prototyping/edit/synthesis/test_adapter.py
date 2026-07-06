@@ -338,6 +338,8 @@ def _shot(index, start, end, src_start):
 
 
 def test_adapt_snaps_interior_boundaries_to_beats():
+    # Boundaries snap CUT_LEAD_SEC (0.04s) ahead of the beat: an on-beat cut
+    # shows the incoming shot's first frame just before the beat hits.
     song = {
         "source": {"duration_sec": 180.0},
         "beats_sec": [0.5, 2.0, 4.5, 7.0],
@@ -349,17 +351,18 @@ def test_adapt_snaps_interior_boundaries_to_beats():
     ]
     tl = adapt(agent, song, VIDEO, SRC_PATH, AUDIO_PATH)
 
-    assert tl.shots[0].timeline_end_sec == pytest.approx(2.0)
-    assert tl.shots[1].timeline_start_sec == pytest.approx(2.0)
-    assert tl.shots[1].timeline_end_sec == pytest.approx(4.5)
-    assert tl.shots[2].timeline_start_sec == pytest.approx(4.5)
+    assert tl.shots[0].timeline_end_sec == pytest.approx(1.96)
+    assert tl.shots[1].timeline_start_sec == pytest.approx(1.96)
+    assert tl.shots[1].timeline_end_sec == pytest.approx(4.46)
+    assert tl.shots[2].timeline_start_sec == pytest.approx(4.46)
     # final boundary is fixed even though 6.0 has no beat
     assert tl.shots[2].timeline_end_sec == pytest.approx(6.0)
     assert tl.output.duration_sec == pytest.approx(6.0)
     # source ranges track the new durations from each shot's chosen start
-    assert tl.shots[0].source.end_sec == pytest.approx(12.0)
+    assert tl.shots[0].source.end_sec == pytest.approx(11.96)
     assert tl.shots[1].source.start_sec == pytest.approx(60.0)
     assert tl.shots[1].source.end_sec == pytest.approx(62.5)
+    # markers record the musical anchors, not the lead-adjusted positions
     assert tl.markers.beats_used_sec == [2.0, 4.5]
     validate_timeline(tl, source_duration_sec=SOURCE_DURATION)
 
@@ -399,15 +402,108 @@ def test_snap_skips_when_source_would_overrun():
     assert beats_used == []
 
 
-def test_snap_records_boundary_already_on_beat():
+def test_snap_boundary_already_on_beat_still_takes_the_lead():
+    # An exactly-on-beat boundary still moves CUT_LEAD_SEC early; the marker
+    # records the beat itself.
     shots = [_shot(0, 0.0, 2.0, 10.0), _shot(1, 2.0, 4.0, 60.0)]
     snapped, beats_used = snap_shots_to_beats(
         shots, [2.0], source_duration_sec=SOURCE_DURATION
     )
 
-    assert snapped[0].timeline_end_sec == pytest.approx(2.0)
-    assert snapped[1].timeline_start_sec == pytest.approx(2.0)
+    assert snapped[0].timeline_end_sec == pytest.approx(1.96)
+    assert snapped[1].timeline_start_sec == pytest.approx(1.96)
     assert beats_used == [2.0]
+
+
+def test_snap_prefers_downbeat_over_nearer_beat():
+    # Beat 2.0 is nearer to the 2.05 boundary, but downbeat 2.1 wins the snap.
+    shots = [_shot(0, 0.0, 2.05, 10.0), _shot(1, 2.05, 4.0, 60.0)]
+    snapped, beats_used = snap_shots_to_beats(
+        shots, [2.0], downbeats_sec=[2.1], source_duration_sec=SOURCE_DURATION
+    )
+
+    assert snapped[0].timeline_end_sec == pytest.approx(2.06)
+    assert beats_used == [2.1]
+
+
+def _video_with_impacts(impacts):
+    return {
+        "source": {"duration_sec": SOURCE_DURATION},
+        "scenes": [
+            {
+                "index": 0,
+                "start_sec": 0.0,
+                "end_sec": SOURCE_DURATION,
+                "impacts": {
+                    "impact_frames": [
+                        {"timestamp_sec": ts, "intensity": inten} for ts, inten in impacts
+                    ]
+                },
+            }
+        ],
+    }
+
+
+def test_adapt_registers_impact_onto_downbeat_end_to_end():
+    # The impact at source 102.5 naturally lands at timeline 2.5; the source
+    # window shifts +0.5s so it lands on the 2.0 downbeat instead. Timeline
+    # boundaries are untouched (4.0 is >0.15s from any anchor, so no snap).
+    song = {
+        "source": {"duration_sec": 6.0},
+        "downbeats_sec": [2.0],
+    }
+    agent = [
+        {"start_time": 0.0, "end_time": 4.0, "source_timestamp": 100.0},
+        {"start_time": 4.0, "end_time": 6.0, "source_timestamp": 200.0},
+    ]
+    report: dict = {}
+    tl = adapt(
+        agent, song, _video_with_impacts([(102.5, 0.9)]), SRC_PATH, AUDIO_PATH,
+        report_sink=report,
+    )
+
+    assert tl.shots[0].source.start_sec == pytest.approx(100.5)
+    assert tl.shots[0].source.end_sec == pytest.approx(104.5)
+    assert tl.shots[0].timeline_start_sec == 0.0
+    assert tl.shots[0].timeline_end_sec == pytest.approx(4.0)
+    assert tl.shots[1].timeline_start_sec == pytest.approx(4.0)
+    assert len(report["impact_registrations"]) == 1
+    assert report["impact_registrations"][0]["shift_sec"] == pytest.approx(0.5)
+    validate_timeline(tl, source_duration_sec=SOURCE_DURATION)
+
+
+def test_adapt_splits_overlong_chorus_shot_end_to_end():
+    # A single 6s shot in a chorus (band 1.0-2.0s at 120bpm) splits at the 2.0
+    # and 4.0 downbeats; the snap pass then pulls those boundaries 0.04s early.
+    song = {
+        "source": {"duration_sec": 6.0},
+        "tempo_bpm": 120.0,
+        "downbeats_sec": [2.0, 4.0],
+        "segments": [{"start_sec": 0.0, "end_sec": 6.0, "label": "chorus"}],
+    }
+    agent = [{"start_time": 0.0, "end_time": 6.0, "source_timestamp": 50.0}]
+    report: dict = {}
+    tl = adapt(agent, song, VIDEO, SRC_PATH, AUDIO_PATH, report_sink=report)
+
+    assert len(tl.shots) == 3
+    assert tl.shots[0].timeline_end_sec == pytest.approx(1.96)
+    assert tl.shots[1].timeline_end_sec == pytest.approx(3.96)
+    assert tl.shots[2].timeline_end_sec == pytest.approx(6.0)
+    # later pieces jumped their source forward so the splits are real cuts
+    assert tl.shots[0].source.start_sec == pytest.approx(50.0)
+    assert tl.shots[1].source.start_sec == pytest.approx(54.0)
+    assert tl.shots[2].source.start_sec == pytest.approx(56.0)
+    assert len(report["pacing_splits"]) == 1
+    validate_timeline(tl, source_duration_sec=SOURCE_DURATION)
+
+
+def test_adapt_report_sink_always_has_sync_report():
+    report: dict = {}
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH, report_sink=report)
+
+    assert report["sync"]["shot_count"] == len(tl.shots)
+    assert report["impact_registrations"] == []
+    assert report["pacing_splits"] == []
 
 
 def test_tail_fade_for_clamps_to_a_third_of_short_reels():

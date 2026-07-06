@@ -152,6 +152,62 @@ def test_finish_edit_returns_overlays():
         ]
 
 
+def test_pacing_targets_injected_into_user_prompt():
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai, \
+         patch("api.prototyping.edit.synthesis.agent.query_clips"):
+
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        finish = _fake_response(
+            [_function_call(
+                "finish_edit",
+                '{"timeline": [{"start_time": 0, "end_time": 2, "source_timestamp": 5.0}]}',
+                "call_1",
+            )],
+            response_id="resp_1",
+        )
+        mock_client.responses.create = MagicMock(side_effect=[finish])
+
+        song = {
+            "source": {"duration_sec": 60.0},
+            "tempo_bpm": 120.0,
+            "segments": [
+                {"start_sec": 0.0, "end_sec": 30.0, "label": "chorus"},
+                {"start_sec": 30.0, "end_sec": 60.0, "label": "verse"},
+            ],
+        }
+        run_synthesis_loop("dummy.mp4", "make a cool video", song=song)
+
+        first_input = mock_client.responses.create.call_args_list[0].kwargs["input"]
+        # Section-aware pacing targets (chorus band at 120bpm is 1.0-2.0s)
+        assert "Pacing targets" in first_input
+        assert "1.0-2.0s" in first_input
+        # ...and the note that query_clips results carry motion/impact metadata.
+        assert "impact_near" in first_input
+
+
+def test_pacing_targets_skipped_without_segments():
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai, \
+         patch("api.prototyping.edit.synthesis.agent.query_clips"):
+
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        finish = _fake_response(
+            [_function_call(
+                "finish_edit",
+                '{"timeline": [{"start_time": 0, "end_time": 2, "source_timestamp": 5.0}]}',
+                "call_1",
+            )],
+            response_id="resp_1",
+        )
+        mock_client.responses.create = MagicMock(side_effect=[finish])
+
+        run_synthesis_loop("dummy.mp4", "make a cool video", song={"source": {"duration_sec": 60.0}})
+
+        first_input = mock_client.responses.create.call_args_list[0].kwargs["input"]
+        assert "Pacing targets" not in first_input
+
+
 def test_overlay_skill_catalog_injected_into_user_prompt():
     with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai, \
          patch("api.prototyping.edit.synthesis.agent.query_clips"):
