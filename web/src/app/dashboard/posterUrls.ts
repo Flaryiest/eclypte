@@ -1,6 +1,6 @@
 import type { AssetSummary, FileVersionInput, PublishingPost } from "@/services/eclypteApi"
 
-export function posterKey(ref: FileVersionInput) {
+function posterKey(ref: FileVersionInput) {
     return `${ref.file_id}:${ref.version_id}`
 }
 

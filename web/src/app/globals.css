@@ -218,7 +218,7 @@ body {
   background-attachment: fixed;
   color: var(--color-primary);
   font-family:
-    var(--font-neue), var(--font-eiko), var(--font-outfit), var(--font-inter-tight),  var(--font-inter),  system-ui,
+    var(--font-neue), var(--font-eiko), var(--font-outfit), system-ui,
     Helvetica, Arial, sans-serif;
 }
 

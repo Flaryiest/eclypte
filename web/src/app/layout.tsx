@@ -1,19 +1,9 @@
 import type { Metadata } from "next";
-import { Inter, Inter_Tight, Outfit } from "next/font/google";
+import { Outfit } from "next/font/google";
 import localFont from "next/font/local";
 import { ThemeProvider } from 'next-themes'
 import { ClerkProvider } from '@clerk/nextjs'
 import "./globals.css";
-
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
-});
-
-const interTight = Inter_Tight({
-  variable: "--font-inter-tight",
-  subsets: ["latin"],
-});
 
 const outfit = Outfit({
   variable: "--font-outfit",
@@ -55,7 +45,7 @@ export default function RootLayout({
 }>) {
   return (
     <html suppressHydrationWarning lang="en">
-      <body className={`${inter.variable} ${interTight.variable} ${outfit.variable} ${neueMontreal.variable} ${eiko.variable}`}>
+      <body className={`${outfit.variable} ${neueMontreal.variable} ${eiko.variable}`}>
         <ClerkProvider>
           <ThemeProvider attribute="data-theme" defaultTheme="dark" enableSystem={false}>
               {children}

@@ -53,7 +53,7 @@ export function Skeleton({ className }: { className?: string }) {
     return <span className={`${styles.skeleton} ${className ?? ""}`} aria-hidden />
 }
 
-export function SkeletonCard() {
+function SkeletonCard() {
     return (
         <div className={styles.skeletonCard} aria-hidden>
             <Skeleton className={styles.skeletonTitle} />
@@ -410,20 +410,6 @@ export function formatClock(totalSec: number | null | undefined) {
     }
     const s = Math.max(0, Math.round(totalSec))
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`
-}
-
-// Spoken duration; e.g. 25 -> "25s", 95 -> "1m 35s".
-export function formatDuration(totalSec: number | null | undefined) {
-    if (totalSec === null || totalSec === undefined || !Number.isFinite(totalSec)) {
-        return "—"
-    }
-    const s = Math.max(0, Math.round(totalSec))
-    if (s < 60) {
-        return `${s}s`
-    }
-    const minutes = Math.floor(s / 60)
-    const rem = s % 60
-    return rem ? `${minutes}m ${String(rem).padStart(2, "0")}s` : `${minutes}m`
 }
 
 // Strips a known media/asset extension off a display name for cleaner titles,
