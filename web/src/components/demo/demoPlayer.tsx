@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useState, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react"
 import { Play } from "lucide-react"
 import styles from "./demoPlayer.module.css"
 
@@ -46,6 +46,15 @@ export function DemoTile({
 }: DemoTileProps) {
     const { activeId, setActiveId } = useContext(DemoReelContext)
     const active = activeId === id
+    const videoRef = useRef<HTMLVideoElement>(null)
+    const posterButtonRef = useRef<HTMLButtonElement>(null)
+    // The play button unmounts when the video mounts (and vice versa on end);
+    // without handoff, keyboard focus falls back to <body> both times.
+    useEffect(() => {
+        if (active) {
+            videoRef.current?.focus()
+        }
+    }, [active])
     const tileClass = [
         styles.tile,
         orientation === "portrait" ? styles.portrait : styles.landscape,
@@ -58,6 +67,7 @@ export function DemoTile({
         <div className={tileClass}>
             {active ? (
                 <video
+                    ref={videoRef}
                     className={styles.media}
                     src={src}
                     poster={poster}
@@ -65,10 +75,16 @@ export function DemoTile({
                     autoPlay
                     playsInline
                     preload="auto"
-                    onEnded={() => setActiveId(null)}
+                    aria-label={label}
+                    onEnded={() => {
+                        setActiveId(null)
+                        // Runs before the poster button remounts; refocus after paint.
+                        requestAnimationFrame(() => posterButtonRef.current?.focus())
+                    }}
                 />
             ) : (
                 <button
+                    ref={posterButtonRef}
                     type="button"
                     className={styles.posterButton}
                     onClick={() => setActiveId(id)}

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import Navbar from "@components/navbar/navbar";
 import styles from "./page.module.css";
 import HeroLayers from "@/components/hero/heroLayers";
@@ -16,7 +17,7 @@ export default function Home() {
           <HeroLayers />
           <div className={styles.heroTextContainer}>
             <h1 className={styles.heroText}>Building Dreams.</h1>
-            <h2 className={styles.heroDescription}>Creation is what makes us human. The ability to evoke emotion.</h2>
+            <p className={styles.heroDescription}>Creation is what makes us human. The ability to evoke emotion.</p>
           </div>
 
         </section>
@@ -68,9 +69,9 @@ export default function Home() {
         <section className={styles.ctaContainer}>
           <Reveal className={styles.cta}>
             <CtaShapes>
-              <button className={styles.ctaButton}>
+              <Link className={styles.ctaButton} href="/dashboard">
                 Get Started for Free
-              </button>
+              </Link>
             </CtaShapes>
           </Reveal>
         </section>

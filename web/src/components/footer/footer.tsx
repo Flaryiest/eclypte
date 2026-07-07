@@ -1,7 +1,7 @@
 import styles from "./footer.module.css"
 import Link from "next/link"
 export default function Footer() {
-    return <section className={styles.container}>
+    return <footer className={styles.container}>
         <div className={styles.footer}>
             <div className={styles.top}>
                 <div className={styles.left}>
@@ -12,13 +12,10 @@ export default function Footer() {
                         <h4 className={styles.resourcesTitle}>Resources</h4>
                         <ul className={styles.resourcesList}>
                             <li>
-                                <Link className={styles.resourceLink} href="/editor">Editor</Link>
+                                <Link className={styles.resourceLink} href="/demo">Demo</Link>
                             </li>
                             <li>
                                 <Link className={styles.resourceLink} href="/pricing">Pricing</Link>
-                            </li>
-                            <li>
-                                <a className={styles.resourceLink} href="/docs" target="_blank" rel="noopener noreferrer">Documentation</a>
                             </li>
                         </ul>
                     </div>
@@ -43,5 +40,5 @@ export default function Footer() {
                 <span className={styles.copyright}>© 2026 Eclypte. All rights reserved.</span>
             </div>
         </div>
-    </section>
+    </footer>
 }

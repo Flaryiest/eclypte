@@ -94,8 +94,6 @@
     padding: 2rem 1.8rem;
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    opacity: 0;
-    transform: translateY(26px);
     transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
         transform 0.9s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s ease;
 }
@@ -108,9 +106,11 @@
     transition-delay: 0.2s;
 }
 
-[data-revealed] .card {
-    opacity: 1;
-    transform: translateY(0);
+/* Progressive enhancement: visible by default (no-JS safe); hidden only
+   between the observer arming the wrapper and the reveal firing. */
+[data-reveal-armed]:not([data-revealed]) .card {
+    opacity: 0;
+    transform: translateY(26px);
 }
 
 .card:hover {
@@ -330,7 +330,8 @@
         transform: none;
     }
 
-    .card {
+    .card,
+    [data-reveal-armed]:not([data-revealed]) .card {
         opacity: 1;
         transform: none;
         transition: border-color 0.3s ease;

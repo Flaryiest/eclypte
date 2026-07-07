@@ -189,12 +189,12 @@
     gap: 1.6rem;
 }
 
+/* Progressive enhancement: visible by default (no-JS safe); hidden only once
+   the observer has armed the wrapper, until the reveal fires. */
 .galleryItem {
     display: flex;
     flex-direction: column;
     gap: 0.85rem;
-    opacity: 0;
-    transform: translateY(26px);
     transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
         transform 0.9s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -207,9 +207,9 @@
     transition-delay: 0.24s;
 }
 
-[data-revealed] .galleryItem {
-    opacity: 1;
-    transform: translateY(0);
+[data-reveal-armed]:not([data-revealed]) .galleryItem {
+    opacity: 0;
+    transform: translateY(26px);
 }
 
 .galleryPortraitItem {
@@ -243,8 +243,6 @@
 }
 
 .stepsGrid > * {
-    opacity: 0;
-    transform: translateY(24px);
     transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
         transform 0.9s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -257,9 +255,9 @@
     transition-delay: 0.24s;
 }
 
-[data-revealed].stepsGrid > * {
-    opacity: 1;
-    transform: translateY(0);
+[data-reveal-armed]:not([data-revealed]).stepsGrid > * {
+    opacity: 0;
+    transform: translateY(24px);
 }
 
 /* ---- cta ---- */
@@ -333,7 +331,9 @@
     }
 
     .galleryItem,
-    .stepsGrid > * {
+    .stepsGrid > *,
+    [data-reveal-armed]:not([data-revealed]) .galleryItem,
+    [data-reveal-armed]:not([data-revealed]).stepsGrid > * {
         opacity: 1;
         transform: none;
         transition: none;

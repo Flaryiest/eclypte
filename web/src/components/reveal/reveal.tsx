@@ -16,6 +16,11 @@ export default function Reveal({ children, className, threshold = 0.2 }: RevealP
         const el = ref.current
         if (!el) return
 
+        // Progressive enhancement: content is visible by default; the
+        // pre-reveal hidden state applies only once the observer is live
+        // (set directly on the node — no render, and never during SSR/no-JS,
+        // so sections can't end up permanently invisible).
+        el.setAttribute("data-reveal-armed", "")
         const observer = new IntersectionObserver(
             ([entry]) => {
                 if (entry.isIntersecting) {

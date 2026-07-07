@@ -78,4 +78,27 @@
 
 }
 
+/* The desktop row (400px brand column + 16rem side padding) cannot fit a
+   phone viewport — stack and tighten instead of clipping. */
+@media (max-width: 768px) {
+    .footer {
+        padding: 4rem 1.5rem;
+        gap: 3rem;
+    }
+
+    .top {
+        flex-direction: column;
+        gap: 2.5rem;
+    }
+
+    .left {
+        min-width: 0;
+    }
+
+    .right {
+        flex-direction: column;
+        gap: 2rem;
+    }
+}
+
 

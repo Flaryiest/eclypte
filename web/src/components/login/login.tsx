@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { SignIn } from "@clerk/nextjs"
 import styles from "./login.module.css"
 
@@ -8,13 +8,52 @@ type LoginProps = {
     onClose: () => void
 }
 
+const FOCUSABLE_SELECTOR =
+    'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
 export default function Login({ onClose }: LoginProps) {
+    const boxRef = useRef<HTMLDivElement>(null)
     useEffect(() => {
+        // Dialog contract: focus moves in on open, Tab is trapped, Escape
+        // closes, body scroll locks, and focus returns to the opener on close.
+        const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
         const onKey = (e: KeyboardEvent) => {
-            if (e.key === "Escape") onClose()
+            if (e.key === "Escape") {
+                onClose()
+                return
+            }
+            if (e.key !== "Tab" || !boxRef.current) {
+                return
+            }
+            const focusable = Array.from(
+                boxRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+            )
+            if (focusable.length === 0) {
+                e.preventDefault()
+                boxRef.current.focus()
+                return
+            }
+            const first = focusable[0]
+            const last = focusable[focusable.length - 1]
+            const active = document.activeElement
+            const inside = boxRef.current.contains(active)
+            if (e.shiftKey && (!inside || active === first)) {
+                e.preventDefault()
+                last.focus()
+            } else if (!e.shiftKey && (!inside || active === last)) {
+                e.preventDefault()
+                first.focus()
+            }
         }
         window.addEventListener("keydown", onKey)
-        return () => window.removeEventListener("keydown", onKey)
+        const previousOverflow = document.body.style.overflow
+        document.body.style.overflow = "hidden"
+        boxRef.current?.focus()
+        return () => {
+            window.removeEventListener("keydown", onKey)
+            document.body.style.overflow = previousOverflow
+            opener?.focus()
+        }
     }, [onClose])
 
     return (
@@ -24,7 +63,7 @@ export default function Login({ onClose }: LoginProps) {
                 if (e.target === e.currentTarget) onClose()
             }}
         >
-            <div className={styles.box}>
+            <div className={styles.box} role="dialog" aria-modal="true" aria-label="Sign in" tabIndex={-1} ref={boxRef}>
                 <SignIn
                     routing="hash"
                     forceRedirectUrl="/dashboard"

@@ -9,7 +9,9 @@
     top: 0;
     left: 0;
     z-index: 50000;
-    background: transparent;
+    /* Always-on scrim: the grey nav links sit over the bright hero image
+       before any scroll, where a fully transparent bar fails contrast. */
+    background: linear-gradient(rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0));
     backdrop-filter: none;
     transition: background 0.3s ease, backdrop-filter 0.3s ease;
 }

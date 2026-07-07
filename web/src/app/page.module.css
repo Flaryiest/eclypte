@@ -102,25 +102,24 @@
     padding: 4rem;
 }
 
+/* Progressive enhancement: visible by default (no-JS safe); the pre-reveal
+   hidden state applies only once the observer has armed the wrapper. */
 .stepsTitle {
     font-family: var(--font-neue);
     font-size: 3rem;
     font-weight: 400;
     color: var(--color-primary);
     transform-origin: 0% 50%;
-    opacity: 0;
-    transform: translateY(30px) rotate(5deg);
-    filter: blur(8px);
     transition:
         opacity 1.3s cubic-bezier(0.16, 1, 0.3, 1),
         transform 1.3s cubic-bezier(0.16, 1, 0.3, 1),
         filter 1.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-[data-revealed] .stepsTitle {
-    opacity: 1;
-    transform: translateY(0) rotate(0);
-    filter: blur(0);
+[data-reveal-armed]:not([data-revealed]) .stepsTitle {
+    opacity: 0;
+    transform: translateY(30px) rotate(5deg);
+    filter: blur(8px);
 }
 
 .stepsDescription {
@@ -245,7 +244,7 @@
 
 
 .statsTitle {
-    font-family: "Outfit";
+    font-family: var(--font-outfit), system-ui, sans-serif;
     font-size: 2.8rem;
     text-align: center;
 }
@@ -267,8 +266,11 @@
 }
 
 .ctaButton {
-    font-family: "outfit";
+    font-family: var(--font-outfit), system-ui, sans-serif;
     font-size: 3rem;
+    /* Rendered as a Link now — inline-block so transform/padding behave. */
+    display: inline-block;
+    text-align: center;
     background: rgb(240, 240, 240);
     color: black;
     border-radius: 1rem;
@@ -361,13 +363,27 @@
         margin: 0rem 3rem;
         font-size: 2rem;
     }
+
+    .statsImage {
+        width: 100%;
+        max-width: 400px;
+        height: auto;
+    }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .stepsTitle {
+    .stepsTitle,
+    [data-reveal-armed]:not([data-revealed]) .stepsTitle {
         opacity: 1;
         transform: none;
         filter: none;
         transition: none;
+    }
+
+    .heroText,
+    .heroDescription {
+        animation: none;
+        opacity: 1;
+        transform: none;
     }
 }
