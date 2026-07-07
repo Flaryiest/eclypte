@@ -17,7 +17,7 @@
     display: inline-flex;
     align-items: center;
     gap: 0.8rem;
-    color: var(--color-highlight, #e8a838);
+    color: var(--color-highlight);
     font-family: var(--font-neue);
     font-size: 0.72rem;
     font-weight: 600;
@@ -29,7 +29,7 @@
     content: "";
     width: 48px;
     height: 1px;
-    background: linear-gradient(90deg, rgba(232, 168, 56, 0.8), transparent);
+    background: linear-gradient(90deg, color-mix(in srgb, var(--color-highlight) 80%, transparent), transparent);
 }
 
 .sectionHead {
@@ -103,7 +103,7 @@
 .featuredFrame {
     position: relative;
     box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.9),
-        0 0 60px -20px rgba(232, 168, 56, 0.18);
+        0 0 60px -20px color-mix(in srgb, var(--color-highlight) 18%, transparent);
 }
 
 .featuredMeta {
@@ -113,7 +113,7 @@
 }
 
 .featuredTag {
-    color: var(--color-highlight, #e8a838);
+    color: var(--color-highlight);
     font-family: var(--font-neue);
     font-size: 0.68rem;
     font-weight: 600;
@@ -129,7 +129,7 @@
 }
 
 .cross {
-    color: var(--color-highlight, #e8a838);
+    color: var(--color-highlight);
     font-style: italic;
     padding: 0 0.15em;
 }
@@ -282,10 +282,10 @@
     font-size: 1.4rem;
     font-weight: 600;
     background: rgb(240, 240, 240);
-    color: #0a0a0a;
+    color: var(--color-on-highlight);
     border-radius: 0.85rem;
     padding: 0.9rem 1.8rem;
-    box-shadow: 0 2px 40px 10px rgba(232, 168, 56, 0.22);
+    box-shadow: 0 2px 40px 10px color-mix(in srgb, var(--color-highlight) 22%, transparent);
     position: relative;
     z-index: 5;
     transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.3s ease;
@@ -293,7 +293,7 @@
 
 .ctaButton:hover {
     transform: scale(1.03);
-    box-shadow: 0 2px 52px 14px rgba(232, 168, 56, 0.36);
+    box-shadow: 0 2px 52px 14px color-mix(in srgb, var(--color-highlight) 36%, transparent);
 }
 
 /* ---- responsive ---- */

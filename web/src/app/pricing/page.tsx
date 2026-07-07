@@ -78,7 +78,8 @@ function PricingCard({ tier }: { tier: Tier }) {
     return (
         <article className={className}>
             {tier.featured && <span className={styles.popularTag}>Most popular</span>}
-            <p className={styles.planName}>{tier.name}</p>
+            {/* Heading so screen-reader users can jump between plans. */}
+            <h2 className={styles.planName}>{tier.name}</h2>
             <p className={styles.price}>
                 <span className={styles.priceNum}>{tier.price}</span>
                 <span className={styles.pricePeriod}>{tier.period}</span>

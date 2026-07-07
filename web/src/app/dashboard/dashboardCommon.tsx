@@ -630,19 +630,35 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const push = useCallback((text: string, tone: "ok" | "err" = "ok") => {
         const id = ++idRef.current
         setToasts((current) => [...current, { id, text, tone }])
-        setTimeout(() => setToasts((current) => current.filter((toast) => toast.id !== id)), 3500)
+        // Errors linger longer; both remain click-dismissible below.
+        setTimeout(
+            () => setToasts((current) => current.filter((toast) => toast.id !== id)),
+            tone === "err" ? 7000 : 3500,
+        )
+    }, [])
+    const dismiss = useCallback((id: number) => {
+        setToasts((current) => current.filter((toast) => toast.id !== id))
     }, [])
     return (
         <ToastContext.Provider value={push}>
             {children}
-            <div className={styles.toastStack} role="status" aria-live="polite">
+            <div className={styles.toastStack}>
+                {/* role per item: "alert" makes errors assertive to screen
+                    readers; successes stay polite. Click dismisses. */}
                 {toasts.map((toast) => (
-                    <div key={toast.id} className={styles.toast}>
+                    <button
+                        key={toast.id}
+                        type="button"
+                        role={toast.tone === "err" ? "alert" : "status"}
+                        className={styles.toast}
+                        onClick={() => dismiss(toast.id)}
+                        title="Dismiss"
+                    >
                         <span className={toast.tone === "ok" ? styles.toastOk : styles.toastErr}>
                             {toast.tone === "ok" ? "✓" : "!"}
                         </span>
                         {toast.text}
-                    </div>
+                    </button>
                 ))}
             </div>
         </ToastContext.Provider>

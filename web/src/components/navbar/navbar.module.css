@@ -22,6 +22,9 @@
     -webkit-backdrop-filter: blur(20px);
 }
 
+/* Deliberately minimal nav (three short items) — it fits down to ~320px by
+   shrinking gaps alone. If a fourth item or longer labels are ever added,
+   introduce a collapsed/hamburger pattern instead of shrinking further. */
 .navbar {
     display: flex;
     width: 80%;

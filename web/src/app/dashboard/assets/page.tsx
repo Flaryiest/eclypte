@@ -1,6 +1,6 @@
 "use client"
 
-import { ChangeEvent, Suspense, useEffect, useMemo, useRef, useState } from "react"
+import { ChangeEvent, KeyboardEvent as ReactKeyboardEvent, Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useUser } from "@clerk/nextjs"
 import { Activity, Download, Link2, Music, Plus, RotateCcw, Send, Trash2 } from "lucide-react"
@@ -35,6 +35,7 @@ import {
 import { useAssets, usePublishingPosts } from "@/stores/dashboardResources"
 
 type LibraryTab = "films" | "songs" | "reels" | "hidden"
+const TAB_ORDER: LibraryTab[] = ["films", "songs", "reels", "hidden"]
 type UploadCard = { id: number; name: string; loaded: number; total: number; stage: string; error: string | null }
 type ImportCard = { url: string; stage: string; error: string | null }
 
@@ -100,6 +101,20 @@ function LibraryPage() {
     const setTab = (next: LibraryTab) => {
         setSelectedId(null)
         router.replace(next === "films" ? "/dashboard/assets" : `/dashboard/assets?tab=${next}`)
+    }
+
+    // ARIA tabs pattern: roving tabindex + arrow keys, selection follows focus.
+    const tabRefs = useRef<(HTMLButtonElement | null)[]>([])
+    const onTablistKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+        const dir = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0
+        if (!dir) {
+            return
+        }
+        event.preventDefault()
+        const index = TAB_ORDER.indexOf(tab)
+        const next = TAB_ORDER[(index + dir + TAB_ORDER.length) % TAB_ORDER.length]
+        setTab(next)
+        requestAnimationFrame(() => tabRefs.current[TAB_ORDER.indexOf(next)]?.focus())
     }
 
     const selected = selectedId
@@ -317,22 +332,31 @@ function LibraryPage() {
                 </div>
             )}
 
-            <div className={styles.tabPills} role="tablist" aria-label="Library">
-                {(["films", "songs", "reels"] as const).map((item) => (
+            <div className={styles.tabPills} role="tablist" aria-label="Library" onKeyDown={onTablistKeyDown}>
+                {(["films", "songs", "reels", "hidden"] as const).map((item) => (
                     <button
                         key={item}
                         type="button"
                         role="tab"
                         aria-selected={tab === item}
-                        className={tab === item ? styles.pillActive : styles.pill}
+                        tabIndex={tab === item ? 0 : -1}
+                        ref={(node) => {
+                            tabRefs.current[TAB_ORDER.indexOf(item)] = node
+                        }}
+                        className={
+                            item === "hidden" ? styles.hiddenLink : tab === item ? styles.pillActive : styles.pill
+                        }
                         onClick={() => setTab(item)}
                     >
-                        {item === "films" ? `Films (${films.length})` : item === "songs" ? `Songs (${songs.length})` : `Reels (${reels.length})`}
+                        {item === "films"
+                            ? `Films (${films.length})`
+                            : item === "songs"
+                              ? `Songs (${songs.length})`
+                              : item === "reels"
+                                ? `Reels (${reels.length})`
+                                : `Hidden${hidden.length ? ` (${hidden.length})` : ""}`}
                     </button>
                 ))}
-                <button type="button" className={styles.hiddenLink} onClick={() => setTab("hidden")}>
-                    Hidden{hidden.length ? ` (${hidden.length})` : ""}
-                </button>
             </div>
 
             {/* In-flight uploads/imports appear at the top of the active view. */}

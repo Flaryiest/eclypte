@@ -145,7 +145,7 @@
 	font-size: 0.86rem;
 	font-weight: 500;
 	cursor: pointer;
-	transition: background-color 140ms ease, color 140ms ease, opacity 140ms ease;
+	transition: background-color var(--dur-fast) ease, color var(--dur-fast) ease, opacity var(--dur-fast) ease;
 }
 
 .primaryButton { background: var(--text-primary); color: var(--accent-contrast); }
@@ -253,7 +253,7 @@
 	font-family: var(--font-ui);
 	font-size: 0.92rem;
 	outline: none;
-	transition: border-color 140ms ease;
+	transition: border-color var(--dur-fast) ease;
 }
 
 .input { min-height: 40px; padding: 0 0.75rem; }
@@ -301,7 +301,7 @@
 	font-size: 0.92rem;
 	text-align: left;
 	cursor: pointer;
-	transition: border-color 140ms ease;
+	transition: border-color var(--dur-fast) ease;
 }
 
 .selectTrigger:hover:not(:disabled) { border-color: var(--text-muted); }
@@ -321,7 +321,7 @@
 .selectPlaceholder { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .selectPlaceholder { color: var(--text-faint); }
 
-.selectChevron { flex-shrink: 0; color: var(--text-muted); transition: transform 160ms ease; }
+.selectChevron { flex-shrink: 0; color: var(--text-muted); transition: transform var(--dur-fast) ease; }
 .selectTriggerOpen .selectChevron { transform: rotate(180deg); }
 
 .selectPopover {
@@ -360,7 +360,9 @@
 
 .selectOptionLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .selectOptionActive { background: var(--surface-sunk); color: var(--text-primary); }
-.selectOptionSelected { color: var(--accent); }
+/* Ink, not coral: the accent is reserved for progress/attention, and the
+   check glyph already marks the selected option. */
+.selectOptionSelected { color: var(--text-primary); font-weight: 600; }
 .selectOption[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
 
 .selectEmpty { padding: 0.7rem 0.6rem; color: var(--text-muted); font-family: var(--font-ui); font-size: 0.86rem; }
@@ -391,7 +393,7 @@
 	font-size: 0.86rem;
 	font-weight: 500;
 	cursor: pointer;
-	transition: color 140ms ease, background-color 140ms ease;
+	transition: color var(--dur-fast) ease, background-color var(--dur-fast) ease;
 }
 
 .segmentButton { color: var(--text-muted); }
@@ -459,7 +461,7 @@
 	border-radius: var(--radius-card);
 	background: var(--surface-raised);
 	cursor: pointer;
-	transition: border-color 140ms ease;
+	transition: border-color var(--dur-fast) ease;
 }
 
 .filePicker:hover { border-color: var(--text-muted); }
@@ -512,7 +514,7 @@
 	font-size: 0.82rem;
 	font-weight: 500;
 	cursor: pointer;
-	transition: border-color 140ms ease, color 140ms ease, opacity 140ms ease;
+	transition: border-color var(--dur-fast) ease, color var(--dur-fast) ease, opacity var(--dur-fast) ease;
 }
 
 .pagerButton:hover:not(:disabled) { border-color: var(--text-muted); color: var(--text-primary); }
@@ -540,7 +542,7 @@
 .stageProgressMeta > span:last-child { color: var(--text-muted); font-weight: 400; }
 
 .progressTrack { position: relative; width: 100%; height: 5px; overflow: hidden; border-radius: 4px; background: var(--surface-sunk); }
-.progressFill { height: 100%; border-radius: 4px; background: var(--accent); transition: width 240ms ease; }
+.progressFill { height: 100%; border-radius: 4px; background: var(--accent); transition: width var(--dur-slow) ease; }
 .activeStage { color: var(--text-primary); }
 .activeStage .progressFill { background: var(--accent); }
 .completeStage .progressFill { background: var(--ok); }
@@ -587,7 +589,7 @@
 	color: #fff;
 	background: rgba(38, 35, 30, 0.34);
 	border-radius: var(--radius-card);
-	transition: background 160ms ease;
+	transition: background var(--dur-fast) ease;
 }
 
 .posterButton:hover .posterPlayIcon,
@@ -635,7 +637,7 @@
 .skeletonThumbTall { aspect-ratio: 9 / 16; }
 
 /* Thumbnails fade in over their gradient placeholder instead of popping. */
-.thumbFade { opacity: 0; transition: opacity 180ms ease; }
+.thumbFade { opacity: 0; transition: opacity var(--dur-fast) ease; }
 .thumbFadeLoaded { opacity: 1; }
 
 /* Sheets reserve the player's final footprint from the moment they open — the
@@ -732,7 +734,7 @@ button.posterPlayIcon:focus-visible {
 	font-size: 0.78rem;
 	font-weight: 500;
 	cursor: pointer;
-	transition: color 140ms ease, border-color 140ms ease;
+	transition: color var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
 .copyId:hover { color: var(--text-primary); border-color: var(--text-muted); }
 .copyId:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
@@ -774,7 +776,7 @@ button.posterPlayIcon:focus-visible {
 }
 
 .disclosureToggle:hover { color: var(--text-primary); }
-.disclosureCaret { display: inline-block; font-size: 1.1rem; line-height: 1; transition: transform 200ms ease; }
+.disclosureCaret { display: inline-block; font-size: 1.1rem; line-height: 1; transition: transform var(--dur-slow) ease; }
 .disclosureOpen .disclosureCaret { transform: rotate(45deg); }
 .disclosureBody { padding: 1.3rem 0 0; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 1.2rem; }
 
@@ -809,13 +811,18 @@ button.posterPlayIcon:focus-visible {
 	gap: 0.55rem;
 	background: var(--text-primary);
 	color: var(--accent-contrast);
+	border: none;
 	border-radius: var(--radius-card);
 	padding: 0.65rem 1rem;
 	font-family: var(--font-ui);
 	font-size: 0.88rem;
+	text-align: left;
 	box-shadow: var(--elev-shadow);
 	pointer-events: auto;
+	cursor: pointer; /* click to dismiss */
 }
+
+.toast:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 .toastOk { color: #9FCBA4; }
 .toastErr { color: #F0A79B; }
@@ -869,7 +876,7 @@ button.posterPlayIcon:focus-visible {
 	border: none;
 	background: var(--line-strong);
 	cursor: pointer;
-	transition: background-color 140ms ease;
+	transition: background-color var(--dur-fast) ease;
 	flex: none;
 }
 .switchButton::after {
@@ -881,7 +888,7 @@ button.posterPlayIcon:focus-visible {
 	height: 16px;
 	border-radius: 50%;
 	background: #fff;
-	transition: transform 140ms ease;
+	transition: transform var(--dur-fast) ease;
 }
 .switchButtonOn { background: var(--text-primary); }
 .switchButtonOn::after { transform: translateX(15px); }
@@ -916,7 +923,7 @@ button.posterPlayIcon:focus-visible {
 	/* Flex rows stretch cross-axis by default, which overrides aspect-ratio
 	   and drags the thumb to the text column's height — keep it 9:16. */
 	align-self: flex-start;
-	background: linear-gradient(160deg, #D8D2C6, #B9B1A0);
+	background: var(--line-strong);
 	border: none;
 	display: block;
 }
@@ -948,11 +955,11 @@ button.posterPlayIcon:focus-visible {
 	min-width: 0;
 }
 
-.queueThumb { width: 32px; height: 32px; border-radius: var(--radius-sm); object-fit: cover; flex: none; background: linear-gradient(135deg, #D8D2C6, #B9B1A0); }
+.queueThumb { width: 32px; height: 32px; border-radius: var(--radius-sm); object-fit: cover; flex: none; background: var(--line-strong); }
 
 .postedStrip { display: flex; gap: 0.7rem; overflow-x: auto; padding-bottom: 0.4rem; }
 .postedCard { width: 76px; flex: none; background: none; border: none; padding: 0; cursor: pointer; text-align: left; }
-.postedThumb { width: 76px; aspect-ratio: 9 / 16; border-radius: var(--radius-sm); object-fit: cover; display: block; background: linear-gradient(160deg, #D8D2C6, #B9B1A0); }
+.postedThumb { width: 76px; aspect-ratio: 9 / 16; border-radius: var(--radius-sm); object-fit: cover; display: block; background: var(--line-strong); }
 .postedMeta { margin: 0.3rem 0 0; font-family: var(--font-ui); font-size: 0.78rem; color: var(--text-muted); line-height: 1.35; }
 
 /* ============ NEW: Library ============ */
@@ -969,7 +976,7 @@ button.posterPlayIcon:focus-visible {
 	cursor: pointer;
 	background: transparent;
 	color: var(--text-muted);
-	transition: color 140ms ease, background-color 140ms ease;
+	transition: color var(--dur-fast) ease, background-color var(--dur-fast) ease;
 }
 .pill:hover { color: var(--text-primary); }
 .pillActive { background: var(--text-primary); color: var(--accent-contrast); }
@@ -991,7 +998,7 @@ button.posterPlayIcon:focus-visible {
 	color: #fff;
 	font-size: 0.85rem;
 	opacity: 0;
-	transition: opacity 140ms ease;
+	transition: opacity var(--dur-fast) ease;
 	pointer-events: none;
 }
 
@@ -1023,12 +1030,12 @@ button.posterPlayIcon:focus-visible {
 	text-align: left;
 	display: flex;
 	flex-direction: column;
-	transition: border-color 140ms ease;
+	transition: border-color var(--dur-fast) ease;
 	min-width: 0;
 }
 .mediaCard:hover { border-color: var(--line-strong); }
 
-.mediaThumb { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; background: linear-gradient(160deg, #D8D2C6, #B9B1A0); }
+.mediaThumb { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; background: var(--line-strong); }
 .mediaThumbTall { aspect-ratio: 9 / 16; }
 .mediaCardBody { padding: 0.7rem 0.85rem 0.85rem; display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
 .mediaTitle { margin: 0; font-family: var(--font-ui); font-size: 0.92rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1060,7 +1067,7 @@ button.posterPlayIcon:focus-visible {
 	place-items: center;
 	color: rgba(255, 255, 255, 0.9);
 	font-size: 0.95rem;
-	background: linear-gradient(135deg, #C9BCA4, #A08D6C);
+	background: var(--text-faint);
 }
 
 .uploadDrop { border-style: dashed; }
@@ -1082,6 +1089,9 @@ button.posterPlayIcon:focus-visible {
 	.toolbar :is(.primaryButton, .secondaryButton, .ghostButton, .dangerButton),
 	.cardActions :is(.primaryButton, .secondaryButton, .ghostButton, .dangerButton),
 	.sheetFooter :is(.primaryButton, .secondaryButton, .ghostButton, .dangerButton) { width: 100%; }
+	/* Touch targets: hit the 44px minimum on coarse-pointer viewports. */
+	.primaryButton, .secondaryButton, .ghostButton, .dangerButton,
+	.pill, .pillActive, .hiddenLink, .pagerButton, .selectTrigger { min-height: 44px; }
 	.rangeGrid { grid-template-columns: 1fr; }
 	.cropPreview { width: 100%; }
 	.settingsRow { grid-template-columns: 1fr; gap: 0.35rem; }

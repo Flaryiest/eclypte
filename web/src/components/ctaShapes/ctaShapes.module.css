@@ -23,7 +23,7 @@
 .frame {
     width: 70px;
     height: 48px;
-    border: 1.5px solid rgba(232, 168, 56, 0.5);
+    border: 1.5px solid color-mix(in srgb, var(--color-highlight) 50%, transparent);
     border-radius: 4px;
     box-sizing: border-box;
 }
@@ -36,7 +36,7 @@
     width: 6px;
     height: 70%;
     transform: translateY(-50%);
-    background-image: radial-gradient(circle, rgba(232, 168, 56, 0.5) 2px, transparent 2.5px);
+    background-image: radial-gradient(circle, color-mix(in srgb, var(--color-highlight) 50%, transparent) 2px, transparent 2.5px);
     background-size: 6px 10px;
 }
 
@@ -47,10 +47,10 @@
 .play {
     width: 0;
     height: 0;
-    border-left: 36px solid rgba(232, 168, 56, 0.45);
+    border-left: 36px solid color-mix(in srgb, var(--color-highlight) 45%, transparent);
     border-top: 22px solid transparent;
     border-bottom: 22px solid transparent;
-    filter: drop-shadow(0 4px 12px rgba(232, 168, 56, 0.15));
+    filter: drop-shadow(0 4px 12px color-mix(in srgb, var(--color-highlight) 15%, transparent));
 }
 
 /* ---------- variant: audio bars ---------- */
@@ -64,7 +64,7 @@
 
 .bars > span {
     width: 5px;
-    background: rgba(232, 168, 56, 0.5);
+    background: color-mix(in srgb, var(--color-highlight) 50%, transparent);
     border-radius: 1px;
 }
 

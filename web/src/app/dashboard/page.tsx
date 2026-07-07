@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import Link from "next/link"
 import { Play, Plus, RefreshCw, Zap } from "lucide-react"
@@ -806,6 +806,25 @@ function ComposerSheet({
     const videos = assets.filter((asset) => asset.kind === "source_video" && asset.current_version_id && !asset.archived_at)
     const songs = assets.filter((asset) => asset.kind === "song_audio" && asset.current_version_id && !asset.archived_at)
 
+    // Radiogroup keyboard semantics: arrows move the selection (roving tabindex).
+    const filmRefs = useRef<(HTMLButtonElement | null)[]>([])
+    const onFilmKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+        const dir =
+            event.key === "ArrowRight" || event.key === "ArrowDown"
+                ? 1
+                : event.key === "ArrowLeft" || event.key === "ArrowUp"
+                  ? -1
+                  : 0
+        if (!dir || videos.length === 0) {
+            return
+        }
+        event.preventDefault()
+        const index = videos.findIndex((asset) => asset.file_id === videoId)
+        const next = index === -1 ? 0 : (index + dir + videos.length) % videos.length
+        setVideoId(videos[next].file_id)
+        requestAnimationFrame(() => filmRefs.current[next]?.focus())
+    }
+
     const add = async () => {
         const video = videos.find((asset) => asset.file_id === videoId)
         if (!video?.current_version_id) {
@@ -866,8 +885,8 @@ function ComposerSheet({
             >
             <div className={styles.fieldLabel}>
                 Film
-                <div className={styles.mediaGrid} role="radiogroup" aria-label="Film">
-                    {videos.map((asset) => {
+                <div className={styles.mediaGrid} role="radiogroup" aria-label="Film" onKeyDown={onFilmKeyDown}>
+                    {videos.map((asset, index) => {
                         const url = assetPosterUrl(asset)
                         const selected = videoId === asset.file_id
                         return (
@@ -876,6 +895,10 @@ function ComposerSheet({
                                 type="button"
                                 role="radio"
                                 aria-checked={selected}
+                                tabIndex={selected || (!videoId && index === 0) ? 0 : -1}
+                                ref={(node) => {
+                                    filmRefs.current[index] = node
+                                }}
                                 className={styles.mediaCard}
                                 style={selected ? { borderColor: "var(--text-primary)", boxShadow: "inset 0 0 0 1px var(--text-primary)" } : undefined}
                                 onClick={() => setVideoId(asset.file_id)}

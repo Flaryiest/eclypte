@@ -42,7 +42,7 @@
 	color: var(--text-muted);
 	border-radius: var(--radius-sm);
 	padding: 0.3rem 0.45rem;
-	transition: color 140ms ease;
+	transition: color var(--dur-fast) ease;
 }
 
 .navLink:hover { color: var(--text-primary); }
@@ -74,7 +74,7 @@
 	background: transparent;
 	color: var(--text-muted);
 	cursor: pointer;
-	transition: color 140ms ease, background-color 140ms ease;
+	transition: color var(--dur-fast) ease, background-color var(--dur-fast) ease;
 }
 
 .signOut:hover { color: var(--text-primary); background: var(--surface-sunk); }

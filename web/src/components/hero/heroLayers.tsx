@@ -150,6 +150,8 @@ export default function HeroLayers() {
                     <img
                         ref={imgRef}
                         src="/assets/hero/one.webp"
+                        width={5504}
+                        height={3072}
                         className={styles.heroImage}
                         alt=""
                         loading="eager"

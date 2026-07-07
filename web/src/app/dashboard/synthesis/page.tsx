@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Link, RefreshCw, RotateCcw, Save, Sparkles } from "lucide-react"
-import { DashboardPage, EmptyState, MetaList, Pager, StatusBadge, errorMessage, formatDate, humanizeLabel, humanizeStageDetail, usePagination } from "../dashboardCommon"
+import { DashboardPage, EmptyState, MetaList, Pager, Spinner, StatusBadge, errorMessage, formatDate, humanizeLabel, humanizeStageDetail, usePagination } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import {
     EclypteApiClient,
@@ -25,6 +25,7 @@ export default function SynthesisPage() {
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [isConsolidating, setIsConsolidating] = useState(false)
     const [isSaving, setIsSaving] = useState(false)
+    const [activatingId, setActivatingId] = useState<string | null>(null)
     const [refsOpen, setRefsOpen] = useState(false)
 
     const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
@@ -151,9 +152,10 @@ export default function SynthesisPage() {
     }
 
     const activateVersion = async (versionId: string) => {
-        if (!api) {
+        if (!api || activatingId) {
             return
         }
+        setActivatingId(versionId)
         setError(null)
         setStatus("Activating prompt version")
         try {
@@ -163,6 +165,8 @@ export default function SynthesisPage() {
             setStatus("Prompt version activated")
         } catch (caught) {
             setError(errorMessage(caught))
+        } finally {
+            setActivatingId(null)
         }
     }
 
@@ -252,8 +256,13 @@ export default function SynthesisPage() {
                                         </div>
                                         {!isActive && (
                                             <div className={styles.cardActions}>
-                                                <button className={styles.secondaryButton} type="button" onClick={() => activateVersion(version.version_id)}>
-                                                    <RotateCcw size={16} /> Activate
+                                                <button
+                                                    className={styles.secondaryButton}
+                                                    type="button"
+                                                    onClick={() => activateVersion(version.version_id)}
+                                                    disabled={activatingId !== null}
+                                                >
+                                                    {activatingId === version.version_id ? <Spinner /> : <RotateCcw size={16} />} Activate
                                                 </button>
                                             </div>
                                         )}

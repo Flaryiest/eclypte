@@ -91,7 +91,15 @@ export function DemoTile({
                     aria-label={`Play ${label}`}
                 >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img className={styles.media} src={poster} alt={label} loading="lazy" />
+                    <img
+                        className={styles.media}
+                        src={poster}
+                        alt={label}
+                        // The featured tile sits near the top of /demo and is a
+                        // likely LCP element — don't lazy-load it.
+                        loading={featured ? "eager" : "lazy"}
+                        fetchPriority={featured ? "high" : undefined}
+                    />
                     <span className={styles.scrim} aria-hidden />
                     <span className={styles.playIcon} aria-hidden>
                         <Play size={featured ? 30 : 22} fill="currentColor" strokeWidth={0} />

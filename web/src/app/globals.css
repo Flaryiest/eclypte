@@ -135,6 +135,7 @@ table {
   --color-subtitle: #f0f0f0;
   --color-secondary: #cacaca;
   --color-highlight: #e8a838;
+  --color-on-highlight: #0a0a0a; /* text/icons sitting on the gold */
 }
 
 
@@ -175,8 +176,6 @@ table {
   --accent: #E86A4F;
   --accent-soft: rgba(232, 106, 79, 0.12);
   --accent-contrast: #FBFAF7;
-  /* Legacy alias: old CSS paints progress with --energy; now plain coral. */
-  --energy: #E86A4F;
 
   /* Status */
   --ok: #5E8A62;
@@ -186,7 +185,6 @@ table {
   --danger-soft: rgba(194, 82, 67, 0.12);
   --danger-line: rgba(194, 82, 67, 0.35);
   --attention: #A87B2A;
-  --attention-soft: rgba(168, 123, 42, 0.14);
 
   /* Pressed/hover inks */
   --text-primary-hover: #3A362F;
@@ -201,6 +199,8 @@ table {
   --radius-sm: 8px;
   --radius: 10px;
   --radius-card: 12px;
+  --dur-fast: 140ms;
+  --dur-slow: 240ms;
 
   /* Dashboard type — one family */
   --font-display: var(--font-neue), "Helvetica Neue", Arial, system-ui, sans-serif;
@@ -218,6 +218,20 @@ table {
   color: var(--text-primary);
 }
 
+/* Brand the text-selection highlight inside the studio surface. */
+[data-surface="studio"] ::selection {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+/* The marketing body underneath is black with a noise texture; paint the body
+   ivory whenever the dashboard is mounted so iOS overscroll/rubber-band
+   regions don't flash the dark marketing backdrop through. */
+body:has([data-surface="studio"]) {
+  background-color: #F7F5F1;
+  background-image: none;
+}
+
 body {
   margin: 0;
   display: flex;
@@ -230,19 +244,17 @@ body {
     linear-gradient(90deg, rgba(255, 255, 255, 0.012) 1px, transparent 1px),
     url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/></svg>");
   background-size: 80px 80px, 80px 80px, 160px 160px;
-  background-attachment: fixed;
+  /* No background-attachment: fixed — it forces a full-viewport repaint of the
+     noise layer on every scroll frame; the subtle texture reads the same
+     scrolling with the page. */
   color: var(--color-primary);
   font-family:
     var(--font-neue), var(--font-eiko), var(--font-outfit), system-ui,
     Helvetica, Arial, sans-serif;
 }
 
-a {
-  text-decoration: none;
-}
-
 button {
-  border: none;;
+  border: none;
   font-weight: 500;
   cursor: pointer;
   padding: 0 0 0 0;
