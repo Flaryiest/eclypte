@@ -644,6 +644,12 @@ function EditJobCard({
 }) {
     const isComplete = job.status === "completed" && job.render_output
     const isActive = isJobActive(job)
+    // Two-step confirm: deleting a finished edit is irreversible.
+    const [confirmDelete, setConfirmDelete] = useState(false)
+    const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    useEffect(() => () => {
+        if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
+    }, [])
     const now = useNow(isActive)
     const startedMs = Date.parse(job.created_at)
     const elapsedSec =
@@ -693,8 +699,22 @@ function EditJobCard({
                         </button>
                     )}
                     {canDelete && (
-                        <button className={styles.dangerButton} type="button" onClick={onDelete} disabled={isDeleting}>
-                            <Trash2 size={16} /> {isDeleting ? "Deleting" : "Delete"}
+                        <button
+                            className={styles.dangerButton}
+                            type="button"
+                            onClick={() => {
+                                if (!confirmDelete) {
+                                    setConfirmDelete(true)
+                                    confirmTimerRef.current = setTimeout(() => setConfirmDelete(false), 3000)
+                                    return
+                                }
+                                if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
+                                setConfirmDelete(false)
+                                onDelete()
+                            }}
+                            disabled={isDeleting}
+                        >
+                            <Trash2 size={16} /> {isDeleting ? "Deleting" : confirmDelete ? "Really delete?" : "Delete"}
                         </button>
                     )}
                     {isComplete && (

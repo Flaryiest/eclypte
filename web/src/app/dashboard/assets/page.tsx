@@ -61,6 +61,9 @@ function LibraryPage() {
     const [uploads, setUploads] = useState<UploadCard[]>([])
     const [imports, setImports] = useState<ImportCard[]>([])
     const [error, setError] = useState<string | null>(null)
+    // Sheet-scoped errors: a page banner is invisible behind an open sheet.
+    const [sheetError, setSheetError] = useState<string | null>(null)
+    const [addError, setAddError] = useState<string | null>(null)
     const uploadIdRef = useRef(0)
     const uploadControllersRef = useRef<Map<number, AbortController>>(new Map())
     const importControllersRef = useRef<Map<string, AbortController>>(new Map())
@@ -91,6 +94,8 @@ function LibraryPage() {
     // First-load gate: show geometry-matched skeletons instead of flashing the
     // tab's resolved-empty copy while its resource is still fetching.
     const tabLoading = tab === "reels" ? reelsResource.isLoading : assetsResource.isLoading
+    const tabError = tab === "reels" ? reelsResource.error : assetsResource.error
+    const tabRevalidate = tab === "reels" ? reelsResource.revalidate : assetsResource.revalidate
 
     const setTab = (next: LibraryTab) => {
         setSelectedId(null)
@@ -112,10 +117,11 @@ function LibraryPage() {
         const isVideo = file.type === "video/mp4" || extension === "mp4"
         const isAudio = file.type.startsWith("audio/") || AUDIO_UPLOAD_EXTENSIONS.includes(extension)
         if (!isVideo && !isAudio) {
-            setError("Use an MP4 film or a common audio file (WAV, MP3, M4A, FLAC, OGG).")
+            // In-sheet: the page banner would be hidden behind this open sheet.
+            setAddError("Use an MP4 film or a common audio file (WAV, MP3, M4A, FLAC, OGG).")
             return
         }
-        setError(null)
+        setAddError(null)
         setAddOpen(false)
         void runUpload(file, isVideo)
     }
@@ -203,11 +209,14 @@ function LibraryPage() {
     const [busyAction, setBusyAction] = useState<string | null>(null)
     const act = async (name: string, action: () => Promise<void>) => {
         setBusyAction(name)
+        setSheetError(null)
         setError(null)
         try {
             await action()
         } catch (caught) {
-            setError(errorMessage(caught))
+            // These actions run from the AssetSheet: show the failure inside it
+            // (the page banner is hidden behind the fixed overlay).
+            setSheetError(errorMessage(caught))
         } finally {
             setBusyAction(null)
         }
@@ -302,7 +311,11 @@ function LibraryPage() {
                 </button>
             }
         >
-            {(error || assetsResource.error) && <div className={styles.errorBanner}>{error || assetsResource.error}</div>}
+            {(error || assetsResource.error || reelsResource.error || postsResource.error) && (
+                <div className={styles.errorBanner}>
+                    {error || assetsResource.error || reelsResource.error || postsResource.error}
+                </div>
+            )}
 
             <div className={styles.tabPills} role="tablist" aria-label="Library">
                 {(["films", "songs", "reels"] as const).map((item) => (
@@ -395,6 +408,15 @@ function LibraryPage() {
                 ) : (
                     <MediaGridSkeleton tall={tab === "reels"} count={8} />
                 )
+            ) : tabError && tabItems.length === 0 ? (
+                // A failed fetch must not masquerade as an empty library.
+                <div className={styles.emptyState}>
+                    <p className={styles.emptyStateTitle}>Couldn&apos;t load this view</p>
+                    <p className={styles.emptyStateHint}>{tabError}</p>
+                    <button className={styles.secondaryButton} type="button" onClick={() => tabRevalidate()}>
+                        Try again
+                    </button>
+                </div>
             ) : tabItems.length === 0 && uploads.length === 0 && imports.length === 0 ? (
                 <div className={styles.emptyState}>
                     <p className={styles.emptyStateTitle}>{emptyTitle(tab)}</p>
@@ -433,7 +455,11 @@ function LibraryPage() {
                     posterUrl={assetPosterUrl(selected)}
                     busyAction={busyAction}
                     existingPost={postByRender.get(selected.file_id)}
-                    onClose={() => setSelectedId(null)}
+                    error={sheetError}
+                    onClose={() => {
+                        setSelectedId(null)
+                        setSheetError(null)
+                    }}
                     onAnalyze={() => analyze(selected)}
                     onDownload={() => download(selected)}
                     onHide={() => hide(selected)}
@@ -445,22 +471,37 @@ function LibraryPage() {
             <Sheet
                 open={addOpen}
                 title="Add to your library"
-                onClose={() => setAddOpen(false)}
+                error={addError}
+                onClose={() => {
+                    setAddOpen(false)
+                    setAddError(null)
+                }}
                 footer={
-                    <button className={styles.secondaryButton} type="button" onClick={runImport} disabled={!youtubeUrl.trim()}>
+                    <button className={styles.secondaryButton} type="submit" form="library-add-form" disabled={!youtubeUrl.trim()}>
                         <Link2 size={15} /> Import from YouTube
                     </button>
                 }
             >
-                <label className={`${styles.filePicker} ${styles.uploadDrop}`}>
-                    <span className={styles.fileName}>Choose a file</span>
-                    <span className={styles.muted}>An MP4 becomes a film; audio (WAV, MP3, M4A, FLAC…) becomes a song.</span>
-                    <input type="file" accept={`video/mp4,.mp4,audio/*,${AUDIO_UPLOAD_EXTENSIONS.map((ext) => `.${ext}`).join(",")}`} onChange={onPick} />
-                </label>
-                <label className={styles.fieldLabel}>
-                    Or paste a YouTube song link
-                    <input className={styles.input} placeholder="https://youtu.be/…" value={youtubeUrl} onChange={(event) => setYoutubeUrl(event.target.value)} />
-                </label>
+                {/* display:contents keeps the sheet-body layout; Enter in the URL
+                    field submits like the footer button. */}
+                <form
+                    id="library-add-form"
+                    style={{ display: "contents" }}
+                    onSubmit={(event) => {
+                        event.preventDefault()
+                        void runImport()
+                    }}
+                >
+                    <label className={`${styles.filePicker} ${styles.uploadDrop}`}>
+                        <span className={styles.fileName}>Choose a file</span>
+                        <span className={styles.muted}>An MP4 becomes a film; audio (WAV, MP3, M4A, FLAC…) becomes a song.</span>
+                        <input type="file" accept={`video/mp4,.mp4,audio/*,${AUDIO_UPLOAD_EXTENSIONS.map((ext) => `.${ext}`).join(",")}`} onChange={onPick} />
+                    </label>
+                    <label className={styles.fieldLabel}>
+                        Or paste a YouTube song link
+                        <input className={styles.input} placeholder="https://youtu.be/…" value={youtubeUrl} onChange={(event) => setYoutubeUrl(event.target.value)} />
+                    </label>
+                </form>
             </Sheet>
         </DashboardPage>
     )
@@ -561,6 +602,7 @@ function AssetSheet({
     posterUrl,
     busyAction,
     existingPost,
+    error,
     onClose,
     onAnalyze,
     onDownload,
@@ -573,6 +615,7 @@ function AssetSheet({
     posterUrl?: string
     busyAction: string | null
     existingPost?: PublishingPost
+    error?: string | null
     onClose: () => void
     onAnalyze: () => void
     onDownload: () => void
@@ -645,6 +688,7 @@ function AssetSheet({
             open
             title={stripExtension(asset.display_name)}
             onClose={onClose}
+            error={error}
             footer={
                 <>
                     {canPost && (

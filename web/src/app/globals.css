@@ -181,16 +181,24 @@ table {
   /* Status */
   --ok: #5E8A62;
   --ok-soft: rgba(94, 138, 98, 0.14);
+  --ok-line: rgba(94, 138, 98, 0.35);
   --danger: #C25243;
   --danger-soft: rgba(194, 82, 67, 0.12);
+  --danger-line: rgba(194, 82, 67, 0.35);
   --attention: #A87B2A;
   --attention-soft: rgba(168, 123, 42, 0.14);
+
+  /* Pressed/hover inks */
+  --text-primary-hover: #3A362F;
+  --surface-sunk-hover: #E9E3D7;
+  --surface-sheet: #FBFAF7;
 
   /* Effects */
   --focus-ring: #E86A4F;
   --elev-shadow: 0 12px 32px rgba(50, 42, 28, 0.16);
   --shadow-card: 0 1px 3px rgba(50, 42, 28, 0.06);
   --shadow-sheet: -16px 0 40px rgba(50, 42, 28, 0.12);
+  --radius-sm: 8px;
   --radius: 10px;
   --radius-card: 12px;
 
@@ -200,6 +208,13 @@ table {
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   background-color: var(--surface-base);
+  color: var(--text-primary);
+}
+
+/* The global marketing `a { color: var(--color-primary) }` below resolves to
+   WHITE under the forced data-theme="dark", which would render invisible links
+   on the ivory dashboard surface. Every dashboard anchor inherits ink instead. */
+[data-surface="studio"] a {
   color: var(--text-primary);
 }
 

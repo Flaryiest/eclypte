@@ -282,8 +282,10 @@ export default function HomePage() {
                     </button>
                 </div>
             )}
-            {(error || autopilotResource.error || postsResource.error) && (
-                <div className={styles.errorBanner}>{error || autopilotResource.error || postsResource.error}</div>
+            {(error || autopilotResource.error || postsResource.error || jobsResource.error || assetsResource.error) && (
+                <div className={styles.errorBanner}>
+                    {error || autopilotResource.error || postsResource.error || jobsResource.error || assetsResource.error}
+                </div>
             )}
 
             {/* Ready for you */}
@@ -435,7 +437,6 @@ export default function HomePage() {
                     posterUrl={postPosterUrl(reviewPost)}
                     onClose={() => setReviewPostId(null)}
                     replacePost={replacePost}
-                    onError={setError}
                 />
             )}
             {api && (
@@ -526,14 +527,12 @@ function ReviewSheet({
     posterUrl,
     onClose,
     replacePost,
-    onError,
 }: {
     api: EclypteApiClient
     post: PublishingPost
     posterUrl?: string
     onClose: () => void
     replacePost: (next: PublishingPost) => void
-    onError: (message: string | null) => void
 }) {
     const toast = useToast()
     const [caption, setCaption] = useState("")
@@ -542,6 +541,14 @@ function ReviewSheet({
     const [videoError, setVideoError] = useState<string | null>(null)
     const [playing, setPlaying] = useState(false)
     const [busy, setBusy] = useState<string | null>(null) // which action is running
+    // Action failures render INSIDE the sheet — a page-level banner sits behind
+    // this fixed overlay (fully hidden under the mobile bottom sheet).
+    const [sheetError, setSheetError] = useState<string | null>(null)
+    const [confirmSkip, setConfirmSkip] = useState(false)
+    const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    useEffect(() => () => {
+        if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
+    }, [])
     const syncedPostIdRef = useRef<string | null>(null)
     // The signed render URL arrives with the post itself — no fetch, no spinner wait.
     const videoUrl = postRenderUrl(post) ?? null
@@ -573,11 +580,11 @@ function ReviewSheet({
 
     const act = async (name: string, action: () => Promise<void>) => {
         setBusy(name)
-        onError(null)
+        setSheetError(null)
         try {
             await action()
         } catch (caught) {
-            onError(errorMessage(caught))
+            setSheetError(errorMessage(caught))
         } finally {
             setBusy(null)
         }
@@ -614,6 +621,7 @@ function ReviewSheet({
             open
             title={postTitle(post)}
             onClose={onClose}
+            error={sheetError}
             footer={
                 canSend ? (
                     <>
@@ -630,14 +638,25 @@ function ReviewSheet({
                             <button
                                 className={styles.dangerButton}
                                 type="button"
-                                onClick={() => act("skip", async () => {
-                                    replacePost(await api.cancelPublishingPost(post.post_id))
-                                    toast("Skipped")
-                                    onClose()
-                                })}
+                                onClick={() => {
+                                    // Two-step confirm: skipping cancels a ready reel.
+                                    if (!confirmSkip) {
+                                        setConfirmSkip(true)
+                                        confirmTimerRef.current = setTimeout(() => setConfirmSkip(false), 3000)
+                                        return
+                                    }
+                                    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
+                                    setConfirmSkip(false)
+                                    act("skip", async () => {
+                                        replacePost(await api.cancelPublishingPost(post.post_id))
+                                        toast("Skipped")
+                                        onClose()
+                                    })
+                                }}
                                 disabled={busy !== null}
                             >
-                                {busy === "skip" ? <Spinner /> : null} Skip this reel
+                                {busy === "skip" ? <Spinner /> : null}
+                                {confirmSkip ? "Really skip?" : "Skip this reel"}
                             </button>
                         </span>
                     </>
@@ -828,13 +847,23 @@ function ComposerSheet({
             open={open}
             title="New reel"
             onClose={onClose}
+            error={formError}
             footer={
-                <button className={styles.primaryButton} type="button" onClick={add} disabled={isAdding}>
+                <button className={styles.primaryButton} type="submit" form="composer-form" disabled={isAdding}>
                     {isAdding ? <Spinner onInk /> : <Plus size={16} />} Add to queue
                 </button>
             }
         >
-            {formError && <div className={styles.errorBanner}>{formError}</div>}
+            {/* display:contents keeps the sheet-body flex layout; Enter in the
+                YouTube/brief fields submits like the footer button. */}
+            <form
+                id="composer-form"
+                style={{ display: "contents" }}
+                onSubmit={(event) => {
+                    event.preventDefault()
+                    void add()
+                }}
+            >
             <div className={styles.fieldLabel}>
                 Film
                 <div className={styles.mediaGrid} role="radiogroup" aria-label="Film">
@@ -897,6 +926,7 @@ function ComposerSheet({
                 Creative note (optional)
                 <textarea className={`${styles.textarea} ${styles.compactTextarea}`} placeholder="Open on the most impactful shot, lean into the chorus…" value={brief} onChange={(event) => setBrief(event.target.value)} />
             </label>
+            </form>
         </Sheet>
     )
 }

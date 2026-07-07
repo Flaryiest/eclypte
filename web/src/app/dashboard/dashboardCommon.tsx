@@ -522,20 +522,28 @@ export function ProgressRow({
     )
 }
 
+const FOCUSABLE_SELECTOR =
+    'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
 // The single modal pattern: right slide-over on desktop, bottom sheet on mobile
-// (media query in studio.module.css). Escape closes; body scroll is locked.
+// (media query in studio.module.css). Escape closes; Tab is trapped inside the
+// panel; body scroll is locked; focus returns to the opener on close. An
+// optional `error` renders inside the sheet (a page-level banner would be
+// hidden behind this fixed overlay, fully so under the mobile bottom sheet).
 export function Sheet({
     open,
     title,
     onClose,
     children,
     footer,
+    error,
 }: {
     open: boolean
     title: string
     onClose: () => void
     children: ReactNode
     footer?: ReactNode
+    error?: string | null
 }) {
     const panelRef = useRef<HTMLDivElement>(null)
     const onCloseRef = useRef(onClose)
@@ -546,9 +554,33 @@ export function Sheet({
         if (!open) {
             return
         }
+        const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
         const onKey = (event: KeyboardEvent) => {
             if (event.key === "Escape") {
                 onCloseRef.current()
+                return
+            }
+            if (event.key !== "Tab" || !panelRef.current) {
+                return
+            }
+            const focusable = Array.from(
+                panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+            )
+            if (focusable.length === 0) {
+                event.preventDefault()
+                panelRef.current.focus()
+                return
+            }
+            const first = focusable[0]
+            const last = focusable[focusable.length - 1]
+            const active = document.activeElement
+            const inside = panelRef.current.contains(active)
+            if (event.shiftKey && (!inside || active === first)) {
+                event.preventDefault()
+                last.focus()
+            } else if (!event.shiftKey && (!inside || active === last)) {
+                event.preventDefault()
+                first.focus()
             }
         }
         document.addEventListener("keydown", onKey)
@@ -558,6 +590,7 @@ export function Sheet({
         return () => {
             document.removeEventListener("keydown", onKey)
             document.body.style.overflow = previousOverflow
+            opener?.focus()
         }
     }, [open])
     if (!open) {
@@ -574,6 +607,11 @@ export function Sheet({
                     </button>
                 </div>
                 <div className={styles.sheetBody}>{children}</div>
+                {error && (
+                    <div className={styles.sheetError} role="alert">
+                        {error}
+                    </div>
+                )}
                 {footer && <div className={styles.sheetFooter}>{footer}</div>}
             </div>
         </>

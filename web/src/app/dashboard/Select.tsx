@@ -156,6 +156,10 @@ export function Select({
                 break
             case "Escape":
                 event.preventDefault()
+                // Swallow the event so a document-level Escape handler (the
+                // enclosing Sheet) doesn't also fire — Escape here means
+                // "close the dropdown", not "discard the whole sheet".
+                event.stopPropagation()
                 closeMenu()
                 break
             case "Tab":
