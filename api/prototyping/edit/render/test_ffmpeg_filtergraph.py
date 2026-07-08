@@ -217,9 +217,24 @@ def test_punch_in_zooms_center_via_zoompan():
     tl = _timeline([(80.0, 2.0, 1.0, "cut")])
     tl.shots[0].effects.append(Effect(type="punch_in"))
     fc = _filter_complex(build_command(tl, source="/s.mp4", audio="/a.wav", out_path="/o.mp4"))
-    # zoom 1.0 -> 1.06 across the shot's 60 frames (2s @ 30fps), centered
-    assert ("zoompan=z='1+0.06*on/60':d=1:"
-            "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30") in fc
+    # zoompan is frame-count based and emits PTS in its own timebase, so the
+    # chain MUST normalize fps before it (frame count == dur*fps) and renumber
+    # PTS after it — otherwise a downstream fps filter sees phantom gaps and
+    # duplicates each frame ~512x (the movie-length frozen-frame bug).
+    assert ("fps=30,zoompan=z='1+0.06*on/60':d=1:"
+            "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,"
+            "setpts=N/(30*TB)") in fc
+
+
+def test_output_duration_is_hard_capped():
+    # -shortest alone does not reliably bound filtergraph output (buffered
+    # frames keep encoding); the output must carry an explicit -t cap.
+    tl = _timeline([(80.0, 2.0, 1.0, "cut"), (200.0, 3.0, 1.0, "cut")])
+    argv = build_command(tl, source="/s.mp4", audio="/a.wav", out_path="/o.mp4")
+    out_index = len(argv) - 1
+    t_index = argv.index("-t", argv.index("-filter_complex"))
+    assert argv[t_index + 1] == "5.000"
+    assert t_index < out_index
 
 
 def test_plain_shot_has_no_effect_chains():

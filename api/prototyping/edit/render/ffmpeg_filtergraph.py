@@ -124,11 +124,20 @@ def _video_chain(input_idx: int, shot: Shot, w: int, h: int, fps: int,
         # animate its w/h (config-time only), so zoompan does the zoom: `on` is
         # the output frame index, d=1 emits one frame per input frame. Mirrors
         # effects._punch_in.
+        #
+        # zoompan is frame-count based and stamps PTS in its own timebase:
+        # normalize to the output fps FIRST (so frame count == dur*fps) and
+        # renumber PTS to consecutive 1/fps steps AFTER — without the setpts, a
+        # downstream fps filter interprets the raw zoompan PTS as ~17s gaps and
+        # duplicates every frame ~512x (a 25s reel became a movie-length file
+        # of one frozen frame; -shortest does not reliably bound it).
         frames = max(1, round(dur * fps))
+        chain.append(f"fps={fps}")
         chain.append(
             f"zoompan=z='1+{PUNCH_IN_END_SCALE - 1.0:g}*on/{frames}':d=1:"
             f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={w}x{h}:fps={fps}"
         )
+        chain.append(f"setpts=N/({fps}*TB)")
     if shot.transition_in.type == "flash":
         chain += _flash_steps(shot.transition_in.duration_sec or FLASH_DURATION_SEC)
     chain += ["setsar=1", f"fps={fps}", "format=yuv420p"]
@@ -190,12 +199,16 @@ def _assemble_video(parts: list[str], shots: list[Shot]) -> str:
     return f"[{acc}]"
 
 
-def _encode_tail(preset: str, threads: int | None, out_path: str) -> list[str]:
+def _encode_tail(preset: str, threads: int | None, out_path: str, duration_sec: float) -> list[str]:
     tail = [
         "-c:v", "libx264", "-preset", preset, "-crf", "18",
         "-tune", "animation", "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
         "-c:a", "aac", "-b:a", "192k", "-shortest",
+        # Hard output bound: -shortest alone does not reliably stop a
+        # filtergraph whose buffered frames keep flowing after the audio ends,
+        # so the output is explicitly capped at the timeline duration.
+        "-t", f"{duration_sec:.3f}",
     ]
     if threads:
         tail += ["-threads", str(threads)]
@@ -286,5 +299,5 @@ def build_command(
         audio_label = f"{audio_idx}:a"
 
     args += ["-filter_complex", ";".join(parts), "-map", video_label, "-map", audio_label]
-    args += _encode_tail(preset, threads, out_path)
+    args += _encode_tail(preset, threads, out_path, timeline.output.duration_sec)
     return args
