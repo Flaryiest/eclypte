@@ -20,7 +20,7 @@ Core invariants:
 - `api/`: FastAPI app, workflow orchestration, storage substrate, YouTube downloader, and prototype media pipelines.
 - `api/publishing.py`: review-gated Buffer publishing for Instagram Reels — Gen-Z-voiced OpenAI/fallback caption generation (the model is fed the source movie/anime + song names — resolved from the render's run lineage by `resolve_edit_source_names` and persisted on the post as `source_name`/`song_name` — and produces context-relevant AI hashtags), public R2 media copies, Buffer GraphQL payloads (declares the Instagram `reel` post type; the send modes are `queue`=`addToQueue`, `schedule`/`now`=`customScheduled` — `now` posts immediately via a server-computed near-future `dueAt` from `immediate_due_at`, since Buffer has no instant-publish mode and rejects past `dueAt`), channel diagnostics, and post-status refresh (`apply_buffer_status`) that marks a post `published` as soon as Buffer reports it sent (`sentAt`/sent status) and independently back-fills the permalink from `externalLink` when it appears.
 - `api/storage/`: R2 object access, file manifests, file versions, upload reservations, run manifests/events/progress, prompt versions, references, publishing posts, Postgres run store, Redis broadcaster, staging helpers, and tests.
-- `api/prototyping/music/`: the pure allin1 analyzer, its Modal app (`eclypte-analysis`), and synced-lyrics lookup. (YouTube/audio ingestion and R2 publishing now live in the control plane — `api/youtube_download.py` and `api/workflows.py`.)
+- `api/prototyping/music/`: the pure allin1 analyzer, its Modal app (`eclypte-analysis`), synced-lyrics lookup, and the word-level lyrics aligner (`lyrics_align.py` pure decisions + `lyrics_align_modal.py` Modal app `eclypte-lyrics`). (YouTube/audio ingestion and R2 publishing now live in the control plane — `api/youtube_download.py` and `api/workflows.py`.)
 - `api/prototyping/video/`: scene detection, optical-flow motion analysis, impact detection, local CPU and Modal GPU runtimes, R2-aware Modal wrapper.
 - `api/prototyping/edit/`: CLIP index, OpenAI synthesis agent, reference ingest/metrics, timeline schemas/validators, dual-path renderer (MP4 + poster frame), Modal render/index wrappers.
 - `api/COMMANDS.md`: command runbook. Prefer updating it when operational instructions change.
@@ -74,6 +74,7 @@ Optional env vars:
 - `ECLYPTE_YOUTUBE_VISITOR_DATA` and `ECLYPTE_YOUTUBE_PO_TOKEN`: PO-token path for `pytubefix`.
 - `BUFFER_API_KEY`, `BUFFER_INSTAGRAM_CHANNEL_ID`, and `ECLYPTE_R2_PUBLIC_BASE_URL`: enable review-gated Buffer Instagram publishing from public R2 copies. `ECLYPTE_BUFFER_POST_NOW_LEAD_SEC` (default 60) is the lead added to "now" the post's computed `dueAt` so Buffer accepts it (must be in the future) and publishes near-immediately.
 - `OPENAI_API_KEY`: enables AI caption generation for publishing packages. `ECLYPTE_CAPTION_MODEL` is optional and defaults to a small GPT-5.4-class model; deterministic fallback captions are used when OpenAI is unavailable.
+- `ECLYPTE_LYRICS_TIMING_DISABLED=1`: kill-switch for word-level lyrics timing — skips the GPU alignment call in the song workflows AND the edit pipeline's backfill ensure-step. `ECLYPTE_LYRICS_WHISPER_MODEL` overrides the aligner's Whisper model (default `large-v3`; `medium` is the pressure valve for very long songs).
 - `ECLYPTE_AUTOPILOT=1`: starts the in-process autopilot loop (FastAPI lifespan task) that ticks every `ECLYPTE_AUTOPILOT_INTERVAL_SEC` (default 300) for every user with autopilot enabled. Without it, ticks only run via `POST /v1/autopilot/tick`.
 
 Routes:
@@ -108,6 +109,7 @@ Artifact kinds are:
 - `source_video`
 - `song_audio`
 - `lyrics`
+- `lyrics_timing`
 - `music_analysis`
 - `video_analysis`
 - `clip_index`
@@ -128,6 +130,7 @@ Important workflows:
 
 - `run_music_analysis`: loads audio from R2, calls `eclypte-analysis::analyze_remote`, publishes a `music_analysis` asset.
 - `run_youtube_song_import`: downloads/transcodes audio through `api/youtube_download.py`, records `youtube_download_attempt` events, publishes `song_audio`, then runs music analysis.
+- `run_lyrics_timing`: backfill worker for word-level lyrics timing — reuses the stored LRC (or fetches one), calls `eclypte-lyrics::align_lyrics_remote`, publishes `lyrics_timing`, and stamps `lyrics_timing_status: ok|none` (the negative-cache marker). Created by the edit pipeline's `_ensure_edit_lyrics_timing` for songs that predate the feature.
 - `run_video_analysis`: calls `eclypte-video-r2::analyze_r2`, publishes `video_analysis`, and (best-effort) a `source_poster` JPEG from the analyzer's picked poster frame — a publish failure is logged and swallowed, never fails the run.
 - `run_timeline_plan`: runs the OpenAI/CLIP agent planner and publishes `timeline`.
 - `run_render`: calls `eclypte-render-r2::render_r2`, publishes a `render_output` MP4 and a `render_poster` JPEG thumbnail.
@@ -146,6 +149,7 @@ Edit child run ids and render output ids are part of the dashboard contract. Pre
 - `youtube_16_9`: 1920x1080, letterbox.
 - `audio_start_sec` and `audio_end_sec`.
 - `trim_song_analysis()`, which rewrites beats, downbeats, segments, energy, and source duration for the selected audio window.
+- `trim_lyrics_timing()`, the same windowing for `lyrics_timing` payloads (lines + words rebased into the window). One deliberate difference: an `end_sec` past the artifact's duration clamps instead of raising, because the whisper-measured duration can differ by ms from the music analysis the window was validated against.
 
 Backend defaults to YouTube 16:9 when export options are omitted. The dashboard defaults the compose UI to Reels.
 
@@ -167,6 +171,8 @@ Do not add browser-side media extraction. Diagnose failures from `RunManifest.la
 `api/prototyping/music/analysis_modal.py` defines Modal app `eclypte-analysis` and `analyze_remote(audio_bytes, filename)`. It owns the heavy allin1/torch/natten image. Keep Modal imports out of `analysis.py`.
 
 The control plane wires the music flow (`api/workflows.py`: `run_music_analysis`, `run_youtube_song_import`) — ingestion via `api/youtube_download.py`, Modal analysis, lyrics, and R2 publishing; the `music/` package itself is just the pure analyzer, its Modal app, and `lyrics.py`. `lyrics.py` uses `syncedlyrics`; lyrics are optional and separate from `song_analysis.json`. Production sourcing: `search_synced_lyrics(query)` (synced LRC only) is called opportunistically during both analysis paths — `run_youtube_song_import` (query = video title) and `run_music_analysis` (query = song filename) — and `_publish_song_lyrics` stores a `lyrics` asset, recording `lyrics_file_id`/`lyrics_version_id` in the run outputs. Best-effort: a miss/error stores nothing and never fails the run. `syncedlyrics` is in root `requirements.txt` because the fetch runs on the control plane (Railway).
+
+Word-level lyrics timing: after the LRC fetch, `_publish_song_lyrics_and_timing` calls `eclypte-lyrics::align_lyrics_remote` with the audio bytes and the LRC **text only** — provider timestamps are always discarded because YouTube-sourced audio is offset from them; timing comes from forced alignment against the actual audio. `api/prototyping/music/lyrics_align.py` is the pure module (LRC text extraction, quality gates, schema assembly, the align→transcribe decision flow; heavy imports stay lazy so the control plane can import it); `lyrics_align_modal.py` is the Modal wrapper (stable-ts 2.19.1 + Whisper `large-v3` + demucs vocal isolation on T4, pinned in `api/requirements-lyrics-modal.txt` — stable-ts is archived upstream, keep pins exact). With no findable text it transcribes instead (`mode: "transcribed"`); an instrumental or hallucinated result publishes nothing. The payload (`schema_version: 1`, `_sec`, 3dp) is `lines[].words[]` with per-word `start_sec`/`end_sec`/`confidence`, published as a `lyrics_timing` asset with run outputs `lyrics_timing_file_id`/`lyrics_timing_version_id`. The edit pipeline backfills older songs via `_ensure_edit_lyrics_timing` (a `lyrics_timing` child run inside the music stage; never blocks or fails the edit; a completed no-words run is a negative cache so GPU isn't re-burned per edit). `_run_agent_timeline_plan` looks the artifact up by audio-version lineage, windows it with `trim_lyrics_timing`, and passes it to the agent.
 
 Heavy audio landmines:
 
@@ -225,6 +231,7 @@ Agent planning defaults:
 - `query_clips` results are enriched on the control plane (`_enrich_clip_results` in `api/workflows.py`) with per-scene `motion` (0–1 avg intensity), `camera` (camera-movement class), and `impact_near` (an impact frame within 0.5s) from the video analysis, so the agent can match footage energy to song energy. Fields are omitted for older analyses.
 - The agent receives the source duration and is instructed to span the full source start→end regardless of song length, so short/trimmed edits still cover the whole film. This guidance is injected into the per-run user content (so it applies regardless of the active prompt version); nothing enforces it (no validator/forced spread), preserving the agent's freedom to dwell on standout moments.
 - The agent also receives per-run pacing targets (`_format_pacing_context` in `agent.py`): tempo-scaled shot-length bands per song section from `rhythm.pacing_bands_for`, plus the note about the enriched query fields. The adapter's split backstop only enforces egregious (2×-band) violations in fast sections — the guidance is what makes the agent hit the bands on its own.
+- When a `lyrics_timing` artifact exists for the song, the agent also receives a word-timed lyrics block (`_format_lyrics_context` in `agent.py`, trimmed to the audio window, times rebased to the edit timeline): per-word rows up to `LYRICS_WORD_DETAIL_MAX`=350 words, per-line rows beyond, a recognition-errors caveat in `transcribed` mode, and guidance for three uses — literal word→imagery match cuts at exact word timestamps, emotional-arc footage matching per section, and anchoring the strongest shots on hook/title-drop line starts. Purely additive context; no lyrics → no block.
 - Reference-derived style profiles: `synthesis/style_profile.py::derive_style_profile` turns completed synthesis-reference metrics into rhythm-engine overrides — `cut_lead_sec` (median cut-before-downbeat lead, clamped to ≤0.08s) and `pacing_bands_beats` per section (from median `cuts_per_downbeat`, 4-beat bars). `_run_agent_timeline_plan` computes the profile fresh at plan time from `repo.list_synthesis_references` (nothing persisted — a newly ingested reference shapes the very next edit), threads it into both the agent's pacing context and `adapt(style_profile=...)`, and records it on the `timeline_sync_report` event.
 - The agent is instructed to never select black frames, solid colors, title cards, logos, or end credits, and to span the end of the *content* (not the trailing credits/black). The data-side filter is partial: `query_clips` results are content-filtered in the CLIP index by brightness/detail (see `index/storage_modal.py`), which drops black/flat frames but NOT credits text on a colored background (bright + has edge detail). So the prompt (`system_prompt.py` + the per-run source context in `agent.py`) is reinforced to treat any text-heavy frame as credits regardless of background color, and to pull the CLOSING shot's source timestamp back from the very end of the source. The durable cap is `content_end_sec` from credit OCR (which needs a present/up-to-date `credits` block — re-analyze older films).
 - Agent mode may create/reuse `clip_index` assets and records `clip_index_file_id`, `clip_index_version_id`, and `synthesis_prompt_version_id`.
@@ -283,7 +290,7 @@ The frontend depends on these output keys:
 - `clip_index_file_id`, `clip_index_version_id`
 - `synthesis_prompt_version_id`
 
-`source_poster_file_id`/`source_poster_version_id` on a `video_analysis` run's outputs are additive and best-effort (not required — a missing poster is not an error); the frontend resolves them into `AssetSummary.poster` rather than reading them directly off run outputs.
+`source_poster_file_id`/`source_poster_version_id` on a `video_analysis` run's outputs are additive and best-effort (not required — a missing poster is not an error); the frontend resolves them into `AssetSummary.poster` rather than reading them directly off run outputs. `lyrics_file_id`/`lyrics_version_id` and `lyrics_timing_file_id`/`lyrics_timing_version_id` are likewise additive and best-effort — the frontend does not read them; `lyrics_timing` assets stay out of the Library (its tabs filter positively by kind).
 
 Styling uses CSS Modules and the existing dashboard/landing visual language. Shared services and components should stay typed and colocated with their CSS where that pattern already exists.
 
@@ -292,6 +299,7 @@ Styling uses CSS Modules and the existing dashboard/landing visual language. Sha
 API-facing R2-aware apps:
 
 - `eclypte-analysis::analyze_remote` from `api/prototyping/music/analysis_modal.py`
+- `eclypte-lyrics::align_lyrics_remote` from `api/prototyping/music/lyrics_align_modal.py` (word-level lyrics forced alignment; own slim T4 image from `api/requirements-lyrics-modal.txt` + `lyrics-align-cache` volume — the fragile allin1 image is untouched; redeploy after changing `lyrics_align.py`)
 - `eclypte-video-r2::analyze_r2` from `api/prototyping/video/storage_modal.py`
 - `eclypte-clip-index-r2::build_index_r2` and `query_index_r2` from `api/prototyping/edit/index/storage_modal.py`
 - `eclypte-render-r2::render_r2` from `api/prototyping/edit/render_storage_modal.py`

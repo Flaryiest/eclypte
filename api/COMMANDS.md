@@ -226,6 +226,33 @@ Modal function from `api/prototyping/music/analysis_modal.py`.
 
 ---
 
+## Word-level lyrics timing (Modal GPU)
+
+Deploy the lyrics aligner (`eclypte-lyrics::align_lyrics_remote`) used by song
+imports/analyses and the edit pipeline's backfill; it has its own slim image
+(`api/requirements-lyrics-modal.txt`) so the fragile allin1 image stays
+untouched:
+
+```powershell
+cd api/prototyping
+$env:PYTHONIOENCODING="utf-8"
+modal deploy music/lyrics_align_modal.py
+```
+
+```bash
+cd api/prototyping
+PYTHONUTF8=1 modal deploy music/lyrics_align_modal.py
+```
+
+Redeploy after changing `music/lyrics_align.py` (the bundled pure module). The
+first call downloads Whisper `large-v3` (~3 GB) + demucs weights (~300 MB) into
+the persistent `lyrics-align-cache` volume, so expect a slow warm-up once.
+`ECLYPTE_LYRICS_TIMING_DISABLED=1` on Railway skips alignment entirely;
+`ECLYPTE_LYRICS_WHISPER_MODEL=medium` trades accuracy for speed on long songs.
+Pure-module tests: `python -m pytest api/prototyping/music -v`.
+
+---
+
 ## Music / video analysis (Modal GPU)
 
 Production analysis calls `eclypte-analysis::analyze_remote` and

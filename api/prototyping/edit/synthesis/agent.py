@@ -189,6 +189,67 @@ def _format_pacing_context(song: dict, style_profile: dict | None = None) -> str
     return "\n".join(lines)
 
 
+LYRICS_WORD_DETAIL_MAX = 350
+
+
+def _format_lyrics_context(lyrics: dict) -> str | None:
+    """Word-timed lyrics for the per-run user content.
+
+    Like the pacing context, this stays out of the system prompt so it applies
+    regardless of the user's active prompt version. Short windows get per-word
+    rows; anything past LYRICS_WORD_DETAIL_MAX words collapses to line rows.
+    """
+    lines = lyrics.get("lines", []) or []
+    if not lines:
+        return None
+    word_count = sum(len(line.get("words") or []) for line in lines)
+    detailed = 0 < word_count <= LYRICS_WORD_DETAIL_MAX
+    if lyrics.get("mode") == "transcribed":
+        header = (
+            "Lyrics timing (word-level, transcribed from the vocal — words may "
+            "contain recognition errors; times are seconds on the edit timeline):"
+        )
+    else:
+        header = (
+            "Lyrics timing (word-level, aligned to the actual vocal; times are "
+            "seconds on the edit timeline):"
+        )
+    out = [header]
+    for i, line in enumerate(lines, 1):
+        start = float(line.get("start_sec", 0.0))
+        text = str(line.get("text", "")).strip()
+        if detailed:
+            end = float(line.get("end_sec", 0.0))
+            out.append(f'L{i} [{start:.2f}-{end:.2f}] "{text}"')
+            words = line.get("words") or []
+            if words:
+                out.append(
+                    "    "
+                    + " ".join(
+                        f"{str(w.get('word', '')).strip()}({float(w.get('start_sec', 0.0)):.2f})"
+                        for w in words
+                    )
+                )
+        else:
+            out.append(f'L{i} [{start:.2f}] "{text}"')
+    out.append(
+        "Use these lyrics three ways:\n"
+        "1. Literal imagery: when a concrete, visual word lands (fire, run, fall, "
+        "rain, a name), consider cutting to footage that literally shows it AT that "
+        "word's timestamp — a lyric-synced match cut is one of the strongest moves "
+        "available to you.\n"
+        "2. Emotional arc: read each section's lines to judge its mood and pick "
+        "footage whose emotional tone matches — tender lines want intimate/slow "
+        "shots, aggressive lines want action.\n"
+        "3. Anchors: hook/chorus lines and any title drop are the song's peak "
+        "moments — place your most striking shots to land exactly on the first "
+        "word of those lines, and prefer starting a new shot there rather than "
+        "mid-line.\n"
+        "Word timings are precise; line boundaries are natural cut points."
+    )
+    return "\n".join(out)
+
+
 SHORT_EDIT_MAX_SEC = 40.0
 
 
@@ -281,6 +342,7 @@ def run_synthesis_loop(
     query_clips_fn: Callable[[str, str, int], list[dict]] | None = None,
     source_duration_sec: float | None = None,
     style_profile: dict | None = None,
+    lyrics: dict | None = None,
 ) -> list[dict]:
     """
     Runs an LLM agent loop to construct an AMV timeline based on instructions.
@@ -290,7 +352,9 @@ def run_synthesis_loop(
 
     If `song` is provided (song_analysis.json dict), its duration, tempo, and
     sections are formatted into the prompt so the agent sizes and paces the
-    edit to the music.
+    edit to the music. If `lyrics` is provided (lyrics_timing.json dict, already
+    trimmed to the audio window), word-timed lines are included so the agent can
+    match imagery/emotion and anchor cuts on key words.
 
     Returns the agent output:
       {
@@ -309,6 +373,10 @@ def run_synthesis_loop(
         pacing_block = _format_pacing_context(song, style_profile)
         if pacing_block:
             context_blocks.append(pacing_block)
+    if lyrics:
+        lyrics_block = _format_lyrics_context(lyrics)
+        if lyrics_block:
+            context_blocks.append(lyrics_block)
     if source_duration_sec is not None and float(source_duration_sec) > 0:
         context_blocks.append(_format_source_context(source_duration_sec))
     song_duration = float((song or {}).get("source", {}).get("duration_sec", 0.0) or 0.0)

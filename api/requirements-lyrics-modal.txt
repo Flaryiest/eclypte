@@ -1,0 +1,10 @@
+# Lyrics forced-alignment stack for the eclypte-lyrics Modal image only
+# (Linux, py3.12, CUDA). Local dev and Railway must NOT install these.
+# stable-ts is archived upstream (May 2026) — keep every pin exact.
+numpy<2
+torch==2.5.1
+torchaudio==2.5.1
+openai-whisper==20250625
+stable-ts==2.19.1
+demucs==4.0.1
+soundfile

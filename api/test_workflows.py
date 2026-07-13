@@ -211,13 +211,17 @@ def test_youtube_song_import_publishes_audio_and_analysis(monkeypatch):
             assert filename == "Imported Song.wav"
             return {"source": {"title": "Imported Song"}}
 
+    class FakeAlign:
+        @staticmethod
+        def remote(*_args):
+            return None
+
     monkeypatch.setattr("api.workflows._download_youtube_wav", fake_download)
+    monkeypatch.setattr(
+        "api.prototyping.music.lyrics.search_synced_lyrics", lambda query: None
+    )
     monkeypatch.setitem(
-        sys.modules,
-        "modal",
-        SimpleNamespace(
-            Function=SimpleNamespace(from_name=lambda *_args: FakeAnalyze),
-        ),
+        sys.modules, "modal", _fake_modal_per_app(analyze=FakeAnalyze, align=FakeAlign)
     )
 
     runner.run_youtube_song_import(
@@ -314,13 +318,17 @@ def test_youtube_song_import_records_download_attempt_events(monkeypatch):
         def remote(_audio_bytes, _filename):
             return {"source": {"title": "Imported Song"}}
 
+    class FakeAlign:
+        @staticmethod
+        def remote(*_args):
+            return None
+
     monkeypatch.setattr("api.workflows._download_youtube_wav", fake_download)
+    monkeypatch.setattr(
+        "api.prototyping.music.lyrics.search_synced_lyrics", lambda query: None
+    )
     monkeypatch.setitem(
-        sys.modules,
-        "modal",
-        SimpleNamespace(
-            Function=SimpleNamespace(from_name=lambda *_args: FakeAnalyze),
-        ),
+        sys.modules, "modal", _fake_modal_per_app(analyze=FakeAnalyze, align=FakeAlign)
     )
 
     runner.run_youtube_song_import(
@@ -737,6 +745,7 @@ def test_edit_pipeline_reuses_existing_analyses_and_publishes_render(monkeypatch
     repo = StorageRepository(store)
     runner = DefaultWorkflowRunner()
     monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setenv("ECLYPTE_LYRICS_TIMING_DISABLED", "1")
     audio, source_video, music_analysis, video_analysis = _publish_timeline_inputs(repo)
     music_run = repo.create_run(
         user_id="user_123",
@@ -801,6 +810,10 @@ def test_edit_pipeline_reuses_existing_analyses_and_publishes_render(monkeypatch
     assert completed.outputs["timeline_run_id"].startswith("run_")
     assert completed.outputs["render_output_file_id"].startswith("file_render_")
     assert any(event.event_type == "progress" and event.payload["stage"] == "render" for event in events)
+    # The kill-switch must actually suppress the lyrics-timing backfill.
+    assert not [
+        r for r in repo.list_run_manifests("user_123") if r.workflow_type == "lyrics_timing"
+    ]
 
 
 def test_edit_pipeline_creates_missing_analysis_child_runs(monkeypatch):
@@ -808,6 +821,7 @@ def test_edit_pipeline_creates_missing_analysis_child_runs(monkeypatch):
     repo = StorageRepository(store)
     runner = DefaultWorkflowRunner()
     monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setenv("ECLYPTE_LYRICS_TIMING_DISABLED", "1")
     audio, source_video, _, _ = _publish_timeline_inputs(repo)
     parent = repo.create_run(
         user_id="user_123",
@@ -864,6 +878,10 @@ def test_edit_pipeline_creates_missing_analysis_child_runs(monkeypatch):
     assert completed.outputs["music_run_id"].startswith("run_")
     assert completed.outputs["video_run_id"].startswith("run_")
     assert completed.outputs["render_output_version_id"].startswith("ver_")
+    # The kill-switch must actually suppress the lyrics-timing backfill.
+    assert not [
+        r for r in repo.list_run_manifests("user_123") if r.workflow_type == "lyrics_timing"
+    ]
 
 
 def test_edit_pipeline_fails_parent_when_child_run_fails(monkeypatch):
@@ -970,3 +988,788 @@ def test_run_video_analysis_publishes_source_poster(monkeypatch):
     ]
     stored = json.loads(store.get_bytes(analysis_key[0]).decode("utf-8"))
     assert "poster_jpeg_b64" not in stored and "poster_ts_sec" not in stored
+
+
+# ---- word-level lyrics timing ----
+
+LYRICS_LRC = "[00:01.00]Hello world\n[00:02.00]Second line"
+
+
+def _fake_modal_per_app(analyze=None, align=None):
+    def from_name(app_name, _fn_name=None):
+        return align if app_name == "eclypte-lyrics" else analyze
+
+    return SimpleNamespace(Function=SimpleNamespace(from_name=from_name))
+
+
+def _lyrics_timing_payload():
+    return {
+        "schema_version": 1,
+        "source": {"duration_sec": 4.0},
+        "mode": "aligned",
+        "language": "en",
+        "text_source": "synced_lrc",
+        "model": "large-v3",
+        "quality": {"word_count": 2},
+        "lines": [
+            {
+                "line_idx": 0,
+                "start_sec": 1.0,
+                "end_sec": 2.0,
+                "text": "Hello world",
+                "words": [
+                    {"word": "Hello", "start_sec": 1.0, "end_sec": 1.4, "confidence": 0.9},
+                    {"word": "world", "start_sec": 1.5, "end_sec": 2.0, "confidence": 0.9},
+                ],
+            }
+        ],
+    }
+
+
+def _seed_song_audio(repo):
+    return _publish_artifact(
+        repo,
+        file_id="file_audio",
+        kind="song_audio",
+        filename="song.wav",
+        body=b"wav",
+        content_type="audio/wav",
+    )
+
+
+def test_music_analysis_publishes_lyrics_timing(monkeypatch):
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    audio = _seed_song_audio(repo)
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="music_analysis",
+        inputs={"audio_version_id": audio["version_id"]},
+        steps=["analyze_music", "publish_analysis"],
+    )
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setattr(
+        "api.prototyping.music.lyrics.search_synced_lyrics", lambda query: LYRICS_LRC
+    )
+
+    captured = {}
+
+    class FakeAnalyze:
+        @staticmethod
+        def remote(audio_bytes, filename):
+            return {"source": {"duration_sec": 4.0}}
+
+    class FakeAlign:
+        @staticmethod
+        def remote(audio_bytes, filename, text):
+            captured["text"] = text
+            return _lyrics_timing_payload()
+
+    monkeypatch.setitem(
+        sys.modules, "modal", _fake_modal_per_app(analyze=FakeAnalyze, align=FakeAlign)
+    )
+
+    runner.run_music_analysis(user_id="user_123", run_id=run.run_id, audio=audio)
+
+    completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=run.run_id))
+    assert completed.status == "completed"
+    assert completed.outputs["lyrics_file_id"]
+    assert completed.outputs["lyrics_timing_file_id"] == f"file_lyrics_timing_{run.run_id}"
+    assert completed.outputs["lyrics_timing_version_id"].startswith("ver_")
+    # LRC timestamps are discarded — the aligner receives text only.
+    assert captured["text"] == "Hello world\nSecond line"
+
+
+def test_music_analysis_survives_alignment_failure(monkeypatch):
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    audio = _seed_song_audio(repo)
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="music_analysis",
+        inputs={"audio_version_id": audio["version_id"]},
+        steps=["analyze_music", "publish_analysis"],
+    )
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setattr(
+        "api.prototyping.music.lyrics.search_synced_lyrics", lambda query: LYRICS_LRC
+    )
+
+    class FakeAnalyze:
+        @staticmethod
+        def remote(audio_bytes, filename):
+            return {"source": {"duration_sec": 4.0}}
+
+    class FakeAlign:
+        @staticmethod
+        def remote(*_args):
+            raise RuntimeError("modal down")
+
+    monkeypatch.setitem(
+        sys.modules, "modal", _fake_modal_per_app(analyze=FakeAnalyze, align=FakeAlign)
+    )
+
+    runner.run_music_analysis(user_id="user_123", run_id=run.run_id, audio=audio)
+
+    completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=run.run_id))
+    assert completed.status == "completed"
+    assert completed.outputs["music_analysis_file_id"]
+    assert "lyrics_timing_file_id" not in completed.outputs
+
+
+def test_youtube_song_import_merges_lyrics_timing_keys(monkeypatch):
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    run = _create_youtube_import_run(repo)
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setenv("ECLYPTE_TEMP_DIR", str(Path.cwd() / ".pytest-tmp-youtube-worker"))
+    monkeypatch.setattr(
+        "api.prototyping.music.lyrics.search_synced_lyrics", lambda query: LYRICS_LRC
+    )
+
+    def fake_download(url, workdir):
+        wav_path = workdir / "download.wav"
+        wav_path.write_bytes(b"wav-bytes")
+        return YoutubeDownloadResult(
+            title="Imported Song",
+            wav_path=wav_path,
+            attempts=[YoutubeDownloadAttempt("pytubefix", "succeeded", "ok")],
+        )
+
+    class FakeAnalyze:
+        @staticmethod
+        def remote(audio_bytes, filename):
+            return {"source": {"duration_sec": 4.0}}
+
+    class FakeAlign:
+        @staticmethod
+        def remote(audio_bytes, filename, text):
+            assert audio_bytes == b"wav-bytes"
+            return _lyrics_timing_payload()
+
+    monkeypatch.setattr("api.workflows._download_youtube_wav", fake_download)
+    monkeypatch.setitem(
+        sys.modules, "modal", _fake_modal_per_app(analyze=FakeAnalyze, align=FakeAlign)
+    )
+
+    runner.run_youtube_song_import(
+        user_id="user_123",
+        run_id=run.run_id,
+        url="https://www.youtube.com/watch?v=abc123",
+    )
+
+    completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=run.run_id))
+    assert completed.status == "completed"
+    assert completed.outputs["lyrics_timing_file_id"] == f"file_lyrics_timing_{run.run_id}"
+
+
+def test_find_song_lyrics_timing_matches_all_arms():
+    from api.workflows import _find_song_lyrics_timing
+
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    keys = {"lyrics_timing_file_id": "file_lt", "lyrics_timing_version_id": "ver_lt"}
+
+    backfill = repo.create_run(
+        user_id="user_123",
+        workflow_type="lyrics_timing",
+        inputs={"audio_version_id": "ver_a"},
+        steps=["align_lyrics"],
+    )
+    repo.update_run_status(
+        RunRef(user_id="user_123", run_id=backfill.run_id), status="completed", outputs=keys
+    )
+    analysis = repo.create_run(
+        user_id="user_123",
+        workflow_type="music_analysis",
+        inputs={"audio_version_id": "ver_b"},
+        steps=["analyze_music"],
+    )
+    repo.update_run_status(
+        RunRef(user_id="user_123", run_id=analysis.run_id), status="completed", outputs=keys
+    )
+    yt = repo.create_run(
+        user_id="user_123",
+        workflow_type="youtube_song_import",
+        inputs={"youtube_url": "u"},
+        steps=["download_youtube_audio"],
+    )
+    repo.update_run_status(
+        RunRef(user_id="user_123", run_id=yt.run_id),
+        status="completed",
+        outputs={**keys, "audio_version_id": "ver_c"},
+    )
+
+    for version_id in ("ver_a", "ver_b", "ver_c"):
+        found = _find_song_lyrics_timing(
+            repo, user_id="user_123", audio_version_id=version_id
+        )
+        assert found == {"file_id": "file_lt", "version_id": "ver_lt"}
+
+    assert (
+        _find_song_lyrics_timing(repo, user_id="user_123", audio_version_id="ver_none")
+        is None
+    )
+
+
+def _create_edit_parent(repo, audio, source_video):
+    return repo.create_run(
+        user_id="user_123",
+        workflow_type="edit_pipeline",
+        inputs={
+            "title": "Edit",
+            "audio_file_id": audio["file_id"],
+            "audio_version_id": audio["version_id"],
+            "source_video_file_id": source_video["file_id"],
+            "source_video_version_id": source_video["version_id"],
+            "creative_brief": "",
+        },
+        steps=["assets", "music", "video", "timeline", "render", "result"],
+    )
+
+
+def test_ensure_edit_lyrics_timing_reuses_existing_artifact(monkeypatch):
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    audio, source_video, _, _ = _publish_timeline_inputs(repo)
+    parent = _create_edit_parent(repo, audio, source_video)
+    timing_run = repo.create_run(
+        user_id="user_123",
+        workflow_type="lyrics_timing",
+        inputs={"audio_version_id": audio["version_id"]},
+        steps=["align_lyrics"],
+    )
+    repo.update_run_status(
+        RunRef(user_id="user_123", run_id=timing_run.run_id),
+        status="completed",
+        outputs={
+            "lyrics_timing_file_id": "file_lt",
+            "lyrics_timing_version_id": "ver_lt",
+            "lyrics_timing_status": "ok",
+        },
+    )
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setattr(
+        runner,
+        "run_lyrics_timing",
+        lambda **_: (_ for _ in ()).throw(AssertionError("timing should be reused")),
+    )
+
+    runner._ensure_edit_lyrics_timing(
+        repo=repo,
+        user_id="user_123",
+        parent_ref=RunRef(user_id="user_123", run_id=parent.run_id),
+        audio=audio,
+    )
+
+    updated = repo.load_run_manifest(RunRef(user_id="user_123", run_id=parent.run_id))
+    assert updated.outputs["lyrics_timing_file_id"] == "file_lt"
+    assert updated.outputs["lyrics_timing_version_id"] == "ver_lt"
+    timing_runs = [
+        r for r in repo.list_run_manifests("user_123") if r.workflow_type == "lyrics_timing"
+    ]
+    assert len(timing_runs) == 1
+
+
+def test_ensure_edit_lyrics_timing_creates_child_and_stamps_parent(monkeypatch):
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    audio, source_video, _, _ = _publish_timeline_inputs(repo)
+    parent = _create_edit_parent(repo, audio, source_video)
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setattr(
+        "api.prototyping.music.lyrics.search_synced_lyrics", lambda query: LYRICS_LRC
+    )
+
+    class FakeAlign:
+        @staticmethod
+        def remote(audio_bytes, filename, text):
+            return _lyrics_timing_payload()
+
+    monkeypatch.setitem(sys.modules, "modal", _fake_modal_per_app(align=FakeAlign))
+
+    runner._ensure_edit_lyrics_timing(
+        repo=repo,
+        user_id="user_123",
+        parent_ref=RunRef(user_id="user_123", run_id=parent.run_id),
+        audio=audio,
+    )
+
+    timing_runs = [
+        r for r in repo.list_run_manifests("user_123") if r.workflow_type == "lyrics_timing"
+    ]
+    assert len(timing_runs) == 1
+    child = timing_runs[0]
+    assert child.status == "completed"
+    assert child.outputs["lyrics_timing_status"] == "ok"
+
+    updated = repo.load_run_manifest(RunRef(user_id="user_123", run_id=parent.run_id))
+    assert updated.outputs["lyrics_timing_run_id"] == child.run_id
+    assert updated.outputs["lyrics_timing_file_id"] == child.outputs["lyrics_timing_file_id"]
+
+
+def test_ensure_edit_lyrics_timing_negative_cache_skips_gpu(monkeypatch):
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    audio, source_video, _, _ = _publish_timeline_inputs(repo)
+    parent = _create_edit_parent(repo, audio, source_video)
+    # A completed timing run with no usable words: don't re-burn GPU per edit.
+    prior = repo.create_run(
+        user_id="user_123",
+        workflow_type="lyrics_timing",
+        inputs={"audio_version_id": audio["version_id"]},
+        steps=["align_lyrics"],
+    )
+    repo.update_run_status(
+        RunRef(user_id="user_123", run_id=prior.run_id),
+        status="completed",
+        outputs={"lyrics_timing_status": "none"},
+    )
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setattr(
+        runner,
+        "run_lyrics_timing",
+        lambda **_: (_ for _ in ()).throw(AssertionError("negative cache must hold")),
+    )
+
+    runner._ensure_edit_lyrics_timing(
+        repo=repo,
+        user_id="user_123",
+        parent_ref=RunRef(user_id="user_123", run_id=parent.run_id),
+        audio=audio,
+    )
+
+    timing_runs = [
+        r for r in repo.list_run_manifests("user_123") if r.workflow_type == "lyrics_timing"
+    ]
+    assert len(timing_runs) == 1
+
+
+def test_ensure_edit_lyrics_timing_failed_child_retries_next_edit(monkeypatch):
+    # Transient errors (Modal app missing, network, timeout) must FAIL the child
+    # run — a completed "none" would permanently negative-cache the song.
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    audio, source_video, _, _ = _publish_timeline_inputs(repo)
+    parent = _create_edit_parent(repo, audio, source_video)
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setattr(
+        "api.prototyping.music.lyrics.search_synced_lyrics", lambda query: LYRICS_LRC
+    )
+
+    class BrokenAlign:
+        @staticmethod
+        def remote(*_args):
+            raise RuntimeError("modal outage")
+
+    monkeypatch.setitem(sys.modules, "modal", _fake_modal_per_app(align=BrokenAlign))
+    parent_ref = RunRef(user_id="user_123", run_id=parent.run_id)
+
+    runner._ensure_edit_lyrics_timing(
+        repo=repo, user_id="user_123", parent_ref=parent_ref, audio=audio
+    )
+
+    timing_runs = [
+        r for r in repo.list_run_manifests("user_123") if r.workflow_type == "lyrics_timing"
+    ]
+    assert len(timing_runs) == 1
+    assert timing_runs[0].status == "failed"
+    updated = repo.load_run_manifest(parent_ref)
+    assert "lyrics_timing_file_id" not in updated.outputs
+
+    # The outage ends; the next edit retries and succeeds.
+    class FakeAlign:
+        @staticmethod
+        def remote(audio_bytes, filename, text):
+            return _lyrics_timing_payload()
+
+    monkeypatch.setitem(sys.modules, "modal", _fake_modal_per_app(align=FakeAlign))
+    runner._ensure_edit_lyrics_timing(
+        repo=repo, user_id="user_123", parent_ref=parent_ref, audio=audio
+    )
+
+    timing_runs = [
+        r for r in repo.list_run_manifests("user_123") if r.workflow_type == "lyrics_timing"
+    ]
+    assert len(timing_runs) == 2
+    updated = repo.load_run_manifest(parent_ref)
+    assert updated.outputs["lyrics_timing_file_id"]
+
+
+def test_ensure_edit_lyrics_timing_writes_negative_cache_on_no_words(monkeypatch):
+    # A genuine no-words conclusion (instrumental) completes with status "none"
+    # and stops later edits from re-burning GPU.
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    audio, source_video, _, _ = _publish_timeline_inputs(repo)
+    parent = _create_edit_parent(repo, audio, source_video)
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setattr(
+        "api.prototyping.music.lyrics.search_synced_lyrics", lambda query: LYRICS_LRC
+    )
+    calls = {"align": 0}
+
+    class NoWordsAlign:
+        @staticmethod
+        def remote(*_args):
+            calls["align"] += 1
+            return None
+
+    monkeypatch.setitem(sys.modules, "modal", _fake_modal_per_app(align=NoWordsAlign))
+    parent_ref = RunRef(user_id="user_123", run_id=parent.run_id)
+
+    runner._ensure_edit_lyrics_timing(
+        repo=repo, user_id="user_123", parent_ref=parent_ref, audio=audio
+    )
+    runner._ensure_edit_lyrics_timing(
+        repo=repo, user_id="user_123", parent_ref=parent_ref, audio=audio
+    )
+
+    timing_runs = [
+        r for r in repo.list_run_manifests("user_123") if r.workflow_type == "lyrics_timing"
+    ]
+    assert len(timing_runs) == 1
+    assert timing_runs[0].status == "completed"
+    assert timing_runs[0].outputs["lyrics_timing_status"] == "none"
+    assert "lyrics_timing_file_id" not in timing_runs[0].outputs
+    assert calls["align"] == 1
+
+
+def test_ensure_edit_lyrics_timing_honors_song_workflow_negative_cache(monkeypatch):
+    # A music_analysis run that already concluded "no usable words" stops the
+    # backfill from re-burning GPU on the first edit.
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    audio, source_video, _, _ = _publish_timeline_inputs(repo)
+    parent = _create_edit_parent(repo, audio, source_video)
+    analysis_run = repo.create_run(
+        user_id="user_123",
+        workflow_type="music_analysis",
+        inputs={"audio_version_id": audio["version_id"]},
+        steps=["analyze_music"],
+    )
+    repo.update_run_status(
+        RunRef(user_id="user_123", run_id=analysis_run.run_id),
+        status="completed",
+        outputs={"lyrics_timing_status": "none"},
+    )
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setattr(
+        runner,
+        "run_lyrics_timing",
+        lambda **_: (_ for _ in ()).throw(AssertionError("negative cache must hold")),
+    )
+
+    runner._ensure_edit_lyrics_timing(
+        repo=repo,
+        user_id="user_123",
+        parent_ref=RunRef(user_id="user_123", run_id=parent.run_id),
+        audio=audio,
+    )
+
+    assert not [
+        r for r in repo.list_run_manifests("user_123") if r.workflow_type == "lyrics_timing"
+    ]
+
+
+def test_music_analysis_records_concluded_none(monkeypatch):
+    # A conclusive no-words alignment during song analysis is stamped so the
+    # edit pipeline's negative cache can honor it.
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    audio = _seed_song_audio(repo)
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="music_analysis",
+        inputs={"audio_version_id": audio["version_id"]},
+        steps=["analyze_music", "publish_analysis"],
+    )
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setattr(
+        "api.prototyping.music.lyrics.search_synced_lyrics", lambda query: LYRICS_LRC
+    )
+
+    class FakeAnalyze:
+        @staticmethod
+        def remote(audio_bytes, filename):
+            return {"source": {"duration_sec": 4.0}}
+
+    class NoWordsAlign:
+        @staticmethod
+        def remote(*_args):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules, "modal", _fake_modal_per_app(analyze=FakeAnalyze, align=NoWordsAlign)
+    )
+
+    runner.run_music_analysis(user_id="user_123", run_id=run.run_id, audio=audio)
+
+    completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=run.run_id))
+    assert completed.status == "completed"
+    assert completed.outputs["lyrics_timing_status"] == "none"
+    assert "lyrics_timing_file_id" not in completed.outputs
+
+
+def test_run_lyrics_timing_reuses_stored_lrc(monkeypatch):
+    # The backfill must reuse the stored LRC (no re-fetch, no duplicate asset).
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    audio = _seed_song_audio(repo)
+    lyrics_asset = _publish_artifact(
+        repo,
+        file_id="file_lyrics_stored",
+        kind="lyrics",
+        filename="lyrics.lrc",
+        body=LYRICS_LRC.encode("utf-8"),
+        content_type="text/plain",
+    )
+    analysis_run = repo.create_run(
+        user_id="user_123",
+        workflow_type="music_analysis",
+        inputs={"audio_version_id": audio["version_id"]},
+        steps=["analyze_music"],
+    )
+    repo.update_run_status(
+        RunRef(user_id="user_123", run_id=analysis_run.run_id),
+        status="completed",
+        outputs={
+            "lyrics_file_id": lyrics_asset["file_id"],
+            "lyrics_version_id": lyrics_asset["version_id"],
+        },
+    )
+    run = repo.create_run(
+        user_id="user_123",
+        workflow_type="lyrics_timing",
+        inputs={"audio_version_id": audio["version_id"]},
+        steps=["fetch_lyrics", "align_lyrics", "publish_lyrics_timing"],
+    )
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setattr(
+        "api.prototyping.music.lyrics.search_synced_lyrics",
+        lambda query: (_ for _ in ()).throw(AssertionError("must reuse stored LRC")),
+    )
+    captured = {}
+
+    class FakeAlign:
+        @staticmethod
+        def remote(audio_bytes, filename, text):
+            captured["text"] = text
+            return _lyrics_timing_payload()
+
+    monkeypatch.setitem(sys.modules, "modal", _fake_modal_per_app(align=FakeAlign))
+
+    runner.run_lyrics_timing(user_id="user_123", run_id=run.run_id, audio=audio)
+
+    completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=run.run_id))
+    assert completed.status == "completed"
+    assert completed.outputs["lyrics_timing_status"] == "ok"
+    assert captured["text"] == "Hello world\nSecond line"
+    lyrics_manifests = [
+        m for m in repo.list_file_manifests("user_123") if m.kind == "lyrics"
+    ]
+    assert len(lyrics_manifests) == 1  # no duplicate publish from the backfill
+
+
+def test_edit_pipeline_generates_lyrics_timing_when_enabled(monkeypatch):
+    # End-to-end: an edit on a song without timing backfills it and stamps the
+    # parent run, with the feature ENABLED (no kill-switch, fakes wired).
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.delenv("ECLYPTE_LYRICS_TIMING_DISABLED", raising=False)
+    audio, source_video, _, _ = _publish_timeline_inputs(repo)
+    parent = _create_edit_parent(repo, audio, source_video)
+    monkeypatch.setattr(
+        "api.prototyping.music.lyrics.search_synced_lyrics", lambda query: LYRICS_LRC
+    )
+
+    class FakeAlign:
+        @staticmethod
+        def remote(audio_bytes, filename, text):
+            return _lyrics_timing_payload()
+
+    monkeypatch.setitem(sys.modules, "modal", _fake_modal_per_app(align=FakeAlign))
+
+    def run_music_analysis(**kwargs):
+        _complete_analysis_run(
+            repo,
+            run_id=kwargs["run_id"],
+            file_id=f"file_music_analysis_{kwargs['run_id']}",
+            kind="music_analysis",
+            filename="song.json",
+            file_key="music_analysis_file_id",
+            version_key="music_analysis_version_id",
+        )
+
+    def run_video_analysis(**kwargs):
+        _complete_analysis_run(
+            repo,
+            run_id=kwargs["run_id"],
+            file_id=f"file_video_analysis_{kwargs['run_id']}",
+            kind="video_analysis",
+            filename="source.json",
+            file_key="video_analysis_file_id",
+            version_key="video_analysis_version_id",
+        )
+
+    monkeypatch.setattr(runner, "run_music_analysis", run_music_analysis)
+    monkeypatch.setattr(runner, "run_video_analysis", run_video_analysis)
+    monkeypatch.setattr(runner, "run_timeline_plan", _fake_timeline_runner(repo))
+    monkeypatch.setattr(runner, "run_render", _fake_render_runner(repo))
+
+    runner.run_edit_pipeline(
+        user_id="user_123",
+        run_id=parent.run_id,
+        audio=audio,
+        source_video=source_video,
+        creative_brief="",
+        title="Edit",
+    )
+
+    completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=parent.run_id))
+    assert completed.status == "completed"
+    assert completed.outputs["lyrics_timing_run_id"].startswith("run_")
+    assert completed.outputs["lyrics_timing_file_id"].startswith("file_lyrics_timing_")
+    assert completed.outputs["lyrics_timing_version_id"].startswith("ver_")
+
+
+def test_edit_pipeline_completes_when_lyrics_timing_fails(monkeypatch):
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    audio, source_video, _, _ = _publish_timeline_inputs(repo)
+    parent = _create_edit_parent(repo, audio, source_video)
+
+    def run_music_analysis(**kwargs):
+        _complete_analysis_run(
+            repo,
+            run_id=kwargs["run_id"],
+            file_id=f"file_music_analysis_{kwargs['run_id']}",
+            kind="music_analysis",
+            filename="song.json",
+            file_key="music_analysis_file_id",
+            version_key="music_analysis_version_id",
+        )
+
+    def run_video_analysis(**kwargs):
+        _complete_analysis_run(
+            repo,
+            run_id=kwargs["run_id"],
+            file_id=f"file_video_analysis_{kwargs['run_id']}",
+            kind="video_analysis",
+            filename="source.json",
+            file_key="video_analysis_file_id",
+            version_key="video_analysis_version_id",
+        )
+
+    monkeypatch.setattr(runner, "run_music_analysis", run_music_analysis)
+    monkeypatch.setattr(runner, "run_video_analysis", run_video_analysis)
+    monkeypatch.setattr(runner, "run_timeline_plan", _fake_timeline_runner(repo))
+    monkeypatch.setattr(runner, "run_render", _fake_render_runner(repo))
+    monkeypatch.setattr(
+        runner,
+        "_ensure_edit_lyrics_timing",
+        lambda **_: (_ for _ in ()).throw(RuntimeError("lyrics blew up")),
+    )
+
+    runner.run_edit_pipeline(
+        user_id="user_123",
+        run_id=parent.run_id,
+        audio=audio,
+        source_video=source_video,
+        creative_brief="",
+        title="Edit",
+    )
+
+    completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=parent.run_id))
+    assert completed.status == "completed"
+
+
+def test_agent_timeline_passes_trimmed_lyrics_to_synthesis(monkeypatch):
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    audio, source_video, music_analysis, video_analysis = _publish_timeline_inputs(repo)
+    _publish_artifact(
+        repo,
+        file_id="file_clip_index",
+        kind="clip_index",
+        filename="source.npz",
+        body=b"npz",
+        content_type="application/x-numpy-data",
+        input_file_version_ids=[source_video["version_id"]],
+        created_by_step=CLIP_INDEX_BUILD_STEP,
+    )
+    timing_artifact = _publish_artifact(
+        repo,
+        file_id="file_lyrics_timing",
+        kind="lyrics_timing",
+        filename="lyrics_timing.json",
+        body=json.dumps(_lyrics_timing_payload()).encode("utf-8"),
+        content_type="application/json",
+    )
+    timing_run = repo.create_run(
+        user_id="user_123",
+        workflow_type="lyrics_timing",
+        inputs={"audio_version_id": audio["version_id"]},
+        steps=["align_lyrics"],
+    )
+    repo.update_run_status(
+        RunRef(user_id="user_123", run_id=timing_run.run_id),
+        status="completed",
+        outputs={
+            "lyrics_timing_file_id": timing_artifact["file_id"],
+            "lyrics_timing_version_id": timing_artifact["version_id"],
+        },
+    )
+    run = _create_timeline_agent_run(repo)
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setattr(runner, "_r2_config_payload", lambda: {"bucket": "test"})
+
+    captured = {}
+
+    def fake_synthesis(**kwargs):
+        captured.update(kwargs)
+        return {
+            "shots": [{"start_time": 0.0, "end_time": 3.0, "source_timestamp": 2.0}],
+            "overlays": [],
+        }
+
+    monkeypatch.setattr("api.workflows._run_agent_synthesis", fake_synthesis)
+
+    runner.run_timeline_plan(
+        user_id="user_123",
+        run_id=run.run_id,
+        audio=audio,
+        source_video=source_video,
+        music_analysis=music_analysis,
+        video_analysis=video_analysis,
+        creative_brief="",
+        export_options={
+            "format": "reels_cinematic",
+            "audio_start_sec": 0.5,
+            "audio_end_sec": 3.5,
+        },
+    )
+
+    completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=run.run_id))
+    assert completed.status == "completed", completed.last_error
+    lyrics = captured["lyrics"]
+    # Trimmed to the audio window and rebased: line 1.0-2.0 -> 0.5-1.5.
+    assert lyrics["source"]["trim_start_sec"] == 0.5
+    assert lyrics["lines"][0]["start_sec"] == 0.5
+    assert lyrics["lines"][0]["words"][0]["word"] == "Hello"

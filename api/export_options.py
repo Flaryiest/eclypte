@@ -124,6 +124,53 @@ def trim_song_analysis(
     return trimmed
 
 
+def trim_lyrics_timing(
+    lyrics: dict[str, Any],
+    *,
+    start_sec: float,
+    end_sec: float | None,
+) -> dict[str, Any]:
+    """Window a lyrics-timing payload the way `trim_song_analysis` windows a song.
+
+    One deliberate difference: an `end_sec` past the artifact's duration clamps
+    instead of raising — the window was validated against the music analysis and
+    the whisper-measured duration can differ slightly; a best-effort artifact
+    must never fail planning.
+    """
+    duration = float(lyrics.get("source", {}).get("duration_sec", 0.0) or 0.0)
+    start_sec = float(start_sec)
+    end_sec = duration if end_sec is None else min(float(end_sec), duration)
+
+    if start_sec < 0:
+        raise ValueError("audio_start_sec must be greater than or equal to 0")
+    if end_sec <= start_sec:
+        raise ValueError("audio_end_sec must be after audio_start_sec")
+
+    trimmed = deepcopy(lyrics)
+    source = dict(trimmed.get("source") or {})
+    source["duration_sec"] = round(end_sec - start_sec, 3)
+    source["trim_start_sec"] = round(start_sec, 3)
+    source["trim_end_sec"] = round(end_sec, 3)
+    trimmed["source"] = source
+
+    lines = []
+    for line in _clip_segments(lyrics.get("lines") or [], start_sec, end_sec):
+        # A line kept by overlap keeps only its in-window words (possibly none
+        # for edge slivers — the line text is still useful on its own).
+        line["words"] = [
+            {
+                **word,
+                "start_sec": round(max(float(word["start_sec"]) - start_sec, 0.0), 3),
+                "end_sec": round(min(float(word["end_sec"]), end_sec) - start_sec, 3),
+            }
+            for word in line.get("words") or []
+            if float(word["start_sec"]) < end_sec and float(word["end_sec"]) > start_sec
+        ]
+        lines.append(line)
+    trimmed["lines"] = lines
+    return trimmed
+
+
 def _coerce_export_options(value: Any) -> dict[str, Any] | None:
     if value is None:
         return None

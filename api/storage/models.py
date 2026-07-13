@@ -6,6 +6,7 @@ ArtifactKind = Literal[
     "source_video",
     "song_audio",
     "lyrics",
+    "lyrics_timing",
     "music_analysis",
     "video_analysis",
     "clip_index",

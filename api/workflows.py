@@ -9,7 +9,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
-from api.export_options import resolve_export_options, trim_song_analysis
+from api.export_options import (
+    resolve_export_options,
+    trim_lyrics_timing,
+    trim_song_analysis,
+)
 from api.youtube_download import (
     YoutubeDownloadAttempt,
     YoutubeDownloadError,
@@ -155,6 +159,15 @@ class DefaultWorkflowRunner:
                 parent_ref=parent_ref,
                 audio=audio,
             )
+            try:
+                self._ensure_edit_lyrics_timing(
+                    repo=repo,
+                    user_id=user_id,
+                    parent_ref=parent_ref,
+                    audio=audio,
+                )
+            except Exception as exc:  # lyrics are best-effort — never fail the edit
+                print(f"[edit] lyrics timing ensure failed (continuing): {exc}")
 
             current_stage = "video"
             video_analysis = self._ensure_edit_video_analysis(
@@ -330,6 +343,99 @@ class DefaultWorkflowRunner:
             },
         )
         return analysis
+
+    def _ensure_edit_lyrics_timing(
+        self,
+        *,
+        repo: StorageRepository,
+        user_id: str,
+        parent_ref: RunRef,
+        audio: dict,
+    ) -> None:
+        """Best-effort backfill: older songs get word-level lyrics timing on
+        their first edit. Unlike the other ensures this never blocks the edit —
+        a failed or empty alignment leaves planning to proceed without lyrics.
+        """
+        if os.environ.get("ECLYPTE_LYRICS_TIMING_DISABLED") == "1":
+            return
+        existing = _find_song_lyrics_timing(
+            repo, user_id=user_id, audio_version_id=audio["version_id"]
+        )
+        if existing is not None:
+            self._set_edit_progress(
+                repo,
+                parent_ref,
+                "music",
+                100,
+                "Reused existing lyrics timing",
+                outputs={
+                    "lyrics_timing_file_id": existing["file_id"],
+                    "lyrics_timing_version_id": existing["version_id"],
+                },
+            )
+            return
+        # Negative cache: a run that CONCLUDED "this song has no usable lyrics"
+        # stops the backfill from re-burning GPU every edit. Failed runs don't
+        # match, so transient errors retry on the next edit. Song workflows
+        # stamp `lyrics_timing_status: none` on the same conclusion; older runs
+        # lack the key entirely, so pre-feature songs still backfill.
+        for run in repo.list_run_manifests(user_id):
+            if run.status != "completed":
+                continue
+            concluded_backfill = (
+                run.workflow_type == "lyrics_timing"
+                and run.inputs.get("audio_version_id") == audio["version_id"]
+            )
+            concluded_song_flow = run.outputs.get("lyrics_timing_status") == "none" and (
+                (
+                    run.workflow_type == "music_analysis"
+                    and run.inputs.get("audio_version_id") == audio["version_id"]
+                )
+                or (
+                    run.workflow_type == "youtube_song_import"
+                    and run.outputs.get("audio_version_id") == audio["version_id"]
+                )
+            )
+            if concluded_backfill or concluded_song_flow:
+                return
+        child = self._create_child_run(
+            repo,
+            user_id=user_id,
+            workflow_type="lyrics_timing",
+            inputs={"audio_file_id": audio["file_id"], "audio_version_id": audio["version_id"]},
+            steps=["fetch_lyrics", "align_lyrics", "publish_lyrics_timing"],
+        )
+        # Percent stays at 100 — the music stage already completed and edit
+        # progress must never regress; the detail says what's happening.
+        self._set_edit_progress(
+            repo,
+            parent_ref,
+            "music",
+            100,
+            "Syncing lyrics to the song",
+            outputs={"lyrics_timing_run_id": child.run_id},
+        )
+        self.run_lyrics_timing(user_id=user_id, run_id=child.run_id, audio=audio)
+        completed = repo.load_run_manifest(RunRef(user_id=user_id, run_id=child.run_id))
+        file_id = completed.outputs.get("lyrics_timing_file_id")
+        version_id = completed.outputs.get("lyrics_timing_version_id")
+        if completed.status == "completed" and file_id and version_id:
+            self._set_edit_progress(
+                repo,
+                parent_ref,
+                "music",
+                100,
+                "Lyrics synced to the song",
+                outputs={
+                    "lyrics_timing_file_id": file_id,
+                    "lyrics_timing_version_id": version_id,
+                },
+            )
+        else:
+            print(
+                f"[edit] lyrics timing unavailable (run {child.run_id}); "
+                f"planning without lyrics"
+            )
 
     def _ensure_edit_video_analysis(
         self,
@@ -551,8 +657,9 @@ class DefaultWorkflowRunner:
                 version_id=audio["version_id"],
             )
             audio_meta = repo.load_file_version_meta(audio_ref)
+            audio_bytes = repo.read_version_bytes(audio_ref)
             analyze = modal.Function.from_name("eclypte-analysis", "analyze_remote")
-            args = [repo.read_version_bytes(audio_ref), audio_meta.original_filename]
+            args = [audio_bytes, audio_meta.original_filename]
             if progress_context is not None:
                 args.append(progress_context)
             result = analyze.remote(*args)
@@ -576,15 +683,70 @@ class DefaultWorkflowRunner:
                 "music_analysis_file_id": file_ref.file_id,
                 "music_analysis_version_id": version.version_id,
             }
-            lyrics_outputs = _publish_song_lyrics(
+            repo.append_run_progress(
+                run_ref=RunRef(user_id=user_id, run_id=run_id),
+                stage="analyze_music",
+                percent=99,
+                detail="Syncing lyrics to the song",
+            )
+            outputs.update(
+                _publish_song_lyrics_and_timing(
+                    repo,
+                    user_id=user_id,
+                    run_id=run_id,
+                    audio_version_id=audio_ref.version_id,
+                    query=Path(audio_meta.original_filename).stem,
+                    audio_bytes=audio_bytes,
+                    filename=audio_meta.original_filename,
+                )
+            )
+            repo.update_run_status(
+                RunRef(user_id=user_id, run_id=run_id),
+                status="completed",
+                outputs=outputs,
+            )
+        except Exception as exc:
+            self._mark_failed(repo, user_id, run_id, exc)
+
+    def run_lyrics_timing(self, **kwargs) -> None:
+        """Backfill worker: fetch/reuse lyric text, align on Modal, publish the
+        `lyrics_timing` asset. Created by the edit pipeline's ensure-step for
+        songs imported before word-level timing existed."""
+        repo = self._repository()
+        user_id = kwargs["user_id"]
+        run_id = kwargs["run_id"]
+        audio = kwargs["audio"]
+        try:
+            audio_ref = FileVersionRef(
+                user_id=user_id,
+                file_id=audio["file_id"],
+                version_id=audio["version_id"],
+            )
+            audio_meta = repo.load_file_version_meta(audio_ref)
+            audio_bytes = repo.read_version_bytes(audio_ref)
+            known_lrc = _find_song_lyrics_lrc(
+                repo, user_id=user_id, audio_version_id=audio_ref.version_id
+            )
+            outputs = _publish_song_lyrics_and_timing(
                 repo,
                 user_id=user_id,
                 run_id=run_id,
                 audio_version_id=audio_ref.version_id,
                 query=Path(audio_meta.original_filename).stem,
+                audio_bytes=audio_bytes,
+                filename=audio_meta.original_filename,
+                known_lrc=known_lrc,
+                # A transient alignment error must FAIL this run (failed runs
+                # aren't negative-cached, so the next edit retries) instead of
+                # completing as a false "song has no lyrics" conclusion.
+                raise_errors=True,
             )
-            if lyrics_outputs:
-                outputs.update(lyrics_outputs)
+            # "none" marks a concluded no-usable-lyrics attempt so the edit
+            # pipeline's negative cache stops re-burning GPU on every edit.
+            outputs.setdefault(
+                "lyrics_timing_status",
+                "ok" if outputs.get("lyrics_timing_file_id") else "none",
+            )
             repo.update_run_status(
                 RunRef(user_id=user_id, run_id=run_id),
                 status="completed",
@@ -678,15 +840,23 @@ class DefaultWorkflowRunner:
                 "music_analysis_file_id": analysis_ref.file_id,
                 "music_analysis_version_id": analysis_version.version_id,
             }
-            lyrics_outputs = _publish_song_lyrics(
-                repo,
-                user_id=user_id,
-                run_id=run_id,
-                audio_version_id=audio_version.version_id,
-                query=title,
+            repo.append_run_progress(
+                run_ref=RunRef(user_id=user_id, run_id=run_id),
+                stage="publish_analysis",
+                percent=90,
+                detail="Syncing lyrics to the song",
             )
-            if lyrics_outputs:
-                outputs.update(lyrics_outputs)
+            outputs.update(
+                _publish_song_lyrics_and_timing(
+                    repo,
+                    user_id=user_id,
+                    run_id=run_id,
+                    audio_version_id=audio_version.version_id,
+                    query=title,
+                    audio_bytes=wav_bytes,
+                    filename=filename,
+                )
+            )
             repo.update_run_status(
                 RunRef(user_id=user_id, run_id=run_id),
                 status="completed",
@@ -925,6 +1095,26 @@ class DefaultWorkflowRunner:
             start_sec=export_options.audio_start_sec,
             end_sec=export_options.audio_end_sec,
         )
+        lyrics = None
+        try:
+            timing = _find_song_lyrics_timing(
+                repo, user_id=user_id, audio_version_id=audio_ref.version_id
+            )
+            if timing:
+                lyrics = trim_lyrics_timing(
+                    _read_json_version(
+                        repo,
+                        FileVersionRef(
+                            user_id=user_id,
+                            file_id=timing["file_id"],
+                            version_id=timing["version_id"],
+                        ),
+                    ),
+                    start_sec=export_options.audio_start_sec,
+                    end_sec=export_options.audio_end_sec,
+                )
+        except Exception as exc:  # best-effort: a bad artifact must never fail planning
+            print(f"[timeline] lyrics timing unavailable: {exc}")
         video = _read_json_version(repo, video_ref)
         # End credits are excluded by capping the usable source at the detected
         # content end (video analysis credit detection); fall back to full source.
@@ -1007,6 +1197,7 @@ class DefaultWorkflowRunner:
             query_clips_fn=query_clip_index,
             source_duration_sec=content_end_sec,
             style_profile=style_profile or None,
+            lyrics=lyrics,
         )
         self._append_progress_context(repo, progress_context, 70, "Adapting agent timeline")
         rhythm_report: dict = {}
@@ -1403,16 +1594,14 @@ def _publish_song_lyrics(
     run_id: str,
     audio_version_id: str,
     query: str,
+    lrc: str | None,
 ) -> dict[str, str] | None:
-    """Best-effort: fetch a synced LRC for `query` and publish a `lyrics` asset.
+    """Best-effort: publish a `lyrics` asset from an already-fetched synced LRC.
 
-    Returns lyrics output refs on success, or None when no synced lyrics exist or
+    Returns lyrics output refs on success, or None when there is no LRC or
     anything fails — lyrics are optional and must never break a run.
     """
     try:
-        from api.prototyping.music.lyrics import search_synced_lyrics
-
-        lrc = search_synced_lyrics(query)
         if not lrc:
             return None
         file_ref = FileRef(user_id=user_id, file_id=f"file_lyrics_{run_id}")
@@ -1436,6 +1625,192 @@ def _publish_song_lyrics(
     except Exception as exc:  # network/provider/storage — never fail the run
         print(f"[workflows] lyrics fetch failed for {query!r}: {exc}")
         return None
+
+
+def _publish_lyrics_timing(
+    repo: StorageRepository,
+    *,
+    user_id: str,
+    run_id: str,
+    audio_version_id: str,
+    query: str,
+    audio_bytes: bytes,
+    filename: str,
+    lrc: str | None,
+    raise_errors: bool = False,
+) -> dict[str, str] | None:
+    """Force-align lyric text against the audio and publish a `lyrics_timing`
+    asset (word-level start/end times).
+
+    Only the LRC's TEXT is used — provider timestamps are offset from
+    YouTube-sourced audio, so timing always comes from the audio itself. With no
+    text the worker transcribes instead. A conclusive no-words result
+    (instrumental, unusable transcription) publishes nothing and returns
+    `{"lyrics_timing_status": "none"}` so callers can negative-cache it. Errors
+    are swallowed (never fail the run) UNLESS `raise_errors` is set — the
+    backfill worker uses it so a transient failure fails its child run and
+    retries on the next edit instead of being mistaken for "no lyrics".
+    """
+    if os.environ.get("ECLYPTE_LYRICS_TIMING_DISABLED") == "1":
+        return None
+    try:
+        import modal
+
+        from api.prototyping.music.lyrics_align import lrc_plain_text
+
+        align = modal.Function.from_name("eclypte-lyrics", "align_lyrics_remote")
+        payload = align.remote(audio_bytes, filename, lrc_plain_text(lrc))
+        if not payload:
+            return {"lyrics_timing_status": "none"}
+        file_ref = FileRef(user_id=user_id, file_id=f"file_lyrics_timing_{run_id}")
+        repo.create_file_manifest(
+            file_ref=file_ref,
+            kind="lyrics_timing",
+            display_name=f"lyrics timing: {query}"[:120],
+            source_run_id=run_id,
+        )
+        version = repo.publish_json(
+            file_ref=file_ref,
+            data=payload,
+            original_filename="lyrics_timing.json",
+            created_by_step="align_lyrics",
+            derived_from_step="align_lyrics",
+            input_file_version_ids=[audio_version_id],
+            derived_from_run_id=run_id,
+        )
+        return {
+            "lyrics_timing_file_id": file_ref.file_id,
+            "lyrics_timing_version_id": version.version_id,
+            "lyrics_timing_status": "ok",
+        }
+    except Exception as exc:  # Modal/storage/network
+        if raise_errors:
+            raise
+        print(f"[workflows] lyrics timing failed for {query!r}: {exc}")
+        return None
+
+
+def _publish_song_lyrics_and_timing(
+    repo: StorageRepository,
+    *,
+    user_id: str,
+    run_id: str,
+    audio_version_id: str,
+    query: str,
+    audio_bytes: bytes,
+    filename: str,
+    known_lrc: str | None = None,
+    raise_errors: bool = False,
+) -> dict[str, str]:
+    """Best-effort: one LRC fetch feeds both the `lyrics` asset and GPU alignment.
+
+    `known_lrc` short-circuits the fetch (the backfill path reuses the stored
+    asset without publishing a duplicate). Each sub-step is independently
+    guarded; returns whatever output keys succeeded. `raise_errors` applies to
+    the alignment step only (see `_publish_lyrics_timing`).
+    """
+    outputs: dict[str, str] = {}
+    lrc = known_lrc
+    if lrc is None:
+        try:
+            from api.prototyping.music.lyrics import search_synced_lyrics
+
+            lrc = search_synced_lyrics(query)
+        except Exception as exc:
+            print(f"[workflows] lyrics search failed for {query!r}: {exc}")
+            lrc = None
+        if lrc:
+            lyrics_outputs = _publish_song_lyrics(
+                repo,
+                user_id=user_id,
+                run_id=run_id,
+                audio_version_id=audio_version_id,
+                query=query,
+                lrc=lrc,
+            )
+            if lyrics_outputs:
+                outputs.update(lyrics_outputs)
+    timing_outputs = _publish_lyrics_timing(
+        repo,
+        user_id=user_id,
+        run_id=run_id,
+        audio_version_id=audio_version_id,
+        query=query,
+        audio_bytes=audio_bytes,
+        filename=filename,
+        lrc=lrc,
+        raise_errors=raise_errors,
+    )
+    if timing_outputs:
+        outputs.update(timing_outputs)
+    return outputs
+
+
+def _find_song_lyrics_lrc(
+    repo: StorageRepository,
+    *,
+    user_id: str,
+    audio_version_id: str,
+) -> str | None:
+    """Return the stored synced LRC for a song, or None.
+
+    Mirrors lyrics-output discovery: a completed youtube_song_import (by output
+    audio_version_id), music_analysis, or lyrics_timing (by input
+    audio_version_id) run that carries `lyrics_file_id`/`lyrics_version_id`.
+    """
+    for run in repo.list_run_manifests(user_id):
+        if run.status != "completed":
+            continue
+        is_import = (
+            run.workflow_type == "youtube_song_import"
+            and run.outputs.get("audio_version_id") == audio_version_id
+        )
+        is_analysis = (
+            run.workflow_type in ("music_analysis", "lyrics_timing")
+            and run.inputs.get("audio_version_id") == audio_version_id
+        )
+        if not (is_import or is_analysis):
+            continue
+        file_id = run.outputs.get("lyrics_file_id")
+        version_id = run.outputs.get("lyrics_version_id")
+        if not file_id or not version_id:
+            continue
+        try:
+            body = repo.read_version_bytes(
+                FileVersionRef(user_id=user_id, file_id=file_id, version_id=version_id)
+            )
+            return body.decode("utf-8")
+        except (KeyError, ValueError):
+            continue
+    return None
+
+
+def _find_song_lyrics_timing(
+    repo: StorageRepository,
+    *,
+    user_id: str,
+    audio_version_id: str,
+) -> dict[str, str] | None:
+    """First completed run carrying lyrics-timing outputs for this audio version:
+    a lyrics_timing backfill or music_analysis (by input) or a
+    youtube_song_import (by output)."""
+    for run in repo.list_run_manifests(user_id):
+        if run.status != "completed":
+            continue
+        matches = (
+            run.workflow_type in ("lyrics_timing", "music_analysis")
+            and run.inputs.get("audio_version_id") == audio_version_id
+        ) or (
+            run.workflow_type == "youtube_song_import"
+            and run.outputs.get("audio_version_id") == audio_version_id
+        )
+        if not matches:
+            continue
+        file_id = run.outputs.get("lyrics_timing_file_id")
+        version_id = run.outputs.get("lyrics_timing_version_id")
+        if file_id and version_id:
+            return {"file_id": file_id, "version_id": version_id}
+    return None
 
 
 # Bump this when the CLIP index format changes so older indexes are rebuilt once
@@ -1505,6 +1880,7 @@ def _run_agent_synthesis(
     query_clips_fn,
     source_duration_sec: float | None = None,
     style_profile: dict | None = None,
+    lyrics: dict | None = None,
 ) -> dict:
     from api.prototyping.edit.synthesis.agent import run_synthesis_loop
 
@@ -1516,6 +1892,7 @@ def _run_agent_synthesis(
         query_clips_fn=query_clips_fn,
         source_duration_sec=source_duration_sec,
         style_profile=style_profile,
+        lyrics=lyrics,
     )
 
 

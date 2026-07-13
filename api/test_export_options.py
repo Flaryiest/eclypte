@@ -1,6 +1,10 @@
 import pytest
 
-from api.export_options import resolve_export_options, trim_song_analysis
+from api.export_options import (
+    resolve_export_options,
+    trim_lyrics_timing,
+    trim_song_analysis,
+)
 
 
 def _song_analysis():
@@ -106,3 +110,148 @@ def test_trim_song_analysis_rejects_invalid_ranges():
 
     with pytest.raises(ValueError, match="exceeds song duration"):
         trim_song_analysis(song, start_sec=1.0, end_sec=9.0)
+
+
+def _lyrics_timing():
+    return {
+        "schema_version": 1,
+        "source": {"duration_sec": 20.0},
+        "mode": "aligned",
+        "language": "en",
+        "text_source": "synced_lrc",
+        "model": "large-v3",
+        "quality": {"word_count": 7},
+        "lines": [
+            {
+                "line_idx": 0,
+                "start_sec": 1.0,
+                "end_sec": 4.0,
+                "text": "before window",
+                "words": [
+                    {"word": "before", "start_sec": 1.0, "end_sec": 2.0, "confidence": 0.9},
+                    {"word": "window", "start_sec": 2.0, "end_sec": 4.0, "confidence": 0.9},
+                ],
+            },
+            {
+                "line_idx": 1,
+                "start_sec": 9.0,
+                "end_sec": 12.0,
+                "text": "straddles start",
+                "words": [
+                    {"word": "straddles", "start_sec": 9.0, "end_sec": 9.8, "confidence": 0.8},
+                    {"word": "start", "start_sec": 9.5, "end_sec": 10.5, "confidence": 0.7},
+                ],
+            },
+            {
+                "line_idx": 2,
+                "start_sec": 13.0,
+                "end_sec": 15.0,
+                "text": "fully inside",
+                "words": [
+                    {"word": "fully", "start_sec": 13.0, "end_sec": 14.0, "confidence": 0.95},
+                    {"word": "inside", "start_sec": 14.0, "end_sec": 15.0, "confidence": 0.9},
+                ],
+            },
+            {
+                "line_idx": 3,
+                "start_sec": 18.0,
+                "end_sec": 19.5,
+                "text": "after window",
+                "words": [
+                    {"word": "after", "start_sec": 18.0, "end_sec": 19.5, "confidence": 0.9},
+                ],
+            },
+        ],
+    }
+
+
+def test_trim_lyrics_timing_clips_and_rebases_lines_and_words():
+    trimmed = trim_lyrics_timing(_lyrics_timing(), start_sec=10.0, end_sec=16.0)
+
+    assert trimmed["source"] == {
+        "duration_sec": 6.0,
+        "trim_start_sec": 10.0,
+        "trim_end_sec": 16.0,
+    }
+    lines = trimmed["lines"]
+    # Line 0 (1-4) and line 3 (18-19.5) fall outside the window entirely.
+    assert [line["line_idx"] for line in lines] == [1, 2]
+
+    straddler = lines[0]
+    assert straddler["text"] == "straddles start"
+    assert straddler["start_sec"] == 0.0
+    assert straddler["end_sec"] == 2.0
+    # "straddles" (9.0-9.8) ends before the window; "start" (9.5-10.5) overlaps
+    # and is rebased + clamped into it.
+    assert straddler["words"] == [
+        {"word": "start", "start_sec": 0.0, "end_sec": 0.5, "confidence": 0.7},
+    ]
+
+    inside = lines[1]
+    assert inside["start_sec"] == 3.0
+    assert inside["end_sec"] == 5.0
+    assert inside["words"][0] == {
+        "word": "fully",
+        "start_sec": 3.0,
+        "end_sec": 4.0,
+        "confidence": 0.95,
+    }
+
+
+def test_trim_lyrics_timing_keeps_overlapping_line_with_no_surviving_words():
+    lyrics = _lyrics_timing()
+    lyrics["lines"] = [
+        {
+            "line_idx": 0,
+            "start_sec": 9.0,
+            "end_sec": 10.5,
+            "text": "sliver",
+            "words": [
+                {"word": "sliver", "start_sec": 9.0, "end_sec": 9.9, "confidence": 0.9},
+            ],
+        }
+    ]
+
+    trimmed = trim_lyrics_timing(lyrics, start_sec=10.0, end_sec=16.0)
+
+    assert len(trimmed["lines"]) == 1
+    assert trimmed["lines"][0]["text"] == "sliver"
+    assert trimmed["lines"][0]["words"] == []
+
+
+def test_trim_lyrics_timing_clamps_end_past_duration_instead_of_raising():
+    # The window is validated against the music analysis; the whisper-measured
+    # duration can differ, so a best-effort artifact must clamp rather than throw.
+    trimmed = trim_lyrics_timing(_lyrics_timing(), start_sec=10.0, end_sec=25.0)
+
+    assert trimmed["source"]["duration_sec"] == 10.0
+    assert trimmed["source"]["trim_end_sec"] == 20.0
+    assert [line["line_idx"] for line in trimmed["lines"]] == [1, 2, 3]
+
+
+def test_trim_lyrics_timing_none_end_uses_full_duration():
+    trimmed = trim_lyrics_timing(_lyrics_timing(), start_sec=5.0, end_sec=None)
+
+    assert trimmed["source"]["duration_sec"] == 15.0
+    assert [line["line_idx"] for line in trimmed["lines"]] == [1, 2, 3]
+
+
+def test_trim_lyrics_timing_passes_through_metadata():
+    trimmed = trim_lyrics_timing(_lyrics_timing(), start_sec=10.0, end_sec=16.0)
+
+    assert trimmed["schema_version"] == 1
+    assert trimmed["mode"] == "aligned"
+    assert trimmed["language"] == "en"
+    assert trimmed["text_source"] == "synced_lrc"
+    assert trimmed["model"] == "large-v3"
+    assert trimmed["quality"] == {"word_count": 7}
+
+
+def test_trim_lyrics_timing_rejects_invalid_ranges():
+    lyrics = _lyrics_timing()
+
+    with pytest.raises(ValueError, match="greater than or equal to 0"):
+        trim_lyrics_timing(lyrics, start_sec=-1.0, end_sec=5.0)
+
+    with pytest.raises(ValueError, match="after audio_start_sec"):
+        trim_lyrics_timing(lyrics, start_sec=5.0, end_sec=5.0)

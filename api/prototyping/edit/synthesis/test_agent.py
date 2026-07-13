@@ -266,6 +266,115 @@ def test_grade_enum_exposed_in_finish_edit_tool():
     assert "text.hook" not in grade_prop["enum"]
 
 
+def _lyrics_timing(mode="aligned", lines=None):
+    if lines is None:
+        lines = [
+            {
+                "line_idx": 0,
+                "start_sec": 0.42,
+                "end_sec": 2.95,
+                "text": "I got a feeling in my soul",
+                "words": [
+                    {"word": "I", "start_sec": 0.42, "end_sec": 0.55, "confidence": 0.9},
+                    {"word": "got", "start_sec": 0.63, "end_sec": 0.8, "confidence": 0.9},
+                    {"word": "a", "start_sec": 0.88, "end_sec": 0.95, "confidence": 0.9},
+                    {"word": "feeling", "start_sec": 1.1, "end_sec": 1.6, "confidence": 0.9},
+                ],
+            },
+            {
+                "line_idx": 1,
+                "start_sec": 3.1,
+                "end_sec": 5.7,
+                "text": "Burning brighter than a wildfire",
+                "words": [
+                    {"word": "Burning", "start_sec": 3.1, "end_sec": 3.5, "confidence": 0.9},
+                    {"word": "wildfire", "start_sec": 4.38, "end_sec": 5.1, "confidence": 0.9},
+                ],
+            },
+        ]
+    return {
+        "schema_version": 1,
+        "source": {"duration_sec": 25.0},
+        "mode": mode,
+        "language": "en",
+        "text_source": "synced_lrc" if mode == "aligned" else "none",
+        "model": "large-v3",
+        "quality": {"word_count": sum(len(l["words"]) for l in lines)},
+        "lines": lines,
+    }
+
+
+def _run_with_lyrics(mock_openai, lyrics):
+    mock_client = MagicMock()
+    mock_openai.return_value = mock_client
+    finish = _fake_response(
+        [_function_call(
+            "finish_edit",
+            '{"timeline": [{"start_time": 0, "end_time": 2, "source_timestamp": 5.0}]}',
+            "call_1",
+        )],
+        response_id="resp_1",
+    )
+    mock_client.responses.create = MagicMock(side_effect=[finish])
+    run_synthesis_loop("dummy.mp4", "make a cool video", lyrics=lyrics)
+    return mock_client.responses.create.call_args_list[0].kwargs["input"]
+
+
+def test_lyrics_context_injected_with_word_detail():
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
+        first_input = _run_with_lyrics(mock_openai, _lyrics_timing())
+
+        assert "Lyrics timing" in first_input
+        # Line rows carry the window and text; word rows carry per-word times.
+        assert '[0.42-2.95] "I got a feeling in my soul"' in first_input
+        assert "wildfire(4.38)" in first_input
+        # The three uses: literal imagery, emotional arc, anchors.
+        assert "Literal imagery" in first_input
+        assert "Emotional arc" in first_input
+        assert "Anchors" in first_input
+
+
+def test_lyrics_context_collapses_to_lines_above_word_cap():
+    lines = [
+        {
+            "line_idx": i,
+            "start_sec": float(i),
+            "end_sec": float(i) + 0.9,
+            "text": f"line number {i}",
+            "words": [
+                {"word": f"w{i}_{j}", "start_sec": float(i), "end_sec": float(i) + 0.1,
+                 "confidence": 0.9}
+                for j in range(10)
+            ],
+        }
+        for i in range(40)  # 400 words > LYRICS_WORD_DETAIL_MAX
+    ]
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
+        first_input = _run_with_lyrics(mock_openai, _lyrics_timing(lines=lines))
+
+        assert "Lyrics timing" in first_input
+        assert '"line number 3"' in first_input
+        # Per-word rows are dropped in line-only mode.
+        assert "w3_0(" not in first_input
+
+
+def test_lyrics_context_transcribed_mode_carries_caveat():
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
+        first_input = _run_with_lyrics(mock_openai, _lyrics_timing(mode="transcribed"))
+
+        assert "recognition errors" in first_input
+
+
+def test_lyrics_context_absent_when_missing_or_empty():
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
+        first_input = _run_with_lyrics(mock_openai, None)
+        assert "Lyrics timing" not in first_input
+
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
+        first_input = _run_with_lyrics(mock_openai, _lyrics_timing(lines=[]))
+        assert "Lyrics timing" not in first_input
+
+
 def test_overlay_skill_catalog_injected_into_user_prompt():
     with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
 
