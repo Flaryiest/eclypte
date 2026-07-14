@@ -8,7 +8,6 @@ import threading
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from typing import Literal
-from urllib.parse import urlparse
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -62,6 +61,7 @@ from api.storage.refs import FileRef, FileVersionRef, RunRef
 from api.storage.repository import StorageRepository
 from api.storage.run_broadcast import RunUpdateBroadcaster
 from api.storage.run_store import RunStore
+from api.timeutil import utc_now
 from api.workflows import DefaultWorkflowRunner, WorkflowRunner
 
 DEFAULT_CORS_ORIGINS = (
@@ -95,13 +95,6 @@ EDIT_STAGE_WEIGHTS = {
     "render": 0.39,
     "result": 0.02,
 }
-YOUTUBE_IMPORT_STEPS = [
-    "download_youtube_audio",
-    "publish_audio",
-    "analyze_music",
-    "publish_analysis",
-]
-
 logger = logging.getLogger("eclypte.autopilot")
 
 
@@ -141,10 +134,6 @@ class MusicAnalysisRequest(BaseModel):
 
 class AudioConversionRequest(BaseModel):
     audio: FileVersionInput
-
-
-class YouTubeSongImportRequest(BaseModel):
-    url: str = Field(min_length=1)
 
 
 class VideoAnalysisRequest(BaseModel):
@@ -300,7 +289,6 @@ class SynthesisPromptVersionRequest(BaseModel):
 class AutopilotQueueItemInput(BaseModel):
     source_video: FileVersionInput
     song: FileVersionInput | None = None
-    song_youtube_url: str | None = None
     creative_brief: str = Field(default="", max_length=2000)
 
 
@@ -331,23 +319,6 @@ def parse_cors_origins(value: str | None = None) -> list[str]:
     if not raw:
         return list(DEFAULT_CORS_ORIGINS)
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
-
-
-def is_youtube_url(url: str) -> bool:
-    try:
-        parsed = urlparse(url)
-    except ValueError:
-        return False
-    hostname = (parsed.hostname or "").lower()
-    return parsed.scheme in {"http", "https"} and (
-        hostname == "youtu.be"
-        or hostname == "youtube.com"
-        or hostname.endswith(".youtube.com")
-    )
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def create_app(
@@ -794,24 +765,6 @@ def create_app(
         return os.environ.get("ECLYPTE_AUTOPILOT") == "1"
 
     def autopilot_callables(repo: StorageRepository, schedule):
-        def start_song_import(uid: str, url: str) -> str:
-            if not is_youtube_url(url):
-                raise ValueError("expected a YouTube URL")
-            run = create_workflow_run(
-                repo,
-                uid,
-                "youtube_song_import",
-                {"youtube_url": url},
-                YOUTUBE_IMPORT_STEPS,
-            )
-            schedule(
-                runner.run_youtube_song_import,
-                user_id=uid,
-                run_id=run.run_id,
-                url=url,
-            )
-            return run.run_id
-
         def start_music_analysis(uid: str, *, audio: dict[str, str]) -> str:
             run = create_workflow_run(
                 repo,
@@ -852,7 +805,7 @@ def create_app(
             job = start_edit_job(request=request, schedule=schedule, repo=repo, uid=uid)
             return job.run_id
 
-        return start_song_import, start_music_analysis, start_edit
+        return start_music_analysis, start_edit
 
     def autopilot_status_response(state) -> AutopilotStatusResponse:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -877,15 +830,12 @@ def create_app(
         repo = build_background_repository()
         if repo is None:
             return
-        start_song_import, start_music_analysis, start_edit = autopilot_callables(
-            repo, _spawn_workflow
-        )
+        start_music_analysis, start_edit = autopilot_callables(repo, _spawn_workflow)
         for uid in repo.list_autopilot_user_ids():
             try:
                 run_autopilot_tick(
                     repo,
                     user_id=uid,
-                    start_song_import=start_song_import,
                     start_music_analysis=start_music_analysis,
                     start_edit=start_edit,
                 )
@@ -910,10 +860,6 @@ def create_app(
     def healthz() -> dict[str, bool]:
         return {
             "ok": True,
-            "youtube_cookies_configured": bool(
-                os.environ.get("ECLYPTE_YOUTUBE_COOKIES_B64")
-                or os.environ.get("ECLYPTE_YOUTUBE_COOKIES")
-            ),
             # Non-secret diagnostics: do realtime run streams (Redis) and the
             # Modal->API worker-progress path exist? When both are false, progress
             # still flows via the slower R2-event + polling fallback.
@@ -1488,24 +1434,20 @@ def create_app(
         new_items: list[AutopilotItem] = []
         now = utc_now()
         for entry in request.items:
-            if (entry.song is None) == (not entry.song_youtube_url):
+            if entry.song is None:
                 raise HTTPException(
                     status_code=400,
-                    detail="each item needs exactly one of song or song_youtube_url",
+                    detail="each item needs a saved song",
                 )
-            if entry.song_youtube_url and not is_youtube_url(entry.song_youtube_url):
-                raise HTTPException(status_code=400, detail="expected a YouTube URL")
             load_version(repo, uid, entry.source_video, "source_video")
-            if entry.song is not None:
-                load_version(repo, uid, entry.song, "song_audio")
+            load_version(repo, uid, entry.song, "song_audio")
             new_items.append(
                 AutopilotItem(
                     item_id=f"ap_{secrets.token_hex(6)}",
                     source_video_file_id=entry.source_video.file_id,
                     source_video_version_id=entry.source_video.version_id,
-                    song_file_id=entry.song.file_id if entry.song else None,
-                    song_version_id=entry.song.version_id if entry.song else None,
-                    song_youtube_url=entry.song_youtube_url or None,
+                    song_file_id=entry.song.file_id,
+                    song_version_id=entry.song.version_id,
                     creative_brief=entry.creative_brief.strip(),
                     created_at=now,
                     updated_at=now,
@@ -1549,13 +1491,12 @@ def create_app(
         repo: StorageRepository = Depends(repository),
         uid: str = Depends(user_id),
     ) -> AutopilotStatusResponse:
-        start_song_import, start_music_analysis, start_edit = autopilot_callables(
+        start_music_analysis, start_edit = autopilot_callables(
             repo, background_tasks.add_task
         )
         state = run_autopilot_tick(
             repo,
             user_id=uid,
-            start_song_import=start_song_import,
             start_music_analysis=start_music_analysis,
             start_edit=start_edit,
         )
@@ -1581,30 +1522,6 @@ def create_app(
             user_id=uid,
             run_id=run.run_id,
             audio=request.audio.model_dump(),
-        )
-        return run
-
-    @app.post("/v1/music/youtube-imports", response_model=RunManifest, status_code=202)
-    def create_youtube_song_import(
-        request: YouTubeSongImportRequest,
-        background_tasks: BackgroundTasks,
-        repo: StorageRepository = Depends(repository),
-        uid: str = Depends(user_id),
-    ) -> RunManifest:
-        if not is_youtube_url(request.url):
-            raise HTTPException(status_code=400, detail="expected a YouTube URL")
-        run = create_workflow_run(
-            repo,
-            uid,
-            "youtube_song_import",
-            {"youtube_url": request.url},
-            YOUTUBE_IMPORT_STEPS,
-        )
-        background_tasks.add_task(
-            runner.run_youtube_song_import,
-            user_id=uid,
-            run_id=run.run_id,
-            url=request.url,
         )
         return run
 

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useUser } from "@clerk/nextjs"
 import { RefreshCw } from "lucide-react"
-import { CopyableId, DashboardPage, Spinner, errorMessage, formatDate, isAbortError, useAbortableLoad } from "../dashboardCommon"
+import { CopyableId, DashboardPage, SignInRequired, Spinner, errorMessage, formatDate, isAbortError, useAbortableLoad } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import {
     ECLYPTE_API_BASE_URL,
@@ -60,11 +60,7 @@ export default function SettingsPage() {
         return <DashboardPage eyebrow="Settings" title="Loading settings"><div /></DashboardPage>
     }
     if (!isSignedIn || !user) {
-        return (
-            <DashboardPage eyebrow="Settings" title="Sign in required">
-                <div className={styles.emptyState}>Sign in from the homepage to view settings.</div>
-            </DashboardPage>
-        )
+        return <SignInRequired eyebrow="Settings" message="Sign in from the homepage to view settings." />
     }
 
     // Binary diagnostic rows fall back to a dash while the health check is
@@ -163,12 +159,6 @@ export default function SettingsPage() {
                                     <div className={styles.settingsRow}>
                                         <span className={styles.settingsRowLabel}>API base URL</span>
                                         <span className={styles.settingsRowValue}>{ECLYPTE_API_BASE_URL}</span>
-                                    </div>
-                                    <div className={styles.settingsRow}>
-                                        <span className={styles.settingsRowLabel}>Song imports</span>
-                                        <span className={styles.settingsRowValue}>
-                                            {flagText(healthDetails?.youtube_cookies_configured, "Ready", "May be flaky")}
-                                        </span>
                                     </div>
                                     <div className={styles.settingsRow}>
                                         <span className={styles.settingsRowLabel}>Live updates</span>

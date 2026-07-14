@@ -3,7 +3,7 @@ A multipurpose AI video editing pipeline. Hosted version can be found here: [htt
 
 Initially created this project in order to create short-form content (particularly cool anime/movie edits) but the infrastructure works arguably better for normal editing activities, at least until I develop it more.
 
-Eclypte lets a user upload a WAV song and an MP4 source audio, then runs both through an analysis pipeline. The song analysis extracts beats, downbeats, tempo, structure, and energy. The video analysis detects scenes, motion, visual energy, and impact momentum (largely based off the previous frame)
+Eclypte lets a user upload a WAV song and an MP4 source video, then runs both through an analysis pipeline. The song analysis extracts beats, downbeats, tempo, structure, and energy. The video analysis detects scenes, motion, visual energy, and impact momentum (largely based off the previous frame)
 
 Those analysis files are then used to plan an edit timeline with an AI agent through API calls and skills. Currently it relies on OpenAI and a CLIP index to search for useful moments in the source content. The final timeline is rendered into an MP4 and made available in the dashboard for preview and download.
 
@@ -85,7 +85,6 @@ In order to create an edit:
 The workflows are all moderately similar to each in the fact that they have a deterministic step that converts the inputs into an easy to digest JSON file, that is stored for future use.
 Compose takes specific shots of footage based on the audio analysis, eg factors such as BPM (tool would already be pretty cool with this only imo).
 
-The analyze audio workflow also has an option youtube url download that does not currently work due to Youtube resetting cookies pretty frequently it seems
 
 ## Storage and Infrastructure
 

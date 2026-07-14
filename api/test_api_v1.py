@@ -11,9 +11,6 @@ class RecordingWorkflowRunner:
     def run_music_analysis(self, **kwargs):
         self.calls.append(("music", kwargs))
 
-    def run_youtube_song_import(self, **kwargs):
-        self.calls.append(("youtube_song_import", kwargs))
-
     def run_audio_conversion(self, **kwargs):
         self.calls.append(("audio_conversion", kwargs))
 
@@ -96,18 +93,7 @@ def test_health_and_cors_allow_vercel_origin():
 
     body = health.json()
     assert body["ok"] is True
-    assert body["youtube_cookies_configured"] is False
     assert preflight.headers["access-control-allow-origin"] == "https://eclypte.vercel.app"
-
-
-def test_health_reports_youtube_cookies_configuration(monkeypatch):
-    monkeypatch.setenv("ECLYPTE_YOUTUBE_COOKIES_B64", "abc123")
-    client, _, _ = build_client()
-
-    health = client.get("/healthz")
-
-    assert health.status_code == 200
-    assert health.json()["youtube_cookies_configured"] is True
 
 
 def test_edit_progress_percent_weights_render_heaviest():
@@ -930,22 +916,6 @@ def test_redo_edit_job_preserves_export_options():
     }
 
 
-def test_youtube_song_import_endpoint_creates_run_and_schedules_background_task():
-    client, _, runner = build_client()
-
-    response = client.post(
-        "/v1/music/youtube-imports",
-        headers={"X-User-Id": "user_123"},
-        json={"url": "https://www.youtube.com/watch?v=abc123"},
-    )
-
-    assert response.status_code == 202
-    assert response.json()["workflow_type"] == "youtube_song_import"
-    assert response.json()["inputs"]["youtube_url"] == "https://www.youtube.com/watch?v=abc123"
-    assert [call[0] for call in runner.calls] == ["youtube_song_import"]
-    assert runner.calls[0][1]["url"] == "https://www.youtube.com/watch?v=abc123"
-
-
 def test_audio_conversion_endpoint_creates_run_and_schedules_background_task():
     client, _, runner = build_client()
 
@@ -963,21 +933,9 @@ def test_audio_conversion_endpoint_creates_run_and_schedules_background_task():
     assert runner.calls[0][1]["source_version_id"] == "ver_raw"
 
 
-def test_youtube_song_import_rejects_non_youtube_url():
-    client, _, runner = build_client()
-
-    response = client.post(
-        "/v1/music/youtube-imports",
-        headers={"X-User-Id": "user_123"},
-        json={"url": "https://example.com/audio"},
-    )
-
-    assert response.status_code == 400
-    assert response.json()["detail"] == "expected a YouTube URL"
-    assert runner.calls == []
-
-
 def test_assets_list_marks_youtube_imported_song_ready_with_analysis():
+    """Songs imported before YouTube import was removed still resolve their
+    analysis via the historical import run's outputs (legacy back-compat)."""
     client, store, _ = build_client()
     repo = StorageRepository(store)
     audio = publish_artifact(

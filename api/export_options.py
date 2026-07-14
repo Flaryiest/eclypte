@@ -18,7 +18,6 @@ class ResolvedExportOptions:
     crop_focus_x: float
     output_size: tuple[int, int]
     crop: OutputCrop
-    explicit: bool
 
     def as_payload(self) -> dict[str, Any]:
         return {
@@ -44,9 +43,7 @@ def resolve_export_options(
     *,
     max_duration_sec: float | None = None,
 ) -> ResolvedExportOptions:
-    raw = _coerce_export_options(export_options)
-    explicit = raw is not None or max_duration_sec is not None
-    raw = raw or {}
+    raw = _coerce_export_options(export_options) or {}
 
     format_value = str(raw.get("format") or "youtube_16_9")
     if format_value not in {"reels_9_16", "reels_cinematic", "youtube_16_9"}:
@@ -88,7 +85,6 @@ def resolve_export_options(
         crop_focus_x=crop_focus_x,
         output_size=output_size,
         crop=crop,  # type: ignore[arg-type]
-        explicit=explicit,
     )
 
 

@@ -4,8 +4,8 @@ Pure metrics derived from (music_analysis, video_analysis) pair.
 A viral AMV's video-analysis `scenes[i].start_sec` for i >= 1 are the
 editor's cut timestamps (the very first scene start = 0 is not a cut).
 Cross-referencing those cuts with the music analysis' downbeats and
-segment labels gives us the behavioural ground truth used by consolidate
-to propose pattern weight multipliers.
+segment labels gives us the behavioural ground truth the runtime
+style-profile loop (synthesis/style_profile.py) derives rhythm overrides from.
 
 No Modal, no LLM, no numpy — pure Python so this is trivially testable.
 """

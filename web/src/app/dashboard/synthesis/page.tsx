@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Link, RefreshCw, RotateCcw, Save, Sparkles } from "lucide-react"
-import { DashboardPage, EmptyState, MetaList, Pager, Spinner, StatusBadge, errorMessage, formatDate, humanizeLabel, humanizeStageDetail, usePagination } from "../dashboardCommon"
+import { DashboardPage, EmptyState, MetaList, Pager, SignInRequired, Spinner, StatusBadge, errorMessage, formatDate, humanizeLabel, humanizeStageDetail, usePagination } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import {
     EclypteApiClient,
@@ -174,11 +174,7 @@ export default function SynthesisPage() {
         return <DashboardPage eyebrow="Synthesis" title="Loading synthesis"><div /></DashboardPage>
     }
     if (!isSignedIn || !user) {
-        return (
-            <DashboardPage eyebrow="Synthesis" title="Sign in required">
-                <div className={styles.emptyState}>Sign in from the homepage to tune synthesis.</div>
-            </DashboardPage>
-        )
+        return <SignInRequired eyebrow="Synthesis" message="Sign in from the homepage to tune synthesis." />
     }
 
 

@@ -18,6 +18,7 @@ from api.publishing import create_publish_post_for_render
 from api.storage.models import AutopilotItem, AutopilotState, RunManifest
 from api.storage.refs import FileVersionRef, RunRef
 from api.storage.repository import StorageRepository
+from api.timeutil import utc_now as utc_now_iso
 
 TRIM_TARGET_SEC = 25.0
 TRIM_MIN_SEC = 20.0
@@ -37,10 +38,6 @@ ACTIVE_ITEM_STATUSES = {"importing", "analyzing", "editing"}
 STATE_LOCK = threading.Lock()
 
 
-class StartSongImport(Protocol):
-    def __call__(self, user_id: str, url: str) -> str: ...
-
-
 class StartMusicAnalysis(Protocol):
     def __call__(self, user_id: str, *, audio: dict[str, str]) -> str: ...
 
@@ -56,10 +53,6 @@ class StartEdit(Protocol):
         title: str,
         export_options: dict[str, object] | None,
     ) -> str: ...
-
-
-def utc_now_iso(now: datetime | None = None) -> str:
-    return (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def combo_key(
@@ -195,7 +188,6 @@ def run_autopilot_tick(
     repo: StorageRepository,
     *,
     user_id: str,
-    start_song_import: StartSongImport,
     start_music_analysis: StartMusicAnalysis,
     start_edit: StartEdit,
     now: datetime | None = None,
@@ -204,7 +196,6 @@ def run_autopilot_tick(
         return _run_tick_locked(
             repo,
             user_id=user_id,
-            start_song_import=start_song_import,
             start_music_analysis=start_music_analysis,
             start_edit=start_edit,
             now=now,
@@ -215,7 +206,6 @@ def _run_tick_locked(
     repo: StorageRepository,
     *,
     user_id: str,
-    start_song_import: StartSongImport,
     start_music_analysis: StartMusicAnalysis,
     start_edit: StartEdit,
     now: datetime | None,
@@ -331,26 +321,14 @@ def _run_tick_locked(
 
     # Advance in-flight items first so completed work frees capacity this tick.
     for index, item in enumerate(items):
-        if item.status == "importing" and item.import_run_id:
-            run = _load_run(repo, user_id=user_id, run_id=item.import_run_id)
-            if run is None or run.status in {"failed", "canceled"}:
-                error = (run.last_error if run else None) or "song import did not complete"
-                items[index] = fail_item(item, error)
-            elif run.status == "completed":
-                song_file_id = run.outputs.get("audio_file_id")
-                song_version_id = run.outputs.get("audio_version_id")
-                if not song_file_id or not song_version_id:
-                    items[index] = fail_item(item, "song import completed without audio outputs")
-                else:
-                    items[index] = begin_edit_or_analysis(
-                        item.model_copy(
-                            update={
-                                "song_file_id": song_file_id,
-                                "song_version_id": song_version_id,
-                                "updated_at": now_iso,
-                            }
-                        )
-                    )
+        if item.status == "importing":
+            # Legacy items from before YouTube import was removed; nothing can
+            # advance them anymore, so fail them without counting toward a halt.
+            items[index] = fail_item(
+                item,
+                "YouTube import was removed; re-add this item with an uploaded song",
+                count_failure=False,
+            )
         elif item.status == "analyzing" and item.analysis_run_id:
             run = _load_run(repo, user_id=user_id, run_id=item.analysis_run_id)
             if run is None or run.status in {"failed", "canceled"}:
@@ -423,21 +401,8 @@ def _run_tick_locked(
             item = items[next_index]
             if item.song_file_id and item.song_version_id:
                 items[next_index] = begin_edit_or_analysis(item)
-            elif item.song_youtube_url:
-                try:
-                    import_run_id = start_song_import(user_id, item.song_youtube_url)
-                except Exception as exc:
-                    items[next_index] = fail_item(item, f"failed to start song import: {exc}")
-                else:
-                    items[next_index] = item.model_copy(
-                        update={
-                            "status": "importing",
-                            "import_run_id": import_run_id,
-                            "updated_at": now_iso,
-                        }
-                    )
             else:
-                items[next_index] = fail_item(item, "item has neither a song asset nor a YouTube URL")
+                items[next_index] = fail_item(item, "item has no saved song")
             if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                 halted_reason = (
                     f"halted after {consecutive_failures} consecutive failures; "

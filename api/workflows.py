@@ -1,30 +1,24 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
+from api.audio_convert import convert_audio_to_wav
+from api.timeutil import utc_now as _utc_now
 from api.export_options import (
     resolve_export_options,
     trim_lyrics_timing,
     trim_song_analysis,
 )
-from api.youtube_download import (
-    YoutubeDownloadAttempt,
-    YoutubeDownloadError,
-    YoutubeDownloadResult,
-    convert_audio_to_wav,
-    download_youtube_wav,
-)
 from api.prototyping.edit.synthesis.system_prompt import (
     SYSTEM_PROMPT as DEFAULT_SYNTHESIS_PROMPT,
 )
-from api.publishing import create_publish_post_for_render
 from api.storage.config import R2Config
 from api.storage.factory import get_storage_repository, load_storage_env
 from api.storage.refs import FileRef, FileVersionRef, RunRef
@@ -37,10 +31,11 @@ DEFAULT_CREATIVE_BRIEF = (
 CLIP_INDEX_CONTENT_TYPE = "application/x-numpy-data"
 TIMELINE_COVERAGE_TOLERANCE_SEC = 0.75
 
+logger = logging.getLogger("eclypte.workflows")
+
 
 class WorkflowRunner(Protocol):
     def run_music_analysis(self, **kwargs) -> None: ...
-    def run_youtube_song_import(self, **kwargs) -> None: ...
     def run_audio_conversion(self, **kwargs) -> None: ...
     def run_video_analysis(self, **kwargs) -> None: ...
     def run_timeline_plan(self, **kwargs) -> None: ...
@@ -167,7 +162,7 @@ class DefaultWorkflowRunner:
                     audio=audio,
                 )
             except Exception as exc:  # lyrics are best-effort — never fail the edit
-                print(f"[edit] lyrics timing ensure failed (continuing): {exc}")
+                logger.warning("[edit] lyrics timing ensure failed (continuing): %s", exc)
 
             current_stage = "video"
             video_analysis = self._ensure_edit_video_analysis(
@@ -432,9 +427,9 @@ class DefaultWorkflowRunner:
                 },
             )
         else:
-            print(
-                f"[edit] lyrics timing unavailable (run {child.run_id}); "
-                f"planning without lyrics"
+            logger.info(
+                "[edit] lyrics timing unavailable (run %s); planning without lyrics",
+                child.run_id,
             )
 
     def _ensure_edit_video_analysis(
@@ -755,122 +750,6 @@ class DefaultWorkflowRunner:
         except Exception as exc:
             self._mark_failed(repo, user_id, run_id, exc)
 
-    def run_youtube_song_import(self, **kwargs) -> None:
-        repo = self._repository()
-        user_id = kwargs["user_id"]
-        run_id = kwargs["run_id"]
-        url = kwargs["url"]
-        try:
-            import modal
-            repo.append_run_progress(
-                run_ref=RunRef(user_id=user_id, run_id=run_id),
-                stage="download_youtube_audio",
-                percent=5,
-                detail="Starting YouTube download",
-            )
-            with _temporary_directory("eclypte_youtube_") as td:
-                try:
-                    download = _download_youtube_wav(url, Path(td))
-                except YoutubeDownloadError as exc:
-                    _record_youtube_download_attempts(repo, user_id, run_id, exc.attempts)
-                    raise
-                _record_youtube_download_attempts(repo, user_id, run_id, download.attempts)
-                repo.append_run_progress(
-                    run_ref=RunRef(user_id=user_id, run_id=run_id),
-                    stage="download_youtube_audio",
-                    percent=35,
-                    detail="Downloaded YouTube audio",
-                )
-                title = download.title
-                wav_path = download.wav_path
-                filename = f"{_safe_audio_basename(title)}.wav"
-                wav_bytes = wav_path.read_bytes()
-
-            repo.append_run_progress(
-                run_ref=RunRef(user_id=user_id, run_id=run_id),
-                stage="publish_audio",
-                percent=55,
-                detail="Publishing audio asset",
-            )
-            audio_ref = FileRef(user_id=user_id, file_id=f"file_audio_{run_id}")
-            repo.create_file_manifest(
-                file_ref=audio_ref,
-                kind="song_audio",
-                display_name=filename,
-                source_run_id=run_id,
-            )
-            audio_version = repo.publish_bytes(
-                file_ref=audio_ref,
-                body=wav_bytes,
-                content_type="audio/wav",
-                original_filename=filename,
-                created_by_step="download_youtube_audio",
-                derived_from_step="download_youtube_audio",
-                input_file_version_ids=[],
-                derived_from_run_id=run_id,
-            )
-
-            repo.append_run_progress(
-                run_ref=RunRef(user_id=user_id, run_id=run_id),
-                stage="analyze_music",
-                percent=65,
-                detail="Analyzing imported song",
-            )
-            analyze = modal.Function.from_name("eclypte-analysis", "analyze_remote")
-            result = analyze.remote(wav_bytes, filename)
-            analysis_ref = FileRef(user_id=user_id, file_id=f"file_music_analysis_{run_id}")
-            repo.create_file_manifest(
-                file_ref=analysis_ref,
-                kind="music_analysis",
-                display_name=f"{filename}.json",
-                source_run_id=run_id,
-            )
-            analysis_version = repo.publish_json(
-                file_ref=analysis_ref,
-                data=result,
-                original_filename=f"{filename}.json",
-                created_by_step="analyze_music",
-                derived_from_step="analyze_music",
-                input_file_version_ids=[audio_version.version_id],
-                derived_from_run_id=run_id,
-            )
-            outputs = {
-                "audio_file_id": audio_ref.file_id,
-                "audio_version_id": audio_version.version_id,
-                "music_analysis_file_id": analysis_ref.file_id,
-                "music_analysis_version_id": analysis_version.version_id,
-            }
-            repo.append_run_progress(
-                run_ref=RunRef(user_id=user_id, run_id=run_id),
-                stage="publish_analysis",
-                percent=90,
-                detail="Syncing lyrics to the song",
-            )
-            outputs.update(
-                _publish_song_lyrics_and_timing(
-                    repo,
-                    user_id=user_id,
-                    run_id=run_id,
-                    audio_version_id=audio_version.version_id,
-                    query=title,
-                    audio_bytes=wav_bytes,
-                    filename=filename,
-                )
-            )
-            repo.update_run_status(
-                RunRef(user_id=user_id, run_id=run_id),
-                status="completed",
-                outputs=outputs,
-            )
-            repo.append_run_progress(
-                run_ref=RunRef(user_id=user_id, run_id=run_id),
-                stage="publish_analysis",
-                percent=100,
-                detail="YouTube song imported and analyzed",
-            )
-        except Exception as exc:
-            self._mark_failed(repo, user_id, run_id, exc)
-
     def run_audio_conversion(self, **kwargs) -> None:
         repo = self._repository()
         user_id = kwargs["user_id"]
@@ -1022,7 +901,9 @@ class DefaultWorkflowRunner:
                     outputs["source_poster_version_id"] = poster_version.version_id
                 except Exception as poster_exc:
                     # Poster is decorative; the analysis run must not fail for it.
-                    print(f"[run_video_analysis] poster publish failed (non-fatal): {poster_exc}")
+                    logger.warning(
+                        "[run_video_analysis] poster publish failed (non-fatal): %s", poster_exc
+                    )
             repo.update_run_status(
                 RunRef(user_id=user_id, run_id=run_id),
                 status="completed",
@@ -1114,7 +995,7 @@ class DefaultWorkflowRunner:
                     end_sec=export_options.audio_end_sec,
                 )
         except Exception as exc:  # best-effort: a bad artifact must never fail planning
-            print(f"[timeline] lyrics timing unavailable: {exc}")
+            logger.warning("[timeline] lyrics timing unavailable: %s", exc)
         video = _read_json_version(repo, video_ref)
         # End credits are excluded by capping the usable source at the detected
         # content end (video analysis credit detection); fall back to full source.
@@ -1123,9 +1004,11 @@ class DefaultWorkflowRunner:
         content_end_sec = credits_block.get("content_end_sec") or source_duration_sec
         # Surface whether the credit-trim actually fired so "did the cap apply?"
         # is answerable from the run logs without spelunking Modal analysis logs.
-        print(
-            f"[timeline] credits_detected={credits_block.get('credits_detected', False)} "
-            f"content_end_sec={content_end_sec} (source_duration_sec={source_duration_sec})"
+        logger.info(
+            "[timeline] credits_detected=%s content_end_sec=%s (source_duration_sec=%s)",
+            credits_block.get("credits_detected", False),
+            content_end_sec,
+            source_duration_sec,
         )
 
         repo.update_run_status(run_ref, status="running", current_step="ensure_clip_index")
@@ -1185,7 +1068,7 @@ class DefaultWorkflowRunner:
             if record.status == "completed" and record.metrics
         ])
         if style_profile:
-            print(f"[timeline] style profile from references: {style_profile}")
+            logger.info("[timeline] style profile from references: %s", style_profile)
 
         creative_brief = str(kwargs.get("creative_brief") or "").strip() or DEFAULT_CREATIVE_BRIEF
         self._append_progress_context(repo, progress_context, 55, "Running agent timeline planner")
@@ -1623,7 +1506,7 @@ def _publish_song_lyrics(
         )
         return {"lyrics_file_id": file_ref.file_id, "lyrics_version_id": version.version_id}
     except Exception as exc:  # network/provider/storage — never fail the run
-        print(f"[workflows] lyrics fetch failed for {query!r}: {exc}")
+        logger.warning("[workflows] lyrics fetch failed for %r: %s", query, exc)
         return None
 
 
@@ -1686,7 +1569,7 @@ def _publish_lyrics_timing(
     except Exception as exc:  # Modal/storage/network
         if raise_errors:
             raise
-        print(f"[workflows] lyrics timing failed for {query!r}: {exc}")
+        logger.warning("[workflows] lyrics timing failed for %r: %s", query, exc)
         return None
 
 
@@ -1717,7 +1600,7 @@ def _publish_song_lyrics_and_timing(
 
             lrc = search_synced_lyrics(query)
         except Exception as exc:
-            print(f"[workflows] lyrics search failed for {query!r}: {exc}")
+            logger.warning("[workflows] lyrics search failed for %r: %s", query, exc)
             lrc = None
         if lrc:
             lyrics_outputs = _publish_song_lyrics(
@@ -1907,34 +1790,8 @@ def _validate_agent_timeline_coverage(timeline, song: dict) -> None:
         )
 
 
-def _download_youtube_wav(url: str, workdir: Path) -> YoutubeDownloadResult:
-    return download_youtube_wav(url, workdir)
-
-
 def _convert_audio_to_wav(source_path: Path, wav_path: Path) -> Path:
     return convert_audio_to_wav(source_path, wav_path)
-
-
-def _record_youtube_download_attempts(
-    repo: StorageRepository,
-    user_id: str,
-    run_id: str,
-    attempts: list[YoutubeDownloadAttempt],
-) -> None:
-    run_ref = RunRef(user_id=user_id, run_id=run_id)
-    for index, attempt in enumerate(attempts):
-        repo.append_run_event(
-            run_ref=run_ref,
-            event_type="youtube_download_attempt",
-            timestamp=_utc_now(),
-            event_id=f"evt_{index:04d}_{uuid.uuid4().hex[:12]}",
-            payload={
-                "step": "download_youtube_audio",
-                "provider": attempt.provider,
-                "status": attempt.status,
-                "detail": attempt.detail,
-            },
-        )
 
 
 IMPACT_NEAR_WINDOW_SEC = 0.5
@@ -1995,11 +1852,13 @@ def _record_timeline_sync_report(
     if not report:
         return
     sync = report.get("sync") or {}
-    print(
-        f"[timeline] sync report: on_beat={sync.get('cuts_on_beat_pct')}% "
-        f"on_downbeat={sync.get('cuts_on_downbeat_pct')}% "
-        f"impacts_on_downbeats={sync.get('impact_on_downbeat_shots')}/{sync.get('shot_count')} "
-        f"splits={len(report.get('pacing_splits') or [])}"
+    logger.info(
+        "[timeline] sync report: on_beat=%s%% on_downbeat=%s%% impacts_on_downbeats=%s/%s splits=%s",
+        sync.get("cuts_on_beat_pct"),
+        sync.get("cuts_on_downbeat_pct"),
+        sync.get("impact_on_downbeat_shots"),
+        sync.get("shot_count"),
+        len(report.get("pacing_splits") or []),
     )
     try:
         repo.append_run_event(
@@ -2010,7 +1869,7 @@ def _record_timeline_sync_report(
             payload=report,
         )
     except Exception as exc:  # telemetry must never fail the run
-        print(f"[timeline] failed to record sync report: {exc}")
+        logger.warning("[timeline] failed to record sync report: %s", exc)
 
 
 @contextmanager
@@ -2035,11 +1894,7 @@ def _temporary_directory(prefix: str):
         yield td
 
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
 def _safe_audio_basename(title: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._ -]+", "", title).strip()
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" ._-")
-    return (cleaned or "youtube_song")[:96]
+    return (cleaned or "song_audio")[:96]

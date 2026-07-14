@@ -13,13 +13,8 @@ TODAY = "2026-06-09"
 
 class RecordingStarts:
     def __init__(self):
-        self.import_calls = []
         self.analysis_calls = []
         self.edit_calls = []
-
-    def start_song_import(self, user_id, url):
-        self.import_calls.append((user_id, url))
-        return f"run_import_{len(self.import_calls)}"
 
     def start_music_analysis(self, user_id, *, audio):
         self.analysis_calls.append((user_id, audio))
@@ -58,7 +53,6 @@ def tick(repo, starts):
     return run_autopilot_tick(
         repo,
         user_id=USER,
-        start_song_import=starts.start_song_import,
         start_music_analysis=starts.start_music_analysis,
         start_edit=starts.start_edit,
         now=NOW,
@@ -172,7 +166,7 @@ def test_tick_disabled_takes_no_action():
     state = tick(repo, starts)
 
     assert starts.edit_calls == []
-    assert starts.import_calls == []
+    assert starts.analysis_calls == []
     assert state.last_tick_at is not None
     assert state.items[0].status == "pending"
 
@@ -211,65 +205,29 @@ def test_tick_uses_trim_window_from_music_analysis():
     assert item.audio_start_sec == options["audio_start_sec"]
 
 
-def test_tick_starts_import_for_youtube_item():
+def test_tick_fails_legacy_importing_item_without_counting_toward_halt():
     repo = build_repo()
     starts = RecordingStarts()
-    item = make_item(
-        song_file_id=None,
-        song_version_id=None,
-        song_youtube_url="https://youtu.be/abc123",
-    )
-    save_state(repo, items=[item])
-
-    state = tick(repo, starts)
-
-    assert starts.import_calls == [(USER, "https://youtu.be/abc123")]
-    assert state.items[0].status == "importing"
-    assert state.items[0].import_run_id == "run_import_1"
-
-
-def test_tick_advances_completed_import_to_edit():
-    repo = build_repo()
-    starts = RecordingStarts()
-    # A real YouTube import records the music analysis in its run outputs, so the
-    # window is available the moment the import completes — no separate analysis pass.
-    analysis_file_id, analysis_version_id = publish_analysis_artifact(repo)
-    run = repo.create_run(
-        user_id=USER,
-        workflow_type="youtube_song_import",
-        inputs={"youtube_url": "https://youtu.be/abc123"},
-        steps=["download_youtube_audio"],
-    )
-    repo.update_run_status(
-        RunRef(user_id=USER, run_id=run.run_id),
-        status="completed",
-        outputs={
-            "audio_file_id": "file_song",
-            "audio_version_id": "v_song",
-            "music_analysis_file_id": analysis_file_id,
-            "music_analysis_version_id": analysis_version_id,
-        },
-    )
+    # Items stuck in "importing" predate the YouTube-import removal; nothing can
+    # advance them anymore, so the tick fails them without tripping the halt.
     item = make_item(
         song_file_id=None,
         song_version_id=None,
         song_youtube_url="https://youtu.be/abc123",
         status="importing",
-        import_run_id=run.run_id,
+        import_run_id="run_import_legacy",
     )
     save_state(repo, items=[item])
 
     state = tick(repo, starts)
 
-    assert len(starts.edit_calls) == 1
+    assert starts.edit_calls == []
     assert starts.analysis_calls == []
-    _, kwargs = starts.edit_calls[0]
-    options = kwargs["export_options"]
-    assert 20.0 <= options["audio_end_sec"] - options["audio_start_sec"] <= 30.0
     updated = state.items[0]
-    assert updated.status == "editing"
-    assert updated.song_file_id == "file_song"
-    assert updated.song_version_id == "v_song"
+    assert updated.status == "failed"
+    assert "YouTube import was removed" in (updated.last_error or "")
+    assert state.consecutive_failures == 0
+    assert state.halted_reason is None
 
 
 def _complete_analysis_run(repo, *, song_version_id="v_song", analysis=None, file_id="file_analysis"):
@@ -436,7 +394,6 @@ def test_tick_halts_after_three_consecutive_failures():
             item_id=f"ap_broken{i}",
             song_file_id=None,
             song_version_id=None,
-            song_youtube_url=None,
         )
         for i in range(3)
     ]
@@ -515,20 +472,6 @@ def test_autopilot_endpoints_flow(monkeypatch):
         json={"items": [{"source_video": video}]},
     )
     assert invalid.status_code == 400
-
-    both = client.post(
-        "/v1/autopilot/queue",
-        json={
-            "items": [
-                {
-                    "source_video": video,
-                    "song": song,
-                    "song_youtube_url": "https://youtu.be/abc",
-                }
-            ]
-        },
-    )
-    assert both.status_code == 400
 
     queued = client.post(
         "/v1/autopilot/queue",

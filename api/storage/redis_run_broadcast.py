@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
 import json
 import time
 from typing import Any
 
 from .models import RunEvent, RunManifest
+from api.timeutil import utc_now as _utc_now
 
 DEFAULT_HEARTBEAT_SECONDS = 15
 RUN_CHANNEL_PREFIX = "eclypte:runs:user"
@@ -99,7 +99,3 @@ def _user_channel(user_id: str) -> str:
 
 def _run_channel(user_id: str, run_id: str) -> str:
     return f"{_user_channel(user_id)}:run:{run_id}"
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")

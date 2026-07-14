@@ -3,11 +3,12 @@
 import { ChangeEvent, KeyboardEvent as ReactKeyboardEvent, Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useUser } from "@clerk/nextjs"
-import { Activity, Download, Link2, Music, Plus, RotateCcw, Send, Trash2 } from "lucide-react"
+import { Activity, Download, Music, Plus, RotateCcw, Send, Trash2 } from "lucide-react"
 import {
     DashboardPage,
     Pager,
     Sheet,
+    SignInRequired,
     FadeImg,
     MediaGridSkeleton,
     SkeletonList,
@@ -37,8 +38,6 @@ import { useAssets, usePublishingPosts } from "@/stores/dashboardResources"
 type LibraryTab = "films" | "songs" | "reels" | "hidden"
 const TAB_ORDER: LibraryTab[] = ["films", "songs", "reels", "hidden"]
 type UploadCard = { id: number; name: string; loaded: number; total: number; stage: string; error: string | null }
-type ImportCard = { url: string; stage: string; error: string | null }
-
 const AUDIO_UPLOAD_EXTENSIONS = ["wav", "mp3", "m4a", "aac", "flac", "ogg", "opus", "aiff", "wma"]
 
 export default function AssetsPage() {
@@ -58,21 +57,17 @@ function LibraryPage() {
     const tab: LibraryTab = tabParam === "songs" || tabParam === "reels" || tabParam === "hidden" ? tabParam : "films"
     const [selectedId, setSelectedId] = useState<string | null>(null)
     const [addOpen, setAddOpen] = useState(false)
-    const [youtubeUrl, setYoutubeUrl] = useState("")
     const [uploads, setUploads] = useState<UploadCard[]>([])
-    const [imports, setImports] = useState<ImportCard[]>([])
     const [error, setError] = useState<string | null>(null)
     // Sheet-scoped errors: a page banner is invisible behind an open sheet.
     const [sheetError, setSheetError] = useState<string | null>(null)
     const [addError, setAddError] = useState<string | null>(null)
     const uploadIdRef = useRef(0)
     const uploadControllersRef = useRef<Map<number, AbortController>>(new Map())
-    const importControllersRef = useRef<Map<string, AbortController>>(new Map())
 
     useEffect(
         () => () => {
             uploadControllersRef.current.forEach((controller) => controller.abort())
-            importControllersRef.current.forEach((controller) => controller.abort())
         },
         [],
     )
@@ -121,7 +116,7 @@ function LibraryPage() {
         ? [...films, ...songs, ...reels, ...hidden].find((a) => a.file_id === selectedId) ?? null
         : null
 
-    // --- Add flow: one smart file input (MP4 → film, audio → song), plus YouTube. ---
+    // --- Add flow: one smart file input (MP4 → film, audio → song). ---
     const onPick = (event: ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0] ?? null
         event.target.value = ""
@@ -181,42 +176,6 @@ function LibraryPage() {
             patch({ error: errorMessage(caught), stage: "Didn't work" })
         } finally {
             uploadControllersRef.current.delete(id)
-        }
-    }
-
-    const runImport = async () => {
-        if (!api || !youtubeUrl.trim()) {
-            return
-        }
-        setError(null)
-        const url = youtubeUrl.trim()
-        setYoutubeUrl("")
-        setAddOpen(false)
-        const controller = new AbortController()
-        importControllersRef.current.set(url, controller)
-        const patch = (partial: Partial<ImportCard>) =>
-            setImports((current) => current.map((card) => (card.url === url ? { ...card, ...partial } : card)))
-        setImports((current) => [...current, { url, stage: "Getting the song", error: null }])
-        try {
-            const run = await api.createYouTubeSongImport(url, controller.signal)
-            await waitForRunCompletion(api, run, {
-                signal: controller.signal,
-                onUpdate: (next) => patch({ stage: next.status === "running" ? "Getting the song" : "Finishing up" }),
-            })
-            setImports((current) => current.filter((card) => card.url !== url))
-            if (tab !== "songs") {
-                setTab("songs")
-            }
-            assetsResource.revalidate()
-            toast("Song imported and ready")
-        } catch (caught) {
-            if (isAbortError(caught)) {
-                setImports((current) => current.filter((card) => card.url !== url))
-                return
-            }
-            patch({ error: errorMessage(caught), stage: "Didn't work" })
-        } finally {
-            importControllersRef.current.delete(url)
         }
     }
 
@@ -309,12 +268,10 @@ function LibraryPage() {
         )
     }
     if (!isSignedIn || !user) {
-        return (
-            <DashboardPage eyebrow="Library" title="Sign in required">
-                <div className={styles.emptyState}>Sign in from the homepage to manage your library.</div>
-            </DashboardPage>
-        )
+        return <SignInRequired eyebrow="Library" message="Sign in from the homepage to manage your library." />
     }
+
+    const banner = error || assetsResource.error || reelsResource.error || postsResource.error
 
     return (
         <DashboardPage
@@ -326,11 +283,7 @@ function LibraryPage() {
                 </button>
             }
         >
-            {(error || assetsResource.error || reelsResource.error || postsResource.error) && (
-                <div className={styles.errorBanner}>
-                    {error || assetsResource.error || reelsResource.error || postsResource.error}
-                </div>
-            )}
+            {banner && <div className={styles.errorBanner}>{banner}</div>}
 
             <div className={styles.tabPills} role="tablist" aria-label="Library" onKeyDown={onTablistKeyDown}>
                 {(["films", "songs", "reels", "hidden"] as const).map((item) => (
@@ -359,13 +312,13 @@ function LibraryPage() {
                 ))}
             </div>
 
-            {/* In-flight uploads/imports appear at the top of the active view. */}
-            {(uploads.length > 0 || imports.length > 0) && (
+            {/* In-flight uploads appear at the top of the active view. */}
+            {uploads.length > 0 && (
                 <div className={styles.feedSection}>
                     {uploads.map((card) => (
                         <div key={card.id} className={styles.progressRow}>
                             <div className={styles.progressRowTop}>
-                                <span style={{ display: "inline-flex", alignItems: "center", gap: "0.55rem", minWidth: 0 }}>
+                                <span className={styles.progressRowLead}>
                                     {!card.error && <Spinner />}
                                     <span className={styles.truncate}>{card.name}</span>
                                 </span>
@@ -398,31 +351,6 @@ function LibraryPage() {
                             )}
                         </div>
                     ))}
-                    {imports.map((card) => (
-                        <div key={card.url} className={styles.progressRow}>
-                            <div className={styles.progressRowTop}>
-                                <span style={{ display: "inline-flex", alignItems: "center", gap: "0.55rem", minWidth: 0 }}>
-                                    {!card.error && <Spinner />}
-                                    <span className={styles.truncate}>{card.url}</span>
-                                </span>
-                                <span>{card.error ?? `${card.stage}…`}</span>
-                            </div>
-                            {!card.error && (
-                                <div>
-                                    <button className={styles.ghostButton} type="button" onClick={() => importControllersRef.current.get(card.url)?.abort()}>
-                                        Cancel
-                                    </button>
-                                </div>
-                            )}
-                            {card.error && (
-                                <div>
-                                    <button className={styles.ghostButton} type="button" onClick={() => setImports((current) => current.filter((item) => item.url !== card.url))}>
-                                        Dismiss
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    ))}
                 </div>
             )}
 
@@ -441,7 +369,7 @@ function LibraryPage() {
                         Try again
                     </button>
                 </div>
-            ) : tabItems.length === 0 && uploads.length === 0 && imports.length === 0 ? (
+            ) : tabItems.length === 0 && uploads.length === 0 ? (
                 <div className={styles.emptyState}>
                     <p className={styles.emptyStateTitle}>{emptyTitle(tab)}</p>
                     <p className={styles.emptyStateHint}>{emptyHint(tab)}</p>
@@ -500,32 +428,12 @@ function LibraryPage() {
                     setAddOpen(false)
                     setAddError(null)
                 }}
-                footer={
-                    <button className={styles.secondaryButton} type="submit" form="library-add-form" disabled={!youtubeUrl.trim()}>
-                        <Link2 size={15} /> Import from YouTube
-                    </button>
-                }
             >
-                {/* display:contents keeps the sheet-body layout; Enter in the URL
-                    field submits like the footer button. */}
-                <form
-                    id="library-add-form"
-                    style={{ display: "contents" }}
-                    onSubmit={(event) => {
-                        event.preventDefault()
-                        void runImport()
-                    }}
-                >
-                    <label className={`${styles.filePicker} ${styles.uploadDrop}`}>
-                        <span className={styles.fileName}>Choose a file</span>
-                        <span className={styles.muted}>An MP4 becomes a film; audio (WAV, MP3, M4A, FLAC…) becomes a song.</span>
-                        <input type="file" accept={`video/mp4,.mp4,audio/*,${AUDIO_UPLOAD_EXTENSIONS.map((ext) => `.${ext}`).join(",")}`} onChange={onPick} />
-                    </label>
-                    <label className={styles.fieldLabel}>
-                        Or paste a YouTube song link
-                        <input className={styles.input} placeholder="https://youtu.be/…" value={youtubeUrl} onChange={(event) => setYoutubeUrl(event.target.value)} />
-                    </label>
-                </form>
+                <label className={`${styles.filePicker} ${styles.uploadDrop}`}>
+                    <span className={styles.fileName}>Choose a file</span>
+                    <span className={styles.muted}>An MP4 becomes a film; audio (WAV, MP3, M4A, FLAC…) becomes a song.</span>
+                    <input type="file" accept={`video/mp4,.mp4,audio/*,${AUDIO_UPLOAD_EXTENSIONS.map((ext) => `.${ext}`).join(",")}`} onChange={onPick} />
+                </label>
             </Sheet>
         </DashboardPage>
     )
@@ -811,7 +719,7 @@ function emptyTitle(tab: LibraryTab) {
 
 function emptyHint(tab: LibraryTab) {
     if (tab === "films") return "Add an MP4 of a film or anime — it becomes the footage your reels are cut from."
-    if (tab === "songs") return "Add an audio file or import a song from YouTube."
+    if (tab === "songs") return "Add an audio file — WAV, MP3, M4A, FLAC, and more all work."
     if (tab === "reels") return "Finished reels land here automatically."
     return "Things you hide can be restored from here."
 }

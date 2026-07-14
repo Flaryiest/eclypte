@@ -12,32 +12,32 @@ export default function Footer() {
                         <h4 className={styles.resourcesTitle}>Resources</h4>
                         <ul className={styles.resourcesList}>
                             <li>
-                                <Link className={styles.resourceLink} href="/demo">Demo</Link>
+                                <Link href="/demo">Demo</Link>
                             </li>
                             <li>
-                                <Link className={styles.resourceLink} href="/pricing">Pricing</Link>
+                                <Link href="/pricing">Pricing</Link>
                             </li>
                         </ul>
                     </div>
-                    <div className={styles.legal}>
+                    <div>
                         <h4 className={styles.legalTitle}>Legal</h4>
                         <ul className={styles.legalList}>
                             <li>
-                                <a className={styles.legalLink} href="https://twitter.com/eclypte" target="_blank" rel="noopener noreferrer">Twitter</a>
+                                <a href="https://twitter.com/eclypte" target="_blank" rel="noopener noreferrer">Twitter</a>
                             </li>
                             <li>
-                                <a className={styles.legalLink} href="https://linkedin.com/company/eclypte" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                                <a href="https://linkedin.com/company/eclypte" target="_blank" rel="noopener noreferrer">LinkedIn</a>
                             </li>
                         </ul>
                     </div>
-                    <div className={styles.contact}>
+                    <div>
                         <h4 className={styles.contactTitle}>Contact Us</h4>
-                        <p className={styles.contactInfo}>Email: info@eclypte.com</p>   
+                        <p className={styles.contactInfo}>Email: info@eclypte.com</p>
                     </div>
                 </div>
             </div>
             <div className={styles.bottom}>
-                <span className={styles.copyright}>© 2026 Eclypte. All rights reserved.</span>
+                <span>© 2026 Eclypte. All rights reserved.</span>
             </div>
         </div>
     </footer>

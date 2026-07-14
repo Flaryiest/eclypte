@@ -84,22 +84,6 @@ CORS defaults to `https://eclypte.vercel.app`, `http://localhost:3000`, and
 `http://127.0.0.1:3000`. Override with a comma-separated
 `ECLYPTE_CORS_ORIGINS` value if needed.
 
-YouTube song import may require authenticated YouTube cookies when Railway's
-IP is challenged. Export YouTube cookies in Netscape `cookies.txt` format,
-base64-encode the file contents, and set this on the Railway API service:
-
-```powershell
-$env:ECLYPTE_YOUTUBE_COOKIES_B64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Content .\youtube-cookies.txt -Raw)))
-```
-
-```bash
-export ECLYPTE_YOUTUBE_COOKIES_B64="$(base64 < youtube-cookies.txt | tr -d '\n')"
-```
-
-For local-only development, raw `ECLYPTE_YOUTUBE_COOKIES` text is also accepted.
-Do not commit exported cookies; treat them like passwords and refresh them if
-YouTube rejects the configured value.
-
 Run locally from the repo root:
 
 ```powershell
@@ -129,7 +113,7 @@ Routes:
 - `GET /v1/files/{file_id}/versions/{version_id}/download-url` returns a presigned R2 GET URL.
 - `POST /v1/music/analyses`, `POST /v1/video/analyses`, `POST /v1/timelines`, and `POST /v1/renders` create run manifests and schedule background work. Renders publish a `render_output` MP4 and a `render_poster` JPEG thumbnail.
 - `GET /v1/publishing/config` reports non-secret Buffer/OpenAI/public-media setup.
-- `GET /v1/publishing/posts`, `POST /v1/publishing/posts`, `PATCH /v1/publishing/posts/{post_id}`, `POST /v1/publishing/posts/{post_id}/regenerate-caption`, `POST /v1/publishing/posts/{post_id}/send-buffer`, `POST /v1/publishing/posts/{post_id}/refresh-status` (back-fills the live permalink from Buffer), and `POST /v1/publishing/posts/{post_id}/cancel` manage review-gated Buffer publishing packages (sent as Instagram Reels).
+- `GET /v1/publishing/posts`, `POST /v1/publishing/posts`, `PATCH /v1/publishing/posts/{post_id}`, `POST /v1/publishing/posts/{post_id}/regenerate-caption`, `POST /v1/publishing/posts/{post_id}/send-buffer`, `POST /v1/publishing/posts/{post_id}/refresh-status` (back-fills the live permalink from Buffer), `POST /v1/publishing/posts/{post_id}/mark-posted` (manual override when a sent post can't be reconciled from Buffer), and `POST /v1/publishing/posts/{post_id}/cancel` manage review-gated Buffer publishing packages (sent as Instagram Reels).
 - `GET /v1/runs/{run_id}` and `GET /v1/runs/{run_id}/events` inspect workflow status.
 - `GET /v1/runs/stream` and `GET /v1/runs/{run_id}/stream` stream Redis-backed run updates when `REDIS_URL` is configured.
 - `POST /internal/progress` records worker progress and requires `X-Eclypte-Internal-Token`.

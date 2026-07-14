@@ -63,7 +63,6 @@ def _local_syncedlyrics_cache():
 
 
 def main(query="Dominic Fike Babydoll Official Audio"):
-    print("running lyrics.py")
     with _local_syncedlyrics_cache():
         lrc = syncedlyrics.search(_clean_query(query))
 

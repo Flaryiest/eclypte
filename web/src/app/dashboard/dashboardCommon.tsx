@@ -33,6 +33,14 @@ export function DashboardPage({
     )
 }
 
+export function SignInRequired({ eyebrow, message }: { eyebrow: string; message: string }) {
+    return (
+        <DashboardPage eyebrow={eyebrow} title="Sign in required">
+            <div className={styles.emptyState}>{message}</div>
+        </DashboardPage>
+    )
+}
+
 export function StatusBadge({
     label,
     tone,
@@ -506,7 +514,7 @@ export function ProgressRow({
     return (
         <div className={styles.progressRow}>
             <div className={styles.progressRowTop}>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: "0.55rem", minWidth: 0 }}>
+                <span className={styles.progressRowLead}>
                     {!error && <Spinner />}
                     <span className={styles.truncate}>{title}</span>
                 </span>

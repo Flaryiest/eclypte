@@ -40,10 +40,7 @@ from .r2_client import ObjectStore
 from .refs import FileRef, FileVersionRef, RunRef
 from .run_broadcast import RunUpdateBroadcaster
 from .run_store import R2RunStore, RunStore
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+from api.timeutil import utc_now as _utc_now
 
 
 def _utc_event_now() -> str:
@@ -654,17 +651,6 @@ class StorageRepository:
             }
         )
         return self.save_run_manifest(archived)
-
-    def restore_run(self, run_ref: RunRef) -> RunManifest:
-        manifest = self.load_run_manifest(run_ref)
-        restored = manifest.model_copy(
-            update={
-                "archived_at": None,
-                "archived_reason": None,
-                "updated_at": _utc_now(),
-            }
-        )
-        return self.save_run_manifest(restored)
 
     def create_synthesis_reference(
         self,

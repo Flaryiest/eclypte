@@ -175,7 +175,6 @@ export type AutopilotItem = {
     source_video_version_id: string
     song_file_id: string | null
     song_version_id: string | null
-    song_youtube_url: string | null
     creative_brief: string
     status: AutopilotItemStatus
     import_run_id: string | null
@@ -204,7 +203,6 @@ export type AutopilotStatus = {
 export type AutopilotQueueItemInput = {
     source_video: FileVersionInput
     song?: FileVersionInput | null
-    song_youtube_url?: string | null
     creative_brief?: string
 }
 
@@ -239,12 +237,6 @@ export type SynthesisPromptState = {
     active_version_id: string
     active_prompt: SynthesisPromptVersion
     versions: SynthesisPromptVersion[]
-}
-
-export type RunProgressEvent = {
-    stage: string
-    percent: number
-    detail: string
 }
 
 export type RunEvent = {
@@ -299,7 +291,6 @@ export type DownloadUrlResponse = {
 
 export type HealthResponse = {
     ok: boolean
-    youtube_cookies_configured?: boolean
     realtime_streaming_configured?: boolean
     worker_progress_configured?: boolean
     autopilot_loop_configured: boolean
@@ -561,14 +552,6 @@ export class EclypteApiClient {
         })
     }
 
-    async createYouTubeSongImport(url: string, signal?: AbortSignal) {
-        return this.request<RunManifest>("/v1/music/youtube-imports", {
-            method: "POST",
-            body: JSON.stringify({ url }),
-            signal,
-        })
-    }
-
     async createAudioConversion(audio: FileVersionInput, signal?: AbortSignal) {
         return this.request<RunManifest>("/v1/music/conversions", {
             method: "POST",
@@ -581,50 +564,6 @@ export class EclypteApiClient {
         return this.request<RunManifest>("/v1/video/analyses", {
             method: "POST",
             body: JSON.stringify({ source_video: sourceVideo }),
-            signal,
-        })
-    }
-
-    async createTimelinePlan(
-        input: {
-            audio: FileVersionInput
-            sourceVideo: FileVersionInput
-            musicAnalysis: FileVersionInput
-            videoAnalysis: FileVersionInput
-            creativeBrief?: string
-            exportOptions?: ExportOptions
-        },
-        signal?: AbortSignal,
-    ) {
-        return this.request<RunManifest>("/v1/timelines", {
-            method: "POST",
-            body: JSON.stringify({
-                audio: input.audio,
-                source_video: input.sourceVideo,
-                music_analysis: input.musicAnalysis,
-                video_analysis: input.videoAnalysis,
-                creative_brief: input.creativeBrief,
-                export_options: serializeExportOptions(input.exportOptions),
-            }),
-            signal,
-        })
-    }
-
-    async createRender(
-        input: {
-            timeline: FileVersionInput
-            audio: FileVersionInput
-            sourceVideo: FileVersionInput
-        },
-        signal?: AbortSignal,
-    ) {
-        return this.request<RunManifest>("/v1/renders", {
-            method: "POST",
-            body: JSON.stringify({
-                timeline: input.timeline,
-                audio: input.audio,
-                source_video: input.sourceVideo,
-            }),
             signal,
         })
     }

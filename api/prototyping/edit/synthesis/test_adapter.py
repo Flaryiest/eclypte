@@ -2,7 +2,7 @@ import pytest
 
 from api.prototyping.edit.synthesis.adapter import adapt, snap_shots_to_beats
 from api.prototyping.edit.synthesis.timeline_schema import Shot, ShotSource
-from api.prototyping.edit.synthesis.validators import TimelineError, validate_timeline
+from api.prototyping.edit.synthesis.validators import validate_timeline
 
 
 SOURCE_DURATION = 300.0

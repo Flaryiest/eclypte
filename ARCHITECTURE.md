@@ -89,7 +89,7 @@ already-completed analyses. **Autopilot** drives this same pipeline on a schedul
   - **Temp auth:** `user_id()` trusts the `X-User-Id` header verbatim (falling back to
     `ECLYPTE_DEFAULT_USER_ID`). There is **no verification yet** — so no real tenant isolation; the
     frontend simply forwards the Clerk user id. JWT verification is deferred.
-  - **Route groups:** uploads/files/assets; workflow triggers (music / youtube-import / conversion,
+  - **Route groups:** uploads/files/assets; workflow triggers (music / conversion,
     video, timelines, renders, edits — all `202` + background tasks); edit-job management; runs
     (list/get/events + NDJSON streams); synthesis (references / consolidations / prompt versions);
     publishing; autopilot; `/healthz`; and `/internal/progress` (Modal-worker callback, guarded by
@@ -100,7 +100,7 @@ already-completed analyses. **Autopilot** drives this same pipeline on a schedul
   `run_*` workflow. Version-gates CLIP-index reuse via `CLIP_INDEX_BUILD_STEP`; caps usable source
   at `credits.content_end_sec`; fails a run if the timeline is >0.75s shorter than the trimmed song.
 - **`autopilot.py`** (~500 lines) — `run_autopilot_tick` state machine
-  (`pending → importing → analyzing → editing → packaged`). Ranks ~20–30s (≈25s) trim windows by
+  (`pending → analyzing → editing → packaged`). Ranks ~20–30s (≈25s) trim windows by
   energy (chorus bonus + 5s lead-in), dedupes `(video, song, window)`, always uses
   `reels_cinematic`, **halts after 3 consecutive failures**, and auto-creates `ready` review
   packages (`auto_created=true`) — it **never auto-posts**. Guarded by an in-process `STATE_LOCK`
@@ -112,8 +112,7 @@ already-completed analyses. **Autopilot** drives this same pipeline on a schedul
 - **`export_options.py`** — the single home for export behavior: `reels_9_16` (fill + `crop_focus_x`),
   `reels_cinematic` (letterbox, baked bars — autopilot default), `youtube_16_9` (letterbox — backend
   default), and `trim_song_analysis()`.
-- **`youtube_download.py`** — multi-provider fallback (`pytubefix` variants → `yt-dlp`); every attempt
-  logged as a run event.
+- **`audio_convert.py`** — ffmpeg WAV transcode helper behind `POST /v1/music/conversions`.
 
 ### Storage substrate — `api/storage/`
 - **`models.py`** — all Pydantic records (`extra="forbid"`): `FileManifest`, `FileVersionMeta`,
@@ -125,7 +124,7 @@ already-completed analyses. **Autopilot** drives this same pipeline on a schedul
   **Redis** (best-effort — swallows failures, never breaks persistence).
 - Supporting: `keys.py` (canonical object-key layout), `r2_client.py` (boto3 + presign + parallel
   `get_json_many`), `postgres_run_store.py`, `redis_run_broadcast.py` (user + run channels, 15s
-  heartbeat), `factory.py`, `staging.py`.
+  heartbeat), `factory.py`.
 - **Asset listing** hides internal kinds (render/source posters, render outputs) and archived assets
   by default, and presigns poster URLs **locally** from the deterministic version blob key (no extra
   round-trip). Prefer archive/restore over hard-delete.

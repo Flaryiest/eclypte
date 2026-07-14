@@ -4,8 +4,6 @@ from api.storage.test_fakes import InMemoryObjectStore
 
 
 def test_storage_smoke_flow_can_publish_stage_and_derive_json(tmp_path):
-    from api.storage.staging import stage_version_to_tempdir
-
     repo = StorageRepository(InMemoryObjectStore())
     source_ref = FileRef(user_id="user_123", file_id="file_source")
     derived_ref = FileRef(user_id="user_123", file_id="file_analysis")
@@ -30,12 +28,8 @@ def test_storage_smoke_flow_can_publish_stage_and_derive_json(tmp_path):
         input_file_version_ids=[],
     )
 
-    staged_path = stage_version_to_tempdir(
-        repository=repo,
-        version_ref=source_version,
-        temp_dir=tmp_path,
-        filename="source.mp4",
-    )
+    staged_path = tmp_path / "source.mp4"
+    staged_path.write_bytes(repo.read_version_bytes(source_version))
     repo.publish_json(
         file_ref=derived_ref,
         data={"source_path": str(staged_path), "ok": True},

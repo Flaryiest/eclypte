@@ -13,6 +13,7 @@ from api.storage.models import PublishingPostRecord
 from api.storage.r2_client import ObjectStore
 from api.storage.refs import FileRef, FileVersionRef, RunRef
 from api.storage.repository import StorageRepository
+from api.timeutil import utc_now as _utc_now
 
 BufferShareMode = Literal["addToQueue", "customScheduled"]
 
@@ -670,7 +671,3 @@ def _humanize(value: str) -> str:
 
 def _safe_id(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_]", "_", value)
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

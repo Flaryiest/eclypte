@@ -4,11 +4,8 @@ import type {
     AutopilotStatus,
     EclypteApiClient,
     EditJobStatus,
-    PublishingConfig,
     PublishingPost,
     PublishingPostStatus,
-    RunStatus,
-    RunSummary,
     SynthesisPromptState,
     SynthesisReference,
 } from "@/services/eclypteApi"
@@ -40,27 +37,6 @@ export function useEditJobs(api: EclypteApiClient | null): UseResourceResult<Edi
     )
 }
 
-export function useRuns(
-    api: EclypteApiClient | null,
-    filters: { workflowType?: string; status?: RunStatus } = {},
-): UseResourceResult<RunSummary[]> {
-    const workflowType = filters.workflowType ?? null
-    const status = filters.status ?? null
-    const key = api ? `runs:${api.userId}:${workflowType ?? "all"}:${status ?? "all"}` : null
-    return useResource<RunSummary[]>(
-        key,
-        (signal) =>
-            api!.listRuns(
-                {
-                    workflowType: workflowType ?? undefined,
-                    status: status ?? undefined,
-                },
-                signal,
-            ),
-        { enabled: api !== null },
-    )
-}
-
 export function usePublishingPosts(
     api: EclypteApiClient | null,
     filters: { status?: PublishingPostStatus | "queued_scheduled" | "all" } = {},
@@ -70,15 +46,6 @@ export function usePublishingPosts(
     return useResource<PublishingPost[]>(
         key,
         (signal) => api!.listPublishingPosts({ status }, signal),
-        { enabled: api !== null },
-    )
-}
-
-export function usePublishingConfig(api: EclypteApiClient | null): UseResourceResult<PublishingConfig> {
-    const key = api ? `publishing-config:${api.userId}` : null
-    return useResource<PublishingConfig>(
-        key,
-        (signal) => api!.getPublishingConfig(signal),
         { enabled: api !== null },
     )
 }

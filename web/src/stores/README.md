@@ -22,7 +22,7 @@ background, and pages that request the same data share a single fetch.
 |------|----------------|
 | `dashboardStore.ts` | The zustand store: a `Record<key, ResourceEntry>` cache plus three actions (`ensureFresh`, `revalidate`, `patch`). Framework-agnostic; knows nothing about specific resources. |
 | `useResource.ts` | The generic React hook. Subscribes a component to one cache entry and triggers stale-while-revalidate on mount. Returns `{ data, status, error, isLoading, isValidating, revalidate, set }`. |
-| `dashboardResources.ts` | Typed, user-scoped wrappers — `useAssets`, `useEditJobs`, `useRuns`, `usePublishingPosts`, `usePublishingConfig`, `useSynthesisReferences`, `useSynthesisPrompt`, `useAutopilot`. Each builds a cache key and delegates to `useResource`. **This is the layer pages import.** |
+| `dashboardResources.ts` | Typed, user-scoped wrappers — `useAssets`, `useEditJobs`, `usePublishingPosts`, `useSynthesisReferences`, `useSynthesisPrompt`, `useAutopilot`. Each builds a cache key and delegates to `useResource`. **This is the layer pages import.** |
 
 ## How it works
 
@@ -77,7 +77,7 @@ whole list.
 const api = useMemo(() => user?.id ? new EclypteApiClient({ userId: user.id }) : null, [user?.id])
 
 // Read-only list:
-const { data: runs = [], error: loadError, isLoading } = useRuns(api, { workflowType: "render" })
+const { data: jobs = [], error: loadError, isLoading } = useEditJobs(api)
 
 // List you also mutate:
 const assetsResource = useAssets(api, { includeArchived: true })
@@ -111,29 +111,28 @@ const refresh = assetsResource.revalidate  // pass to useRunStream / a Refresh b
   // useCallback(() => resource.revalidate(), [resource])       // ❌ churns
   ```
 - **Memoize `data ?? []` when it feeds a `useEffect` dependency.** `?? []` makes a fresh array each
-  render; wrap it in `useMemo(() => data ?? [], [data])` (see `new-edit`'s `jobs`, `renders`'
-  `outputs`, `publish`' `posts`). Where the list is only read in render, plain `data ?? []` is fine.
+  render; wrap it in `useMemo(() => data ?? [], [data])` (see `new-edit`'s `jobs`, the Library's
+  `reels`, Home's `posts`). Where the list is only read in render, plain `data ?? []` is fine.
 - **No abort on unmount (intentional).** A fetch is allowed to finish after the component unmounts
   and populate the shared cache — that's the whole point. Correctness comes from latest-wins + dedup,
   and writing to an external store after unmount is safe (no React state-on-unmounted warning).
 - **User-owned inputs need a dirty-guard.** When a textarea/field is seeded from cached data and the
   user can edit it, a background revalidate must not clobber unsaved edits. `synthesis` seeds the
   prompt textarea only when it still equals the last value we wrote (`lastSeededRef`).
-- **Don't re-seed editors on every poll.** `publish` polls Buffer every ~25 s and patches `posts`;
-  it guards the caption editor and `<video>` with `syncedPostIdRef`/`previewKeyRef` so a replaced
-  post object (same `post_id`) doesn't reset them.
+- **Don't re-seed editors on every poll.** The Home feed polls Buffer every ~25 s and patches
+  `posts`; it guards the caption editor and `<video>` with `syncedPostIdRef`/`previewKeyRef` so a
+  replaced post object (same `post_id`) doesn't reset them.
 
 ## Page → resource map
 
 | Page | Resources |
 |------|-----------|
-| `/assets` | `useAssets({ includeArchived: true })` |
+| `/dashboard` (Home) | `useAutopilot`, `usePublishingPosts({ status: "all" })`, `useEditJobs`, `useAssets({ includeArchived: true })` (videos/songs filtered client-side — shares the library cache) |
+| `/assets` (Library) | `useAssets({ includeArchived: true })`, `useAssets({ kind: "render_output" })` (Reels tab), `usePublishingPosts({ status: "all" })` |
 | `/new-edit` | `useAssets({ includeArchived: true })`, `useEditJobs` |
-| `/autopilot` | `useAutopilot`, `useAssets({ includeArchived: true })` (videos/songs filtered client-side — shares the library cache) |
-| `/renders` | `useAssets({ kind: "render_output" })`, `useRuns({ workflowType: "render" })` |
-| `/publish` | `usePublishingPosts({ status: "all" })`, `usePublishingConfig` |
 | `/synthesis` | `useSynthesisReferences`, `useSynthesisPrompt` |
 | `/settings` | not migrated — still uses `useAbortableLoad` directly |
+| `/autopilot`, `/publish`, `/renders` | redirect stubs — no resources of their own |
 
 ## Deferred
 

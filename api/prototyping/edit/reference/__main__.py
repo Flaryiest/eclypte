@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(
         prog="python -m api.prototyping.edit.reference",
-        description="Reference-AMV ingestion + consolidation (Phase 2).",
+        description="Reference-AMV ingestion (download, analyze, store).",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 

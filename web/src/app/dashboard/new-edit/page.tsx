@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Download, Eye, Play, RefreshCw, RotateCcw, Trash2, WandSparkles, XCircle } from "lucide-react"
-import { DashboardPage, Pager, Select, SkeletonList, StatusBadge, errorMessage, formatBytes, formatDate, humanizeStageDetail, isAbortError, kindLabel, statusLabel, usePagination, versionRef } from "../dashboardCommon"
+import { DashboardPage, Pager, Select, SignInRequired, SkeletonList, StatusBadge, errorMessage, formatBytes, formatClock, formatDate, humanizeStageDetail, isAbortError, kindLabel, statusLabel, usePagination, versionRef } from "../dashboardCommon"
 import styles from "../studio.module.css"
 import { downloadSignedUrl, safeDownloadFilename } from "@/services/downloadFile"
 import {
@@ -339,11 +339,7 @@ export default function NewEditPage() {
         return <DashboardPage eyebrow="Compose" title="Preparing studio"><div /></DashboardPage>
     }
     if (!isSignedIn || !user) {
-        return (
-            <DashboardPage eyebrow="Compose" title="Sign in required">
-                <div className={styles.emptyState}>Sign in from the homepage to create an AMV.</div>
-            </DashboardPage>
-        )
+        return <SignInRequired eyebrow="Compose" message="Sign in from the homepage to create an AMV." />
     }
 
     return (
@@ -454,7 +450,7 @@ export default function NewEditPage() {
                             <div className={styles.trimSummary}>
                                 {songDurationSec === null
                                     ? mediaStatus || "Choose a song to set timing"
-                                    : `${formatTime(audioStartSec)} - ${formatTime(audioEndSec)} (${formatSeconds(selectedDurationSec || 0)})`}
+                                    : `${formatClock(audioStartSec)} - ${formatClock(audioEndSec)} (${formatSeconds(selectedDurationSec || 0)})`}
                             </div>
                             <div className={styles.rangeGrid}>
                                 <label className={styles.rangeLabel}>
@@ -805,13 +801,6 @@ function clampTime(value: number, min: number, max: number) {
 
 function roundTime(value: number) {
     return Math.round(value * 10) / 10
-}
-
-function formatTime(value: number) {
-    const safe = Math.max(0, Math.floor(value))
-    const minutes = Math.floor(safe / 60)
-    const seconds = safe % 60
-    return `${minutes}:${seconds.toString().padStart(2, "0")}`
 }
 
 function formatSeconds(value: number) {

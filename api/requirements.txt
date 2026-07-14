@@ -5,7 +5,6 @@
 modal
 fastapi
 uvicorn
-pytubefix
 yt-dlp
 pydub
 syncedlyrics

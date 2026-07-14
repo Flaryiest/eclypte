@@ -388,7 +388,7 @@ def run_synthesis_loop(
     else:
         user_content = instructions
 
-    print(f"Agent thinking (loop 1)...")
+    print("Agent thinking (loop 1)...")
     response = _create(client, input_=user_content, system_prompt=active_system_prompt)
 
     for loop_i in range(MAX_LOOPS):

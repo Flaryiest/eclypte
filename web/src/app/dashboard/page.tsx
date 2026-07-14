@@ -13,6 +13,7 @@ import {
     ReviewCardsSkeleton,
     Select,
     Sheet,
+    SignInRequired,
     Skeleton,
     SkeletonList,
     Spinner,
@@ -206,16 +207,13 @@ export default function HomePage() {
         )
     }
     if (!isSignedIn || !user) {
-        return (
-            <DashboardPage eyebrow="Home" title="Sign in required">
-                <div className={styles.emptyState}>Sign in from the homepage to see your reels.</div>
-            </DashboardPage>
-        )
+        return <SignInRequired eyebrow="Home" message="Sign in from the homepage to see your reels." />
     }
 
     const reviewPost = reviewPostId ? posts.find((post) => post.post_id === reviewPostId) ?? null : null
     const madeToday = autopilot?.packaged_today ?? 0
     const target = autopilot?.daily_target ?? 3
+    const banner = error || autopilotResource.error || postsResource.error || jobsResource.error || assetsResource.error
 
     return (
         <DashboardPage
@@ -282,11 +280,7 @@ export default function HomePage() {
                     </button>
                 </div>
             )}
-            {(error || autopilotResource.error || postsResource.error || jobsResource.error || assetsResource.error) && (
-                <div className={styles.errorBanner}>
-                    {error || autopilotResource.error || postsResource.error || jobsResource.error || assetsResource.error}
-                </div>
-            )}
+            {banner && <div className={styles.errorBanner}>{banner}</div>}
 
             {/* Ready for you */}
             <section className={styles.feedSection}>
@@ -460,7 +454,6 @@ function isPipelineRunUpdate(message: RunStreamMessage) {
     return (
         message.type === "run_manifest"
         && (message.run.workflow_type === "edit_pipeline"
-            || message.run.workflow_type === "youtube_song_import"
             || message.run.workflow_type === "music_analysis")
     )
 }
@@ -486,7 +479,7 @@ function itemTitle(item: AutopilotItem, assetById: Map<string, AssetSummary>) {
     const video = assetById.get(item.source_video_file_id)?.display_name ?? "Video"
     const song = item.song_file_id
         ? assetById.get(item.song_file_id)?.display_name ?? "Song"
-        : item.song_youtube_url ?? "Song"
+        : "Song"
     return `${stripExtension(video)} × ${stripExtension(song)}`
 }
 
@@ -796,9 +789,7 @@ function ComposerSheet({
     onQueued: (next: Awaited<ReturnType<EclypteApiClient["addAutopilotItems"]>>) => void
 }) {
     const [videoId, setVideoId] = useState("")
-    const [songMode, setSongMode] = useState<"asset" | "youtube">("asset")
     const [songId, setSongId] = useState("")
-    const [youtubeUrl, setYoutubeUrl] = useState("")
     const [brief, setBrief] = useState("")
     const [formError, setFormError] = useState<string | null>(null)
     const [isAdding, setIsAdding] = useState(false)
@@ -831,13 +822,9 @@ function ComposerSheet({
             setFormError("Pick a film first.")
             return
         }
-        const song = songMode === "asset" ? songs.find((asset) => asset.file_id === songId) : null
-        if (songMode === "asset" && !song?.current_version_id) {
-            setFormError("Pick a song, or switch to a YouTube link.")
-            return
-        }
-        if (songMode === "youtube" && !youtubeUrl.trim()) {
-            setFormError("Paste a YouTube link, or pick a saved song.")
+        const song = songs.find((asset) => asset.file_id === songId)
+        if (!song?.current_version_id) {
+            setFormError("Pick a song first.")
             return
         }
         setIsAdding(true)
@@ -846,12 +833,10 @@ function ComposerSheet({
             const next = await api.addAutopilotItems([
                 {
                     source_video: { file_id: video.file_id, version_id: video.current_version_id },
-                    song: song?.current_version_id ? { file_id: song.file_id, version_id: song.current_version_id } : null,
-                    song_youtube_url: songMode === "youtube" ? youtubeUrl.trim() : null,
+                    song: { file_id: song.file_id, version_id: song.current_version_id },
                     creative_brief: brief.trim(),
                 },
             ])
-            setYoutubeUrl("")
             setBrief("")
             onQueued(next)
         } catch (caught) {
@@ -874,7 +859,7 @@ function ComposerSheet({
             }
         >
             {/* display:contents keeps the sheet-body flex layout; Enter in the
-                YouTube/brief fields submits like the footer button. */}
+                brief field submits like the footer button. */}
             <form
                 id="composer-form"
                 style={{ display: "contents" }}
@@ -919,32 +904,13 @@ function ComposerSheet({
             <div className={styles.fieldLabel}>
                 Song
                 <Select
-                    ariaLabel="Song source"
-                    value={songMode}
-                    onChange={(next) => setSongMode(next as "asset" | "youtube")}
-                    options={[
-                        { value: "asset", label: "Use a saved song" },
-                        { value: "youtube", label: "Import from YouTube" },
-                    ]}
+                    ariaLabel="Song"
+                    value={songId}
+                    onChange={setSongId}
+                    placeholder="Pick a song…"
+                    options={songs.map((asset) => ({ value: asset.file_id, label: stripExtension(asset.display_name) }))}
                 />
             </div>
-            {songMode === "asset" ? (
-                <div className={styles.fieldLabel}>
-                    Saved song
-                    <Select
-                        ariaLabel="Saved song"
-                        value={songId}
-                        onChange={setSongId}
-                        placeholder="Pick a song…"
-                        options={songs.map((asset) => ({ value: asset.file_id, label: stripExtension(asset.display_name) }))}
-                    />
-                </div>
-            ) : (
-                <label className={styles.fieldLabel}>
-                    YouTube link
-                    <input className={styles.input} placeholder="https://youtu.be/…" value={youtubeUrl} onChange={(event) => setYoutubeUrl(event.target.value)} />
-                </label>
-            )}
             <label className={styles.fieldLabel}>
                 Creative note (optional)
                 <textarea className={`${styles.textarea} ${styles.compactTextarea}`} placeholder="Open on the most impactful shot, lean into the chorus…" value={brief} onChange={(event) => setBrief(event.target.value)} />
