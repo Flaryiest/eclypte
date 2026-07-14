@@ -42,6 +42,8 @@ def adapt(
     audio_start_sec: float = 0.0,
     overlays: list[dict] | None = None,
     grade: str | None = None,
+    lyrics_plan: dict | None = None,
+    lyrics_timing: dict | None = None,
     content_end_sec: float | None = None,
     style_profile: dict | None = None,
     report_sink: dict | None = None,
@@ -222,8 +224,15 @@ def adapt(
             print(f"adapter: auto-placed {len(accents)} impact.shake accent(s)")
             raw_overlays += accents
 
-    resolved_overlays = _resolve_grade(grade, round(last_end, 3)) + _resolve_overlays(
-        raw_overlays, round(last_end, 3)
+    lyrics_overlays, lyrics_report = _resolve_lyrics(
+        lyrics_plan, lyrics_timing, round(last_end, 3)
+    )
+    # Order: grade first (text draws over graded footage), then the full-reel
+    # lyric track, then the agent's windowed overlays/moment accents on top.
+    resolved_overlays = (
+        _resolve_grade(grade, round(last_end, 3))
+        + lyrics_overlays
+        + _resolve_overlays(raw_overlays, round(last_end, 3))
     )
 
     fade = tail_fade_for(round(last_end, 3))
@@ -250,6 +259,8 @@ def adapt(
         report_sink["sync"] = sync_report(shots, song, video)
         report_sink["impact_registrations"] = impact_registrations
         report_sink["pacing_splits"] = split_records
+        if lyrics_report is not None:
+            report_sink["lyrics"] = lyrics_report
 
     return timeline
 
@@ -265,6 +276,109 @@ def _has_moment_overlay(raw_overlays: list[dict]) -> bool:
         and skills.get(str(raw["skill_id"])).kind == "moment"
         for raw in raw_overlays
     )
+
+
+def _resolve_lyrics(
+    lyrics_plan: dict | None,
+    lyrics_timing: dict | None,
+    duration_sec: float,
+) -> tuple[list[Overlay], dict | None]:
+    """Turn the agent's lyrics choice + the windowed word-timing payload into
+    one full-reel `lyrics.kinetic` overlay (or none).
+
+    The payload's words ("word" key) become skill words ("text" key), clamped
+    to the reel; lines left with nothing inside the reel are dropped. Like
+    grades/overlays, any invalid plan is dropped with a log — lyrics are
+    decorative, never worth failing the edit. The tool schema is non-strict,
+    so the WHOLE resolution is guarded: any shape of agent garbage drops.
+    Returns (overlays, telemetry).
+    """
+    try:
+        return _resolve_lyrics_unguarded(lyrics_plan, lyrics_timing, duration_sec)
+    except Exception as exc:  # noqa: BLE001 - drop-with-log, never fail the edit
+        print(f"adapter: dropped kinetic lyrics with malformed plan: {exc}")
+        return [], None
+
+
+def _resolve_lyrics_unguarded(
+    lyrics_plan: dict | None,
+    lyrics_timing: dict | None,
+    duration_sec: float,
+) -> tuple[list[Overlay], dict | None]:
+    if not lyrics_plan or not isinstance(lyrics_plan, dict):
+        return [], None
+    if not lyrics_plan.get("enabled") or not lyrics_timing:
+        return [], None
+    from ..skills.lyrics_kinetic import KineticLyricsParams
+
+    lines: list[dict] = []
+    word_count = 0
+    for line in lyrics_timing.get("lines") or []:
+        words = []
+        for word in line.get("words") or []:
+            start = float(word.get("start_sec", 0.0))
+            end = min(float(word.get("end_sec", 0.0)), duration_sec)
+            text = str(word.get("word") or "").strip()
+            if not text or start >= duration_sec or end <= start:
+                continue
+            words.append(
+                {
+                    "text": text,
+                    "start_sec": round(start, 3),
+                    "end_sec": round(end, 3),
+                    "confidence": float(word.get("confidence", 1.0)),
+                }
+            )
+        if not words:
+            continue
+        word_count += len(words)
+        lines.append(
+            {
+                "text": str(line.get("text") or ""),
+                "start_sec": round(max(0.0, float(line.get("start_sec", 0.0))), 3),
+                "end_sec": round(min(float(line.get("end_sec", 0.0)), duration_sec), 3),
+                "words": words,
+            }
+        )
+
+    section_styles = [
+        {
+            "start_sec": round(max(0.0, float(raw["start_time"])), 3),
+            "end_sec": round(min(float(raw["end_time"]), duration_sec), 3),
+            "style": str(raw["style"]),
+        }
+        for raw in lyrics_plan.get("section_styles") or []
+        if raw.get("start_time") is not None and raw.get("end_time") is not None
+    ]
+
+    candidate = {
+        "font_id": str(lyrics_plan.get("font") or ""),
+        "style": str(lyrics_plan.get("style") or "sweep"),
+        "section_styles": section_styles,
+        "accent_color": lyrics_plan.get("accent_color"),
+        "mode": str(lyrics_timing.get("mode") or "aligned"),
+        "lines": lines,
+    }
+    try:
+        params = KineticLyricsParams(**candidate).model_dump()
+    except Exception as exc:  # invalid plan/payload — decorative, drop it
+        print(f"adapter: dropped kinetic lyrics with invalid plan: {exc}")
+        return [], None
+
+    report = {
+        "enabled": True,
+        "font": params["font_id"],
+        "style": params["style"],
+        "word_count": word_count,
+    }
+    return [
+        Overlay(
+            skill_id="lyrics.kinetic",
+            timeline_start_sec=0.0,
+            timeline_end_sec=duration_sec,
+            params=params,
+        )
+    ], report
 
 
 def _resolve_grade(grade_id: str | None, duration_sec: float) -> list[Overlay]:

@@ -1096,6 +1096,8 @@ class DefaultWorkflowRunner:
             audio_start_sec=export_options.audio_start_sec,
             overlays=agent_output["overlays"],
             grade=agent_output.get("grade"),
+            lyrics_plan=agent_output.get("lyrics"),
+            lyrics_timing=lyrics,
             content_end_sec=content_end_sec,
             style_profile=style_profile or None,
             report_sink=rhythm_report,

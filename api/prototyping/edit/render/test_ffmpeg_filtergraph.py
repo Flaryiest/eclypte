@@ -306,3 +306,45 @@ def test_audio_gain_and_fade_chain_into_single_aout():
     assert "volume=-3.0dB,afade=t=out:st=7.500:d=2.5[aout]" in fc
     # exactly one [aout] label produced
     assert fc.count("[aout]") == 1
+
+
+def _lyrics_overlay(end=6.0):
+    return Overlay(
+        skill_id="lyrics.kinetic",
+        timeline_start_sec=0.0,
+        timeline_end_sec=end,
+        params={
+            "font_id": "bebas_neue",
+            "style": "sweep",
+            "lines": [
+                {
+                    "text": "hold me",
+                    "start_sec": 0.0,
+                    "end_sec": 1.0,
+                    "words": [
+                        {"text": "hold", "start_sec": 0.0, "end_sec": 0.5},
+                        {"text": "me", "start_sec": 0.5, "end_sec": 1.0},
+                    ],
+                }
+            ],
+        },
+    )
+
+
+def test_lyrics_overlay_stays_on_native_path():
+    tl = _timeline([(80.0, 2.0, 1.0, "cut"), (200.0, 4.0, 1.0, "cut")])
+    tl.overlays.append(_lyrics_overlay())
+    assert can_render_with_ffmpeg(tl) is True
+
+
+def test_lyrics_overlay_emits_ass_fragment_from_asset_dir():
+    tl = _timeline([(80.0, 2.0, 1.0, "cut"), (200.0, 4.0, 1.0, "cut")], video_fade=2.0)
+    tl.overlays.append(_lyrics_overlay())
+    argv = build_command(
+        tl, source="/s.mp4", audio="/a.wav", out_path="/o.mp4",
+        asset_dir="/scratch", fonts_dir="/fonts/kinetic",
+    )
+    fc = _filter_complex(argv)
+    assert "ass=filename=/scratch/lyrics_kinetic.ass:fontsdir=/fonts/kinetic[ov0]" in fc
+    # lyrics fade to black with the picture, same as every overlay
+    assert "[ov0]fade=t=out" in fc

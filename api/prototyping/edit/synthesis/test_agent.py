@@ -395,3 +395,85 @@ def test_overlay_skill_catalog_injected_into_user_prompt():
         first_input = mock_client.responses.create.call_args_list[0].kwargs["input"]
         assert "text.hook" in first_input
         assert "mask.vignette" in first_input
+
+
+# --- kinetic lyrics plan ------------------------------------------------------
+
+
+def test_finish_edit_returns_lyrics_plan():
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        finish = _fake_response(
+            [_function_call(
+                "finish_edit",
+                '{"timeline": [{"start_time": 0, "end_time": 2, "source_timestamp": 5.0}], '
+                '"lyrics": {"enabled": true, "font": "bebas_neue", "style": "sweep"}}',
+                "call_1",
+            )],
+        )
+        mock_client.responses.create = MagicMock(side_effect=[finish])
+        result = run_synthesis_loop("dummy.mp4", "make it")
+        assert result["lyrics"] == {"enabled": True, "font": "bebas_neue", "style": "sweep"}
+
+
+def test_finish_edit_lyrics_absent_is_none():
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        finish = _fake_response(
+            [_function_call(
+                "finish_edit",
+                '{"timeline": [{"start_time": 0, "end_time": 2, "source_timestamp": 5.0}]}',
+                "call_1",
+            )],
+        )
+        mock_client.responses.create = MagicMock(side_effect=[finish])
+        result = run_synthesis_loop("dummy.mp4", "make it")
+        assert result["lyrics"] is None
+
+
+def test_lyrics_field_exposed_in_finish_edit_tool():
+    from api.prototyping.edit.synthesis.agent import TOOLS
+    from api.prototyping.edit.skills.lyrics_fonts import font_ids
+
+    finish = next(t for t in TOOLS if t["name"] == "finish_edit")
+    lyrics_prop = finish["parameters"]["properties"]["lyrics"]
+    assert set(lyrics_prop["properties"]["font"]["enum"]) == font_ids()
+    assert lyrics_prop["properties"]["style"]["enum"] == ["sweep", "pop", "build"]
+    assert set(lyrics_prop["required"]) == {"enabled", "font", "style"}
+    section_items = lyrics_prop["properties"]["section_styles"]["items"]
+    assert set(section_items["required"]) == {"start_time", "end_time", "style"}
+
+
+def test_overlays_enum_excludes_lyrics_and_grade_kinds():
+    from api.prototyping.edit.synthesis.agent import TOOLS
+
+    finish = next(t for t in TOOLS if t["name"] == "finish_edit")
+    enum = finish["parameters"]["properties"]["overlays"]["items"]["properties"]["skill_id"]["enum"]
+    assert "lyrics.kinetic" not in enum
+    assert "grade.cinematic" not in enum
+    assert "text.hook" in enum
+
+
+def test_lyrics_rendering_options_injected_with_font_menu():
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
+        first_input = _run_with_lyrics(mock_openai, _lyrics_timing())
+    assert "bebas_neue" in first_input          # font menu reaches the model
+    assert "cinematic poster energy" in first_input
+    assert "`lyrics`" in first_input
+    # default-ON guidance
+    assert "default" in first_input.lower()
+
+
+def test_lyrics_rendering_options_carry_transcribed_caution():
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
+        first_input = _run_with_lyrics(mock_openai, _lyrics_timing(mode="transcribed"))
+    assert "reads clean" in first_input
+
+
+def test_overlay_catalog_excludes_lyrics_kind():
+    from api.prototyping.edit.synthesis.agent import _format_overlay_skills
+
+    catalog = _format_overlay_skills()
+    assert "lyrics.kinetic" not in catalog

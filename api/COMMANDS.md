@@ -194,7 +194,19 @@ update deployed apps. Redeploy `eclypte-render-r2` whenever `edit/render/**`,
 `edit/skills/**`, `edit/synthesis/timeline_schema.py`, or
 `edit/synthesis/validators.py` change (encode settings, effects/transitions,
 overlay skills, schema values), or live renders keep the old behavior — an
-older render image silently drops overlays whose skills it lacks. Redeploy
+older render image silently drops overlays whose skills it lacks, and an
+older image REJECTS timelines carrying `lyrics.kinetic` (unknown skill_id →
+visible render failure), so redeploy BEFORE shipping control-plane changes
+that emit kinetic lyrics. The render image also downloads the kinetic-lyrics
+font catalog (from `edit/skills/lyrics_fonts.py`, SHA-pinned google/fonts
+URLs) into `/fonts/kinetic` and asserts its ffmpeg links libass at build time.
+
+Local kinetic-lyrics rendering needs the same fonts once (gitignored
+`api/prototyping/edit/content/fonts/`):
+
+```powershell
+python -m api.prototyping.edit.skills.fetch_fonts
+``` Redeploy
 `eclypte-video-r2` (`modal deploy video/storage_modal.py`, `PYTHONUTF8=1` on
 Windows per above) whenever `video/analysis_cuda.py`, `video/credits.py`, or
 `video/poster.py` change (its image bundles `tesseract-ocr` + `pytesseract`

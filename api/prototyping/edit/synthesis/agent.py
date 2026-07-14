@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from api.prototyping.edit import skills
+from api.prototyping.edit.skills.lyrics_fonts import agent_font_menu, font_ids
 from api.prototyping.edit.synthesis.rhythm import pacing_bands_for
 from api.prototyping.edit.synthesis.system_prompt import SYSTEM_PROMPT
 
@@ -97,7 +98,7 @@ TOOLS = [
                                 "type": "string",
                                 "enum": sorted(
                                     sid for sid in skills.ids()
-                                    if skills.get(sid).kind != "grade"
+                                    if skills.get(sid).kind not in ("grade", "lyrics")
                                 ),
                                 "description": "Which windowed skill to apply.",
                             },
@@ -120,6 +121,58 @@ TOOLS = [
                         "Optional whole-reel color grade. Pick the one matching the "
                         "footage's mood, or omit for an ungraded look."
                     ),
+                },
+                "lyrics": {
+                    "type": "object",
+                    "description": (
+                        "Word-synced kinetic lyrics burned over the whole reel. Include "
+                        "this whenever a word-timed lyrics block was provided (default ON "
+                        "for songs with usable lyrics); omit entirely for instrumentals, "
+                        "when no lyrics timing was given, or when the brief demands a "
+                        "text-free look."
+                    ),
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                        "font": {
+                            "type": "string",
+                            "enum": sorted(font_ids()),
+                            "description": "Typeface for the lyric text — pick by the song's character (see the font menu in the lyrics context).",
+                        },
+                        "style": {
+                            "type": "string",
+                            "enum": ["sweep", "pop", "build"],
+                            "description": (
+                                "sweep = the full line on screen, color filling word-by-word "
+                                "with the vocal; pop = one big word at a time on its exact "
+                                "timestamp; build = words accumulate into the line."
+                            ),
+                        },
+                        "section_styles": {
+                            "type": "array",
+                            "description": (
+                                "Optional per-section style switching keyed to the song "
+                                "sections (e.g. sweep verses, pop choruses); omit for one "
+                                "uniform style."
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "start_time": {"type": "number"},
+                                    "end_time": {"type": "number"},
+                                    "style": {"type": "string", "enum": ["sweep", "pop", "build"]},
+                                },
+                                "required": ["start_time", "end_time", "style"],
+                            },
+                        },
+                        "accent_color": {
+                            "type": "string",
+                            "description": (
+                                "Optional #RRGGBB accent; omit to let the renderer adapt "
+                                "the accent to the footage's palette (recommended)."
+                            ),
+                        },
+                    },
+                    "required": ["enabled", "font", "style"],
                 },
             },
             "required": ["timeline"],
@@ -247,7 +300,41 @@ def _format_lyrics_context(lyrics: dict) -> str | None:
         "mid-line.\n"
         "Word timings are precise; line boundaries are natural cut points."
     )
+    out.append(_format_lyrics_rendering_options(lyrics))
     return "\n".join(out)
+
+
+def _format_lyrics_rendering_options(lyrics: dict) -> str:
+    """The kinetic-lyrics rendering offer: fonts, styles, and the default-ON
+    guidance for finish_edit's `lyrics` field. Lives in per-run user content
+    (like the pacing block) so it applies under any active prompt version."""
+    parts = [
+        "On-screen kinetic lyrics (finish_edit `lyrics` field):",
+        "You can burn word-synced lyrics over the whole reel — they appear and "
+        "color-fill exactly on the word timings above and stay quiet through "
+        "instrumental stretches. With word-timed lyrics available, ENABLE THIS BY "
+        "DEFAULT: pass lyrics={enabled: true, font, style} unless the brief asks "
+        "for a clean/text-free look.",
+        "Fonts — pick the ONE whose character matches the song:",
+        agent_font_menu(),
+        "Styles: `sweep` shows each full line with color filling word-by-word as "
+        "the vocal passes (melodic/calm sections); `pop` slams one big word at a "
+        "time on its exact timestamp (fast/aggressive sections); `build` "
+        "accumulates the line word by word (spoken/storytelling feel). Either "
+        "keep one style for the whole reel or pass section_styles windows "
+        "matched to the song structure (e.g. sweep verses, pop choruses) — "
+        "choose based on the song, not by default.",
+        "Placement and colors adapt to the footage automatically; only set "
+        "accent_color (#RRGGBB) if the brief demands a specific palette.",
+    ]
+    if lyrics.get("mode") == "transcribed":
+        parts.append(
+            "CAUTION: these words come from speech recognition and will render "
+            "on screen exactly as written — only enable kinetic lyrics if the "
+            "transcript above reads clean; misheard words burned into the reel "
+            "are worse than no text."
+        )
+    return "\n".join(parts)
 
 
 SHORT_EDIT_MAX_SEC = 40.0
@@ -264,7 +351,9 @@ def _format_short_edit_context(song_duration_sec: float) -> str:
 
 def _format_overlay_skills() -> str:
     catalog = skills.agent_catalog()
-    windowed = [e for e in catalog if e["kind"] != "grade"]
+    # lyrics-kind skills ride finish_edit's dedicated `lyrics` field (offered
+    # in the lyrics context block), not the overlays list.
+    windowed = [e for e in catalog if e["kind"] not in ("grade", "lyrics")]
     grades = [e for e in catalog if e["kind"] == "grade"]
     lines = [
         "Available creative skills.",
@@ -360,6 +449,8 @@ def run_synthesis_loop(
       {
         "shots": [{"start_time": float, "end_time": float, "source_timestamp": float}, ...],
         "overlays": [{"skill_id": str, "text"?: str, "start_time": float, "end_time": float}, ...],
+        "grade": str | None,
+        "lyrics": {"enabled": bool, "font": str, "style": str, ...} | None,
       }
     """
     load_dotenv(_ENV_PATH)
@@ -435,6 +526,7 @@ def run_synthesis_loop(
                     "shots": args["timeline"],
                     "overlays": args.get("overlays") or [],
                     "grade": args.get("grade"),
+                    "lyrics": args.get("lyrics"),
                 }
 
         next_input: list[dict] = list(tool_outputs)

@@ -23,6 +23,7 @@ from .. import skills
 from ..skills.base import RenderContext, ResolvedOverlay
 from ..synthesis.timeline_schema import OutputSpec, Shot, Timeline
 from ..synthesis.validators import validate_timeline
+from . import footage_stats
 from .effects import apply_effects, apply_speed_ramp, has_speed_ramp
 from .fades import audio_fade_out, video_fade_out
 from .ffmpeg_filtergraph import can_render_with_ffmpeg
@@ -54,6 +55,27 @@ def _resolve_font_path() -> str:
     raise FileNotFoundError(
         "no overlay font available; set ECLYPTE_OVERLAY_FONT or bundle /fonts/overlay.otf"
     )
+
+
+def _resolve_lyrics_fonts_dir() -> str | None:
+    from ..skills.lyrics_fonts import resolve_fonts_dir
+
+    fonts_dir = resolve_fonts_dir()
+    if fonts_dir is None:
+        print("[renderer] kinetic fonts dir not found; libass will fall back to system fonts")
+    return fonts_dir
+
+
+def _sample_shot_stats_safe(timeline: Timeline, target_size: tuple[int, int]):
+    """Footage sampling for lyric layout — a hint, never a render failure."""
+    try:
+        started = time.perf_counter()
+        stats = footage_stats.sample_shot_stats(timeline, target_size)
+        _log_timing("sample shot stats", started)
+        return stats
+    except Exception as exc:  # noqa: BLE001 - degrade to default layout
+        print(f"[renderer] shot-stats sampling failed (using default layout): {exc}")
+        return None
 
 
 def _apply_overlays(base, timeline: Timeline, target_size: tuple[int, int]):
@@ -108,11 +130,16 @@ def render_timeline(
     # skill with an ffmpeg port; anything else falls through to MoviePy below.
     if can_render_with_ffmpeg(timeline):
         font_path = None
+        fonts_dir = None
+        shot_stats = None
         if timeline.overlays:
             try:
                 font_path = _resolve_font_path()
             except FileNotFoundError:
                 font_path = None  # drawtext raises a clear error only if needed
+            fonts_dir = _resolve_lyrics_fonts_dir()
+            if footage_stats.wants_shot_stats(timeline.overlays):
+                shot_stats = _sample_shot_stats_safe(timeline, target_size)
         render_with_ffmpeg(
             timeline,
             source=timeline.source.video,
@@ -125,6 +152,8 @@ def render_timeline(
             progress_callback=progress_callback,
             poster_path=poster_path,
             font_path=font_path,
+            fonts_dir=fonts_dir,
+            shot_stats=shot_stats,
         )
         _log_timing("total render_timeline (ffmpeg)", total_started)
         return out_path

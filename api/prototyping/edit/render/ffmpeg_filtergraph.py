@@ -227,6 +227,9 @@ def build_command(
     size: tuple[int, int] | None = None,
     fps: int | None = None,
     font_path: str | None = None,
+    asset_dir: str = "",
+    fonts_dir: str = "",
+    shot_stats=None,
 ) -> list[str]:
     w, h = size or (timeline.output.width, timeline.output.height)
     out_fps = fps or timeline.output.fps
@@ -262,7 +265,11 @@ def build_command(
     if timeline.overlays:
         from .. import skills  # registry (moviepy-free metadata)
 
-        ctx = RenderContext(output_size=(w, h), fps=out_fps, font_path=font_path or "")
+        ctx = RenderContext(
+            output_size=(w, h), fps=out_fps, font_path=font_path or "",
+            asset_dir=asset_dir, fonts_dir=fonts_dir,
+            shot_stats=tuple(shot_stats) if shot_stats else None,
+        )
         for k, ov in enumerate(timeline.overlays):
             resolved = ResolvedOverlay(
                 skill_id=ov.skill_id,

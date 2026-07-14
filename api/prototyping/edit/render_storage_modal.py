@@ -5,6 +5,11 @@ import tempfile
 
 import modal
 
+# Deploy-time import (runs locally at `modal deploy`): the kinetic-lyrics font
+# catalog pins every download URL to one google/fonts commit, so the image
+# build is reproducible and stays in lockstep with the catalog module.
+from edit.skills.lyrics_fonts import FONT_CATALOG, MODAL_FONTS_DIR
+
 RENDER_PROFILES = {
     "standard": {"cpu": 16, "memory": 16384, "threads": 16},
 }
@@ -13,8 +18,19 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     # fonts-dejavu-core gives moviepy TextClip a guaranteed font for text overlays
     # (renderer._resolve_font_path finds /usr/share/fonts/truetype/dejavu/...).
-    .apt_install("ffmpeg", "fonts-dejavu-core")
+    .apt_install("ffmpeg", "fonts-dejavu-core", "wget")
     .pip_install("moviepy>=2", "pydantic>=2", "numpy", "imageio-ffmpeg", "boto3")
+    .run_commands(
+        # Kinetic-lyrics font catalog (renderer resolves MODAL_FONTS_DIR for the
+        # ass filter's fontsdir) + a build-time assert that this ffmpeg links
+        # libass — fail the image build, not a live render.
+        f"mkdir -p {MODAL_FONTS_DIR}",
+        *[
+            f'wget -q -O {MODAL_FONTS_DIR}/{spec.filename} "{spec.url}"'
+            for spec in FONT_CATALOG.values()
+        ],
+        "ffmpeg -hide_banner -filters | grep -qw ass",
+    )
     .add_local_python_source("edit", "modal_s3", "progress_events")
 )
 

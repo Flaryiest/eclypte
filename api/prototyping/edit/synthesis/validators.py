@@ -60,9 +60,16 @@ def validate_timeline(
         from .. import skills  # registry of overlay skills (moviepy-free metadata)
 
         known_skill_ids = skills.ids()
+        seen_counts: dict[str, int] = {}
         for i, ov in enumerate(timeline.overlays):
             if ov.skill_id not in known_skill_ids:
                 errors.append(f"overlay[{i}] references unknown skill_id {ov.skill_id!r}")
+            else:
+                seen_counts[ov.skill_id] = seen_counts.get(ov.skill_id, 0) + 1
+                if seen_counts[ov.skill_id] == 2 and skills.get(ov.skill_id).singleton:
+                    errors.append(
+                        f"overlay[{i}] duplicates singleton skill {ov.skill_id!r}"
+                    )
             if ov.timeline_start_sec < -GAP_TOLERANCE_SEC:
                 errors.append(f"overlay[{i}] start {ov.timeline_start_sec} is negative")
             if ov.timeline_end_sec <= ov.timeline_start_sec:

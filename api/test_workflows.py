@@ -1614,3 +1614,92 @@ def test_agent_timeline_passes_trimmed_lyrics_to_synthesis(monkeypatch):
     assert lyrics["source"]["trim_start_sec"] == 0.5
     assert lyrics["lines"][0]["start_sec"] == 0.5
     assert lyrics["lines"][0]["words"][0]["word"] == "Hello"
+
+
+def test_agent_timeline_embeds_kinetic_lyrics_overlay(monkeypatch):
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    audio, source_video, music_analysis, video_analysis = _publish_timeline_inputs(repo)
+    _publish_artifact(
+        repo,
+        file_id="file_clip_index",
+        kind="clip_index",
+        filename="source.npz",
+        body=b"npz",
+        content_type="application/x-numpy-data",
+        input_file_version_ids=[source_video["version_id"]],
+        created_by_step=CLIP_INDEX_BUILD_STEP,
+    )
+    timing_artifact = _publish_artifact(
+        repo,
+        file_id="file_lyrics_timing",
+        kind="lyrics_timing",
+        filename="song.lyrics_timing.json",
+        body=json.dumps(_lyrics_timing_payload()).encode("utf-8"),
+        content_type="application/json",
+    )
+    timing_run = repo.create_run(
+        user_id="user_123",
+        workflow_type="lyrics_timing",
+        inputs={"audio_version_id": audio["version_id"]},
+        steps=["align_lyrics"],
+    )
+    repo.update_run_status(
+        RunRef(user_id="user_123", run_id=timing_run.run_id),
+        status="completed",
+        outputs={
+            "lyrics_timing_file_id": timing_artifact["file_id"],
+            "lyrics_timing_version_id": timing_artifact["version_id"],
+        },
+    )
+    run = _create_timeline_agent_run(repo)
+    runner = DefaultWorkflowRunner()
+    monkeypatch.setattr(runner, "_repository", lambda: repo)
+    monkeypatch.setattr(runner, "_r2_config_payload", lambda: {"bucket": "test"})
+    monkeypatch.setattr(
+        "api.workflows._build_clip_index_r2",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("clip index should be reused")),
+    )
+
+    captured = {}
+
+    def fake_synthesis(**kwargs):
+        captured.update(kwargs)
+        return {
+            "shots": [{"start_time": 0.0, "end_time": 4.0, "source_timestamp": 2.0}],
+            "overlays": [],
+            "grade": None,
+            "lyrics": {"enabled": True, "font": "anton", "style": "sweep"},
+        }
+
+    monkeypatch.setattr("api.workflows._run_agent_synthesis", fake_synthesis)
+
+    runner.run_timeline_plan(
+        user_id="user_123",
+        run_id=run.run_id,
+        audio=audio,
+        source_video=source_video,
+        music_analysis=music_analysis,
+        video_analysis=video_analysis,
+    )
+
+    completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=run.run_id))
+    assert completed.status == "completed"
+    # the agent saw the windowed lyrics payload
+    assert captured["lyrics"]["lines"][0]["words"][0]["word"] == "Hello"
+
+    timeline = json.loads(
+        repo.read_version_bytes(
+            FileVersionRef(
+                user_id="user_123",
+                file_id=completed.outputs["timeline_file_id"],
+                version_id=completed.outputs["timeline_version_id"],
+            )
+        )
+    )
+    lyric_overlays = [o for o in timeline["overlays"] if o["skill_id"] == "lyrics.kinetic"]
+    assert len(lyric_overlays) == 1
+    params = lyric_overlays[0]["params"]
+    assert params["font_id"] == "anton"
+    assert params["mode"] == "aligned"
+    assert [w["text"] for w in params["lines"][0]["words"]] == ["Hello", "world"]

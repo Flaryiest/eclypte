@@ -60,3 +60,34 @@ def test_overlay_nonpositive_window_raises():
 def test_overlay_unknown_skill_raises():
     with pytest.raises(TimelineError):
         validate_timeline(_timeline([_overlay(skill_id="text.bogus")]))
+
+
+def _lyrics_overlay(end=6.0):
+    return Overlay(
+        skill_id="lyrics.kinetic",
+        timeline_start_sec=0.0,
+        timeline_end_sec=end,
+        params={
+            "font_id": "anton",
+            "lines": [
+                {
+                    "start_sec": 0.0,
+                    "end_sec": 1.0,
+                    "words": [{"text": "hold", "start_sec": 0.0, "end_sec": 1.0}],
+                }
+            ],
+        },
+    )
+
+
+def test_single_lyrics_overlay_passes():
+    validate_timeline(_timeline([_lyrics_overlay()]))
+
+
+def test_duplicate_singleton_skill_raises():
+    with pytest.raises(TimelineError, match="singleton"):
+        validate_timeline(_timeline([_lyrics_overlay(), _lyrics_overlay()]))
+
+
+def test_duplicate_non_singleton_skill_is_fine():
+    validate_timeline(_timeline([_overlay(end=1.0), _overlay(start=2.0, end=3.0)]))

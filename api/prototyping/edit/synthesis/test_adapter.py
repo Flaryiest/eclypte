@@ -628,3 +628,146 @@ def test_adapt_sets_tail_fade_on_audio_and_output():
     # _three_shots_contiguous totals 6.0s -> clamped fade of 2.0s on both streams.
     assert tl.output.fade_out_sec == 2.0
     assert tl.audio.fade_out_sec == 2.0
+
+
+# --- kinetic lyrics resolution ------------------------------------------------
+
+LYRICS_TIMING = {
+    "schema_version": 1,
+    "source": {"duration_sec": 180.0},
+    "mode": "aligned",
+    "lines": [
+        {
+            "line_idx": 0, "start_sec": 0.5, "end_sec": 2.0, "text": "hold me close",
+            "words": [
+                {"word": "hold", "start_sec": 0.5, "end_sec": 1.0, "confidence": 0.9},
+                {"word": "me", "start_sec": 1.0, "end_sec": 1.4, "confidence": 0.8},
+                {"word": "close", "start_sec": 1.4, "end_sec": 2.0, "confidence": 0.85},
+            ],
+        },
+        {
+            "line_idx": 1, "start_sec": 5.0, "end_sec": 8.0, "text": "beyond the end",
+            "words": [
+                {"word": "beyond", "start_sec": 5.0, "end_sec": 5.5, "confidence": 0.9},
+                {"word": "the", "start_sec": 5.5, "end_sec": 5.8, "confidence": 0.9},
+                {"word": "end", "start_sec": 5.8, "end_sec": 8.0, "confidence": 0.9},
+            ],
+        },
+    ],
+}
+
+LYRICS_PLAN = {"enabled": True, "font": "bebas_neue", "style": "sweep"}
+
+
+def test_adapt_lyrics_plan_creates_full_reel_overlay():
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH,
+               lyrics_plan=LYRICS_PLAN, lyrics_timing=LYRICS_TIMING)
+
+    assert [ov.skill_id for ov in tl.overlays] == ["lyrics.kinetic"]
+    ov = tl.overlays[0]
+    assert ov.timeline_start_sec == pytest.approx(0.0)
+    assert ov.timeline_end_sec == pytest.approx(tl.output.duration_sec)
+    assert ov.params["font_id"] == "bebas_neue"
+    assert ov.params["style"] == "sweep"
+    assert ov.params["mode"] == "aligned"
+    # payload words ("word" key) are embedded as skill words ("text" key)
+    line0 = ov.params["lines"][0]
+    assert [w["text"] for w in line0["words"]] == ["hold", "me", "close"]
+    assert line0["words"][0]["start_sec"] == pytest.approx(0.5)
+    # a word running past the reel end is clamped to the timeline duration
+    last_word = ov.params["lines"][-1]["words"][-1]
+    assert last_word["end_sec"] == pytest.approx(tl.output.duration_sec)
+
+
+def test_adapt_lyrics_orders_grade_then_lyrics_then_overlays():
+    overlays = [{"skill_id": "text.hook", "text": "go", "start_time": 0.0, "end_time": 1.0}]
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH,
+               overlays=overlays, grade="grade.cinematic",
+               lyrics_plan=LYRICS_PLAN, lyrics_timing=LYRICS_TIMING)
+    assert [ov.skill_id for ov in tl.overlays] == [
+        "grade.cinematic", "lyrics.kinetic", "text.hook",
+    ]
+
+
+def test_adapt_lyrics_absent_or_disabled_adds_nothing():
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH,
+               lyrics_timing=LYRICS_TIMING)
+    assert tl.overlays == []
+
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH,
+               lyrics_plan={"enabled": False, "font": "anton", "style": "pop"},
+               lyrics_timing=LYRICS_TIMING)
+    assert tl.overlays == []
+
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH,
+               lyrics_plan=LYRICS_PLAN, lyrics_timing=None)
+    assert tl.overlays == []
+
+
+def test_adapt_lyrics_invalid_plan_is_dropped_not_fatal():
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH,
+               lyrics_plan={"enabled": True, "font": "comic_sans", "style": "sweep"},
+               lyrics_timing=LYRICS_TIMING)
+    assert tl.overlays == []
+
+
+def test_adapt_lyrics_maps_section_styles_from_agent_times():
+    plan = dict(LYRICS_PLAN)
+    plan["section_styles"] = [
+        {"start_time": 2.0, "end_time": 4.0, "style": "pop"},
+        {"start_time": 5.0, "end_time": 99.0, "style": "build"},  # clamped
+    ]
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH,
+               lyrics_plan=plan, lyrics_timing=LYRICS_TIMING)
+    sections = tl.overlays[0].params["section_styles"]
+    assert sections[0] == {"start_sec": 2.0, "end_sec": 4.0, "style": "pop"}
+    assert sections[1]["end_sec"] == pytest.approx(tl.output.duration_sec)
+
+
+def test_adapt_lyrics_carries_transcribed_mode():
+    timing = dict(LYRICS_TIMING)
+    timing["mode"] = "transcribed"
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH,
+               lyrics_plan=LYRICS_PLAN, lyrics_timing=timing)
+    assert tl.overlays[0].params["mode"] == "transcribed"
+
+
+def test_adapt_lyrics_drops_lines_fully_beyond_reel_end():
+    timing = {
+        "mode": "aligned",
+        "lines": LYRICS_TIMING["lines"] + [
+            {"line_idx": 2, "start_sec": 30.0, "end_sec": 33.0, "text": "late",
+             "words": [{"word": "late", "start_sec": 30.0, "end_sec": 33.0, "confidence": 0.9}]},
+        ],
+    }
+    tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH,
+               lyrics_plan=LYRICS_PLAN, lyrics_timing=timing)
+    assert len(tl.overlays[0].params["lines"]) == 2
+
+
+def test_adapt_lyrics_report_sink_counts_only():
+    sink = {}
+    adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH,
+          lyrics_plan=LYRICS_PLAN, lyrics_timing=LYRICS_TIMING, report_sink=sink)
+    assert sink["lyrics"] == {
+        "enabled": True, "font": "bebas_neue", "style": "sweep", "word_count": 6,
+    }
+
+
+def test_adapt_lyrics_malformed_plan_never_fails_the_edit():
+    # Tools are non-strict: the agent can emit garbage shapes. Every one of
+    # these must drop the lyrics with a log, never raise out of adapt().
+    malformed_plans = [
+        "just a string",                                              # not an object
+        {"enabled": True, "font": "anton", "style": "sweep",
+         "section_styles": [{"start_time": 0.0, "end_time": 2.0}]},   # missing style
+        {"enabled": True, "font": "anton", "style": "sweep",
+         "section_styles": [{"start_time": "chorus", "end_time": 2.0,
+                             "style": "pop"}]},                        # non-numeric time
+        {"enabled": True, "font": "anton", "style": "sweep",
+         "section_styles": "verse"},                                   # wrong container type
+    ]
+    for plan in malformed_plans:
+        tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH,
+                   lyrics_plan=plan, lyrics_timing=LYRICS_TIMING)
+        assert tl.overlays == [], f"plan {plan!r} should drop, not raise"
