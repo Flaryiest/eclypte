@@ -19,8 +19,8 @@ It is deliberately **quality-over-speed**: every scene/frame of video and every 
 analyzed before an edit is composed, so a single finished video can take **hours** (movie analysis
 dominates). It began as a personal/portfolio project (see [`README.md`](README.md)).
 
-**Scale (post the July 2026 de-bloat):** ~12.7k lines of application Python across `api/` including
-the `api/prototyping/` workers, plus ~8.5k lines of tests; ~6.9k lines of TS/TSX and ~3.6k of CSS
+**Scale (post the July 2026 de-bloat):** ~14k lines of application Python across `api/` including
+the `api/prototyping/` workers, plus ~10k lines of tests; ~6.9k lines of TS/TSX and ~3.6k of CSS
 in `web/src`. Tracked repo is ~200 MB, dominated by the served demo videos under `web/public/demo/`.
 
 ---
@@ -52,6 +52,10 @@ changing bundled worker code.
  Upload song (R2) ─► run_music_analysis ─► Modal: eclypte-analysis / analyze_remote
                                             tempo · beats · downbeats · 10Hz energy · segments
                                             (schema_version 1, _sec times)  + best-effort LRC lyrics
+                                           ─► Modal: eclypte-lyrics / align_lyrics_remote
+                                            word-level lyric timings (Whisper + demucs forced
+                                            alignment against the actual vocal; LRC text only,
+                                            provider timestamps discarded) ─► lyrics_timing asset
 
  Upload film (R2) ─► run_video_analysis ─► Modal: eclypte-video-r2 / analyze_r2
                                             scenes ─► per-scene GPU optical-flow motion ─► impacts,
@@ -60,13 +64,17 @@ changing bundled worker code.
                         ▼
     run_timeline_plan ─► build/reuse CLIP index  (Modal: eclypte-clip-index-r2)
                        ─► OpenAI agent loop (gpt-5.5, Responses API):
-                            query_clips(text) semantic search ─► finish_edit(shots, overlays)
+                            query_clips(text) semantic search ─► finish_edit(shots, overlays,
+                            grade, lyrics — the kinetic-lyrics plan: font + style, default-on
+                            when word timing exists)
                        ─► adapter: dedupe · re-time contiguous · beat-snap (±0.15s) ·
-                            song-trim · tail fade · overlay resolve ─► validated Timeline JSON
+                            song-trim · tail fade · overlay resolve (grade → lyrics → overlays;
+                            windowed lyric words embedded in the timeline) ─► validated Timeline JSON
                         │
                         ▼
           run_render ─► Modal: eclypte-render-r2 / render_r2
                          native ffmpeg filtergraph (fast)  OR  MoviePy fallback (effects/overlays)
+                         kinetic lyrics burn in via libass (ASS karaoke; footage-adaptive layout)
                          ─► MP4 (H.264 CRF18, -tune animation, yuv420p, AAC 192k) + JPEG poster
                         │
                         ▼
@@ -137,6 +145,13 @@ already-completed analyses. **Autopilot** drives this same pipeline on a schedul
   volume).
 - **`lyrics.py`** — `search_synced_lyrics()` (timestamped LRC only, best-effort). Heavy deps live
   only in `requirements-modal.txt`.
+- **`lyrics_align.py`** / **`lyrics_align_modal.py`** — word-level lyric timing. The pure module owns
+  LRC text extraction, the align-vs-transcribe decision flow, and quality gates; the Modal app
+  `eclypte-lyrics` (`align_lyrics_remote`, T4, own slim image pinned by
+  `requirements-lyrics-modal.txt`) runs stable-ts + Whisper `large-v3` + demucs vocal isolation
+  against the actual audio (provider LRC timestamps are always discarded). Publishes a
+  `lyrics_timing` asset (`lines[].words[]` with per-word `start_sec`/`end_sec`/`confidence`); the
+  edit pipeline backfills older songs with a negative cache so GPU isn't re-burned per edit.
 
 ### Video pipeline — `api/prototyping/video/`
 - **`analysis_cuda.py`** — the orchestrator (single-pass GPU decode); produces `credits` + `poster`
@@ -158,11 +173,22 @@ already-completed analyses. **Autopilot** drives this same pipeline on a schedul
   `Timeline`, the deterministic adapter (dedupe within 1.0s, **re-time all positions contiguously
   from 0** — the agent's absolute offsets are discarded, only per-shot durations survive — beat-snap
   ±0.15s, song-trim, tail fade, overlay resolution), and structural validation.
-- **`skills/`** — self-registering creative skills in three kinds: windowed overlays (`text.hook`,
+- **`skills/`** — self-registering creative skills in four kinds: windowed overlays (`text.hook`,
   `text.caption`, `text.lower_third`, `mask.vignette`), whole-reel grades (`grade.cinematic`/
-  `vibrant`/`moody`), and moment accents (`impact.shake`). Metadata is moviepy-free; `build_layers`
-  (MoviePy) imports lazily, and skills with `ffmpeg_supported = True` provide an `ffmpeg_filter`
-  fragment so they render on the fast native path.
+  `vibrant`/`moody`), moment accents (`impact.shake`), and full-reel word-synced lyrics
+  (`lyrics.kinetic`). Metadata is moviepy-free; `build_layers` (MoviePy) imports lazily, and skills
+  with `ffmpeg_supported = True` provide an `ffmpeg_filter` fragment so they render on the fast
+  native path. Skills needing a side file implement `ffmpeg_assets()` (materialized into a scratch
+  dir by the executor).
+- **Kinetic lyrics** (`lyrics.kinetic`) — the agent's on-screen text tool: three treatments
+  (`sweep` = ASS `\kf` karaoke color-fill per word, `pop` = one big word on its timestamp,
+  `build` = accumulating line), switchable per song section, default-on when word timing exists.
+  Pure modules: `lyrics_ass.py` (ASS serializer), `lyrics_layout.py` (footage-adaptive band +
+  palette with hysteresis inside IG safe areas, linear-luminance contrast floor, caps-aware width
+  fitting with ≤3-row wrapping), `lyrics_fonts.py` (10 OFL/Apache static TTFs SHA-pinned to one
+  google/fonts commit; the Modal render image downloads them at build, local dev uses
+  `fetch_fonts`). The renderer's `footage_stats.py` sampling pass feeds the layout; any failure
+  degrades to safe defaults — lyrics can never fail an edit or render.
 
 ### Edit — render + CLIP index — `api/prototyping/edit/render/`, `.../index/`
 - **Dual render dispatch** in `render/renderer.py` via `can_render_with_ffmpeg()` (capability-driven):
@@ -175,7 +201,8 @@ already-completed analyses. **Autopilot** drives this same pipeline on a schedul
 - **CLIP index** — `frames.py`, `embed.py` (ViT-L/14, 768-dim), `query.py`
   (`rank_with_content_filter` drops near-black/flat frames). `storage_modal.py` =
   `eclypte-clip-index-r2` (`build_index_r2`, `query_index_r2`).
-- `render_storage_modal.py` = `eclypte-render-r2` (`render_r2`, bundles ffmpeg).
+- `render_storage_modal.py` = `eclypte-render-r2` (`render_r2`, bundles ffmpeg + the kinetic-lyrics
+  font catalog at `/fonts/kinetic`, with a build-time libass assert).
 
 ### Edit — reference learning — `api/prototyping/edit/reference/`
 Ingests viral reference reels (yt_dlp download → the same Modal analyzers) and computes pure-Python
@@ -215,8 +242,8 @@ Breaking any of these silently breaks another layer:
   `video_analysis_*`, `source_poster_*`, `timeline_*`, `clip_index_*`, `render_output_*`,
   `render_poster_*`, `lyrics_*`, `synthesis_prompt_version_id`, plus `<stage>_run_id` child pointers.
 - **Modal app/function names** are cross-boundary contracts: `eclypte-analysis/analyze_remote`,
-  `eclypte-video-r2/analyze_r2`, `eclypte-clip-index-r2/{build,query}_index_r2`,
-  `eclypte-render-r2/render_r2`.
+  `eclypte-lyrics/align_lyrics_remote`, `eclypte-video-r2/analyze_r2`,
+  `eclypte-clip-index-r2/{build,query}_index_r2`, `eclypte-render-r2/render_r2`.
 - **Export behavior lives only in `api/export_options.py`** — never reimplement format/trim/crop in
   pages, planners, adapters, or renderers.
 - Keep storage / API / `eclypteApi.ts` / dashboard in sync when a contract changes, and **redeploy
@@ -246,11 +273,13 @@ Breaking any of these silently breaks another layer:
   rhythm engine (downbeat-preferred early snapping, impact→downbeat registration, section pacing),
   the ffmpeg polish foundation (skill kinds + capability-driven dispatch), the polish catalog
   (grades, impact.shake + auto-accents, real speed_ramp), and plan-time reference-derived style
-  profiles. Autopilot Reels growth continues underneath (`reels_cinematic`, ~25s energy windows,
-  review-gated Buffer publishing, AI captions).
-- **Deferred:** `whip` transition and `hold` effect (cut/no-op); a YouTube publishing path (16:9
-  renders exist, no upload integration); a single-scene vs. full-source-montage retention
-  experiment; per-shot crop focus for fill-mode reels.
+  profiles — plus **kinetic lyrics** on top (word-synced ASS/libass lyric text with
+  footage-adaptive layout and a curated font catalog). Autopilot Reels growth continues underneath
+  (`reels_cinematic`, ~25s energy windows, review-gated Buffer publishing, AI captions).
+- **Deferred:** text-behind-subject masking for kinetic lyrics (needs a GPU segmentation matte);
+  `whip` transition and `hold` effect (cut/no-op); a YouTube publishing path (16:9 renders exist,
+  no upload integration); a single-scene vs. full-source-montage retention experiment; per-shot
+  crop focus for fill-mode reels.
 - **Notable soft spots:** temp auth is effectively no auth; the autopilot state lock is
   single-replica only; git history still carries ~600 MB of media blobs (working-tree media was
   trimmed, but clone-size relief would need a history rewrite or LFS — a deliberate deferral).

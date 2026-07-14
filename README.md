@@ -3,7 +3,7 @@ A multipurpose AI video editing pipeline. Hosted version can be found here: [htt
 
 Initially created this project in order to create short-form content (particularly cool anime/movie edits) but the infrastructure works arguably better for normal editing activities, at least until I develop it more.
 
-Eclypte lets a user upload a WAV song and an MP4 source video, then runs both through an analysis pipeline. The song analysis extracts beats, downbeats, tempo, structure, and energy. The video analysis detects scenes, motion, visual energy, and impact momentum (largely based off the previous frame)
+Eclypte lets a user upload a song (most common audio formats) and an MP4 source video, then runs both through an analysis pipeline. The song analysis extracts beats, downbeats, tempo, structure, and energy — plus word-level lyric timings via forced alignment against the actual vocal when lyrics can be found. The video analysis detects scenes, motion, visual energy, and impact momentum (largely based off the previous frame)
 
 Those analysis files are then used to plan an edit timeline with an AI agent through API calls and skills. Currently it relies on OpenAI and a CLIP index to search for useful moments in the source content. The final timeline is rendered into an MP4 and made available in the dashboard for preview and download.
 
@@ -100,7 +100,7 @@ Current limitations include:
 
 - uploads accept most common audio formats (auto-converted to WAV server-side) but video is still MP4 only
 - speed issues, especially on movie analysis and synthesis, can take a few hours
-- the editing vocabulary is growing but still curated: colour grades, text overlays, a vignette mask, camera-shake accents, flash/crossfade transitions, and freeze/punch-in/speed-ramp effects exist (agent-placed, with a deterministic "rhythm engine" keeping cuts musical) - still a ways from a full-fledged editor with arbitrary layers
+- the editing vocabulary is growing but still curated: colour grades, text overlays, word-synced kinetic lyrics (karaoke color sweeps / word pops / building lines, with footage-adaptive placement, color, and a 10-font catalog), a vignette mask, camera-shake accents, flash/crossfade transitions, and freeze/punch-in/speed-ramp effects exist (agent-placed, with a deterministic "rhythm engine" keeping cuts musical) - still a ways from a full-fledged editor with arbitrary layers
 
 ## AI Usage and Disclaimer
 
