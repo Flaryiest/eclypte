@@ -126,12 +126,17 @@ def query_index_r2(
     top_k: int = 5,
 ) -> list[dict]:
     from edit.index.embed import embed_text
-    from edit.index.query import rank_with_content_filter
+    from edit.index.query import TEXT_NEGATIVE_PROMPTS, rank_with_content_filter
     import numpy as np
 
     timestamps, embeddings, brightness, detail = _load_index_from_r2(r2_config, index_key)
     query_embedding = embed_text(query)[0]
     similarities = np.dot(embeddings, query_embedding)
+    # Per-frame max similarity to the title-card/credits prompts — computed
+    # from the STORED frame embeddings, so this works on old indexes too.
+    negative_embeddings = embed_text(list(TEXT_NEGATIVE_PROMPTS))
+    text_negative_sims = np.dot(embeddings, negative_embeddings.T).max(axis=1)
     return rank_with_content_filter(
-        timestamps, similarities, brightness, detail, top_k=top_k
+        timestamps, similarities, brightness, detail, top_k=top_k,
+        text_negative_sims=text_negative_sims,
     )

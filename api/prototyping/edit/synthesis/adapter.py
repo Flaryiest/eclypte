@@ -28,6 +28,19 @@ MIN_SNAPPED_SHOT_SEC = 0.4
 AGENT_TRANSITIONS = {"cut", "flash", "crossfade"}
 AGENT_EFFECTS = {"freeze", "punch_in", "speed_ramp"}
 
+# Head/tail anchor guard: the source's opening (logos, title cards, opening
+# credits) and tail (end credits missed by OCR) are where the agent most often
+# invents timestamps. An anchor in a danger zone that no query_clips result
+# backs gets relocated to the nearest query-backed timestamp outside the zones.
+ANCHOR_GUARD_MIN_SEC = 10.0
+ANCHOR_GUARD_MAX_SEC = 90.0
+ANCHOR_GUARD_FRAC = 0.03
+ANCHOR_BACKED_TOLERANCE_SEC = 2.0
+
+
+def _anchor_guard_sec(duration_sec: float) -> float:
+    return min(ANCHOR_GUARD_MAX_SEC, max(ANCHOR_GUARD_MIN_SEC, duration_sec * ANCHOR_GUARD_FRAC))
+
 
 def adapt(
     agent_output: list[dict],
@@ -46,6 +59,7 @@ def adapt(
     lyrics_timing: dict | None = None,
     content_end_sec: float | None = None,
     style_profile: dict | None = None,
+    query_anchors: list[float] | None = None,
     report_sink: dict | None = None,
 ) -> Timeline:
     """
@@ -75,11 +89,41 @@ def adapt(
 
     ordered = sorted(agent_output, key=lambda s: float(s["start_time"]))
 
+    # Head/tail anchor guard (active only when this plan's query_clips results
+    # are known): anchors inside the danger zones that no query result backs
+    # are relocated to the nearest query-backed timestamp outside the zones —
+    # the agent's "span the full source" instinct otherwise lands on logos,
+    # title cards, and credits that the prompt alone fails to keep out.
+    anchors = sorted(float(a) for a in (query_anchors or []))
+    guard = _anchor_guard_sec(effective_source_end)
+    head_end = guard
+    tail_start = effective_source_end - guard
+    anchor_relocations: list[dict] = []
+
+    def _guard_anchor(src_ts: float) -> float:
+        if not anchors:
+            return src_ts
+        if head_end <= src_ts <= tail_start:
+            return src_ts
+        if any(abs(src_ts - a) <= ANCHOR_BACKED_TOLERANCE_SEC for a in anchors):
+            return src_ts
+        safe = [a for a in anchors if head_end <= a <= tail_start]
+        pool = safe or anchors
+        relocated = min(pool, key=lambda a: abs(a - src_ts))
+        anchor_relocations.append(
+            {"from_sec": round(src_ts, 3), "to_sec": round(relocated, 3)}
+        )
+        print(
+            f"adapter: relocated danger-zone anchor {src_ts:.3f}s -> {relocated:.3f}s "
+            f"(head<{head_end:.1f}s / tail>{tail_start:.1f}s, not query-backed)"
+        )
+        return relocated
+
     shots: list[Shot] = []
     for i, raw in enumerate(ordered):
         start_time = float(raw["start_time"])
         end_time = float(raw["end_time"])
-        src_ts = float(raw["source_timestamp"])
+        src_ts = _guard_anchor(float(raw["source_timestamp"]))
 
         duration = end_time - start_time
         if duration <= 0:
@@ -259,6 +303,7 @@ def adapt(
         report_sink["sync"] = sync_report(shots, song, video)
         report_sink["impact_registrations"] = impact_registrations
         report_sink["pacing_splits"] = split_records
+        report_sink["anchor_relocations"] = anchor_relocations
         if lyrics_report is not None:
             report_sink["lyrics"] = lyrics_report
 

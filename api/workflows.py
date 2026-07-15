@@ -1044,6 +1044,10 @@ class DefaultWorkflowRunner:
         active_prompt = prompt_state.active_prompt
         r2_config = self._r2_config_payload()
 
+        # Every timestamp the agent was actually shown — the adapter's anchor
+        # guard relocates head/tail anchors the agent invented beyond these.
+        seen_query_timestamps: set[float] = set()
+
         def query_clip_index(query: str, _video_filename: str, top_k: int = 5) -> list[dict]:
             results = _query_clip_index_r2(
                 r2_config=r2_config,
@@ -1053,6 +1057,7 @@ class DefaultWorkflowRunner:
             )
             # Never offer credit-region timestamps to the agent.
             results = [r for r in results if float(r.get("timestamp", 0.0)) <= content_end_sec]
+            seen_query_timestamps.update(float(r["timestamp"]) for r in results)
             # Attach scene motion/impact metadata so the agent can match
             # footage energy to song energy (fields absent on old analyses).
             return _enrich_clip_results(results, video)
@@ -1100,6 +1105,7 @@ class DefaultWorkflowRunner:
             lyrics_timing=lyrics,
             content_end_sec=content_end_sec,
             style_profile=style_profile or None,
+            query_anchors=sorted(seen_query_timestamps) or None,
             report_sink=rhythm_report,
         )
         if style_profile:

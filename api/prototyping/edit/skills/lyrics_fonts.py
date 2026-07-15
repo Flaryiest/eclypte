@@ -35,11 +35,12 @@ class FontSpec:
     license: str
     width_factor: float  # rough avg glyph width / font size, for line fitting
     all_caps: bool = False  # face draws lowercase input as caps-width glyphs
+    spacing_frac: float = 0.0  # letter-spacing (tracking) as a fraction of font size
 
 
 def _spec(
     font_id: str, family: str, repo_path: str, vibe: str, width_factor: float,
-    all_caps: bool = False,
+    all_caps: bool = False, spacing_frac: float = 0.0,
 ) -> FontSpec:
     return FontSpec(
         font_id=font_id,
@@ -50,6 +51,7 @@ def _spec(
         license="Apache-2.0" if repo_path.startswith("apache/") else "OFL-1.1",
         width_factor=width_factor,
         all_caps=all_caps,
+        spacing_frac=spacing_frac,
     )
 
 
@@ -59,22 +61,22 @@ FONT_CATALOG: dict[str, FontSpec] = {
         _spec(
             "anton", "Anton", "ofl/anton/Anton-Regular.ttf",
             "heavy brutalist condensed sans — shouty and modern, the classic bold edit caption",
-            0.42,
+            0.42, spacing_frac=0.03,
         ),
         _spec(
             "bebas_neue", "Bebas Neue", "ofl/bebasneue/BebasNeue-Regular.ttf",
             "tall condensed all-caps sans — cinematic poster energy, clean and punchy",
-            0.38, all_caps=True,
+            0.38, all_caps=True, spacing_frac=0.045,
         ),
         _spec(
             "archivo_black", "Archivo Black", "ofl/archivoblack/ArchivoBlack-Regular.ttf",
             "ultra-heavy grotesk block letters — loud streetwear weight, hits hard",
-            0.60,
+            0.60, spacing_frac=0.01,
         ),
         _spec(
             "poppins", "Poppins SemiBold", "ofl/poppins/Poppins-SemiBold.ttf",
             "clean geometric sans — friendly modern social-video default, safe on anything",
-            0.55,
+            0.55, spacing_frac=0.015,
         ),
         _spec(
             "dm_serif_display", "DM Serif Display", "ofl/dmserifdisplay/DMSerifDisplay-Regular.ttf",
@@ -84,12 +86,12 @@ FONT_CATALOG: dict[str, FontSpec] = {
         _spec(
             "italiana", "Italiana", "ofl/italiana/Italiana-Regular.ttf",
             "thin fashion-magazine serif — delicate, romantic, quiet luxury",
-            0.45,
+            0.45, spacing_frac=0.08,
         ),
         _spec(
             "marcellus", "Marcellus", "ofl/marcellus/Marcellus-Regular.ttf",
             "classical inscription serif — epic, mythic, movie-title gravitas",
-            0.50,
+            0.50, spacing_frac=0.03,
         ),
         _spec(
             "special_elite", "Special Elite", "apache/specialelite/SpecialElite-Regular.ttf",
@@ -104,7 +106,7 @@ FONT_CATALOG: dict[str, FontSpec] = {
         _spec(
             "righteous", "Righteous", "ofl/righteous/Righteous-Regular.ttf",
             "rounded retro-futuristic display — playful neon, synthwave nights",
-            0.52,
+            0.52, spacing_frac=0.02,
         ),
     )
 }

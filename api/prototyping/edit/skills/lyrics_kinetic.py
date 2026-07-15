@@ -35,9 +35,14 @@ logger = logging.getLogger(__name__)
 
 ASS_FILENAME = "lyrics_kinetic.ass"
 
-# Base font sizes as fractions of output height.
-SWEEP_SIZE_FRAC = 0.045   # full lines (sweep/build)
-POP_SIZE_FRAC = 0.085     # single big words
+# Base font sizes as fractions of output height. Lyric text is a designed
+# element, not a subtitle — err prominent; long lines wrap rather than shrink.
+SWEEP_SIZE_FRAC = 0.056   # full lines (sweep/build)
+POP_SIZE_FRAC = 0.098     # single big words
+POP_MIN_SCALE = 0.65      # one long word may not shrink every pop below this
+OUTLINE_FRAC = 0.05       # outline width as a fraction of font size
+SHADOW_FRAC = 0.03        # drop-shadow depth as a fraction of font size
+SHADOW_ALPHA = 0.35       # shadow transparency (ASS BackColour alpha)
 LINE_HOLD_SEC = 0.35      # how long a finished line lingers (clamped to the next line)
 POP_HOLD_SEC = 0.30       # how long a popped word lingers past its end
 
@@ -180,6 +185,8 @@ def build_ass_for_overlay(
     font = get_font(params.font_id)
     safe_width = width * (1 - 2 * SAFE_SIDE_FRAC)
     margin_side = round(width * SAFE_SIDE_FRAC)
+    # Tracking widens every glyph cell; fold it into the width estimate.
+    effective_wf = font.width_factor + font.spacing_frac
 
     layouts = plan_line_layouts(
         [line.model_dump() for line in params.lines],
@@ -188,10 +195,38 @@ def build_ass_for_overlay(
         section_styles=[s.model_dump() for s in params.section_styles],
         shot_stats=shot_stats,
         base_size_px=round(height * SWEEP_SIZE_FRAC),
-        width_factor=font.width_factor,
+        width_factor=effective_wf,
         accent_override=params.accent_color,
         all_caps=font.all_caps,
     )
+
+    # One pop size for the whole reel (a lone "go" popping comically larger
+    # than its neighbors reads as a glitch); a line whose own longest word
+    # can't fit at the shared size still shrinks individually.
+    pop_base = round(height * POP_SIZE_FRAC)
+    pop_fits: dict[int, int] = {}
+    for i, (line, layout) in enumerate(zip(params.lines, layouts)):
+        if layout.style == "pop":
+            longest = max((sanitize_ass_text(w.text) for w in line.words), key=len, default="")
+            pop_fits[i] = fit_font_size(
+                longest, base_size_px=pop_base, safe_width_px=safe_width,
+                width_factor=effective_wf, all_caps=font.all_caps,
+            )
+    shared_pop = max(min(pop_fits.values()), round(pop_base * POP_MIN_SCALE)) if pop_fits else pop_base
+
+    def _style(name: str, size: int, *, primary: str, secondary: str,
+               outline_colour: str, alignment: int, margin_v: int) -> AssStyle:
+        return AssStyle(
+            name=name, fontname=font.family, fontsize=size,
+            primary=primary, secondary=secondary,
+            outline_colour=outline_colour,
+            back_colour=ass_color("#000000", alpha=SHADOW_ALPHA),
+            outline=max(2.5, round(size * OUTLINE_FRAC, 1)),
+            shadow=round(size * SHADOW_FRAC, 1),
+            spacing=round(size * font.spacing_frac, 1),
+            alignment=alignment,
+            margin_l=margin_side, margin_r=margin_side, margin_v=margin_v,
+        )
 
     styles: list[AssStyle] = []
     events: list[AssEvent] = []
@@ -205,49 +240,28 @@ def build_ass_for_overlay(
         fill = ass_color(layout.fill)
         accent = ass_color(layout.accent)
         outline_colour = ass_color(layout.outline)
-        back_colour = ass_color("#000000", alpha=1.0)
 
         if layout.style == "pop":
-            longest = max((sanitize_ass_text(w.text) for w in line.words), key=len, default="")
-            font_size = fit_font_size(
-                longest,
-                base_size_px=round(height * POP_SIZE_FRAC),
-                safe_width_px=safe_width,
-                width_factor=font.width_factor,
-                all_caps=font.all_caps,
-            )
             styles.append(
-                AssStyle(
-                    name=style_name, fontname=font.family, fontsize=font_size,
-                    primary=fill, secondary=accent,
-                    outline_colour=outline_colour, back_colour=back_colour,
-                    outline=max(2.0, round(font_size * 0.045, 1)),
-                    alignment=5, margin_l=margin_side, margin_r=margin_side, margin_v=0,
-                )
+                _style(style_name, min(shared_pop, pop_fits[i]),
+                       primary=fill, secondary=accent,
+                       outline_colour=outline_colour, alignment=5, margin_v=0)
             )
             events.extend(_pop_events(line, style_name, end_sec))
         elif layout.style == "build":
             styles.append(
-                AssStyle(
-                    name=style_name, fontname=font.family, fontsize=layout.font_size,
-                    primary=fill, secondary=accent,
-                    outline_colour=outline_colour, back_colour=back_colour,
-                    outline=max(2.0, round(layout.font_size * 0.045, 1)),
-                    alignment=layout.alignment,
-                    margin_l=margin_side, margin_r=margin_side, margin_v=layout.margin_v,
-                )
+                _style(style_name, layout.font_size,
+                       primary=fill, secondary=accent,
+                       outline_colour=outline_colour,
+                       alignment=layout.alignment, margin_v=layout.margin_v)
             )
             events.extend(_build_events(line, style_name, end_sec, accent, layout.row_splits))
         else:  # sweep: text starts as fill and the accent sweeps through it
             styles.append(
-                AssStyle(
-                    name=style_name, fontname=font.family, fontsize=layout.font_size,
-                    primary=accent, secondary=fill,
-                    outline_colour=outline_colour, back_colour=back_colour,
-                    outline=max(2.0, round(layout.font_size * 0.045, 1)),
-                    alignment=layout.alignment,
-                    margin_l=margin_side, margin_r=margin_side, margin_v=layout.margin_v,
-                )
+                _style(style_name, layout.font_size,
+                       primary=accent, secondary=fill,
+                       outline_colour=outline_colour,
+                       alignment=layout.alignment, margin_v=layout.margin_v)
             )
             events.extend(_sweep_events(line, style_name, end_sec, layout.row_splits))
 

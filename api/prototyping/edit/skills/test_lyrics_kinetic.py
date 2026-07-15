@@ -225,3 +225,41 @@ def test_sweep_long_line_wraps_with_hard_breaks():
     )
     doc = build_ass_for_overlay(params, shot_stats=None, output_size=(1080, 1920), duration_sec=25.0)
     assert "\\N" in doc
+
+
+def test_styles_carry_spacing_shadow_and_soft_back():
+    doc = build_ass_for_overlay(_params(), shot_stats=None, output_size=(1080, 1920), duration_sec=25.0)
+    style_line = next(l for l in doc.splitlines() if l.startswith("Style: L0,"))
+    fields = style_line.split(",")
+    # bebas_neue carries letter-spacing; shadow gives the text depth
+    assert float(fields[13]) > 0        # Spacing
+    assert float(fields[17]) > 0        # Shadow
+    # BackColour (shadow color) is semi-transparent black, not fully transparent
+    assert fields[6].startswith("&H") and fields[6] != "&HFF000000"
+
+
+def test_sweep_base_size_is_prominent():
+    # 1920-high reel: sweep lines should render >= 100px so the text reads as
+    # a designed element, not a subtitle afterthought.
+    doc = build_ass_for_overlay(_params(), shot_stats=None, output_size=(1080, 1920), duration_sec=25.0)
+    style_line = next(l for l in doc.splitlines() if l.startswith("Style: L0,"))
+    assert int(style_line.split(",")[2]) >= 100
+
+
+def test_pop_words_share_one_size_across_lines():
+    params = _params(
+        style="pop",
+        lines=[
+            {"text": "go", "start_sec": 0.0, "end_sec": 0.6,
+             "words": [{"text": "go", "start_sec": 0.0, "end_sec": 0.6}]},
+            {"text": "running", "start_sec": 1.0, "end_sec": 1.8,
+             "words": [{"text": "running", "start_sec": 1.0, "end_sec": 1.8}]},
+        ],
+    )
+    doc = build_ass_for_overlay(params, shot_stats=None, output_size=(1080, 1920), duration_sec=25.0)
+    sizes = {
+        int(l.split(",")[2])
+        for l in doc.splitlines()
+        if l.startswith("Style: L")
+    }
+    assert len(sizes) == 1  # "go" must not render comically larger than "running"

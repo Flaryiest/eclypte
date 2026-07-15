@@ -98,6 +98,7 @@ class AssStyle:
     bold: bool = False
     outline: float = 3.0
     shadow: float = 0.0
+    spacing: float = 0.0  # letter-spacing (tracking) in px
     alignment: int = 2    # numpad: 2 = bottom-center, 5 = middle-center, 8 = top-center
     margin_l: int = 60
     margin_r: int = 60
@@ -126,7 +127,7 @@ def _style_line(style: AssStyle) -> str:
     return (
         f"Style: {style.name},{style.fontname},{style.fontsize},"
         f"{style.primary},{style.secondary},{style.outline_colour},{style.back_colour},"
-        f"{-1 if style.bold else 0},0,0,0,100,100,0,0,1,"
+        f"{-1 if style.bold else 0},0,0,0,100,100,{style.spacing:g},0,1,"
         f"{style.outline},{style.shadow},{style.alignment},"
         f"{style.margin_l},{style.margin_r},{style.margin_v},1"
     )

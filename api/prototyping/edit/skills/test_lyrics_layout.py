@@ -397,3 +397,31 @@ def test_plan_line_layouts_palette_flips_on_committed_brightness_change():
     )
     assert layouts[0].fill == "#FFFFFF"
     assert layouts[1].fill == lyrics_layout.INK_FILL
+
+
+def test_plan_row_splits_prefers_wrapping_at_base_size():
+    # A medium line must WRAP at the base size, not shrink on one row —
+    # constant text size across the reel is the professional look.
+    words = "i remember it all too well standing there".split()
+    size, splits = lyrics_layout.plan_row_splits(
+        words, base_size_px=86, safe_width_px=864, width_factor=0.5
+    )
+    assert size == 86
+    assert len(splits) == 2
+
+
+def test_plan_line_layouts_keeps_one_size_across_lines():
+    short = _line(0.0, 2.0)  # "hold me close"
+    medium = _line(2.5, 5.0, text="i remember it all too well standing there")
+    layouts = plan_line_layouts(
+        [short, medium],
+        output_size=(1080, 1920),
+        base_style="sweep",
+        section_styles=(),
+        shot_stats=None,
+        base_size_px=86,
+        width_factor=0.5,
+    )
+    assert layouts[0].font_size == layouts[1].font_size == 86
+    assert layouts[0].row_splits == (3,)
+    assert len(layouts[1].row_splits) == 2

@@ -286,11 +286,12 @@ def plan_row_splits(
 ) -> tuple[int, tuple[int, ...]]:
     """(font_size, cumulative word-end index per row) for one lyric line.
 
-    Rows are added (up to MAX_TEXT_ROWS) whenever a single row would need a
-    size below the readability floor — the ASS document uses WrapStyle 2, so
-    a line that doesn't fit here would hard-clip at the frame edges instead
-    of wrapping. The returned size always CONTAINS every row (no floor clamp
-    on the last resort; tiny beats clipped)."""
+    Size-constancy first: lines WRAP (up to MAX_TEXT_ROWS) to fit at the base
+    size, so consecutive lines render at ONE size instead of jittering — the
+    professional lyric look. Only a line that can't fit at the base size even
+    fully wrapped shrinks, and then the returned size still CONTAINS every
+    row (the ASS document uses WrapStyle 2 — an unfitted line would hard-clip
+    at the frame edges, and tiny beats clipped)."""
     best: tuple[int, tuple[int, ...]] | None = None
     for rows in range(1, min(MAX_TEXT_ROWS, len(word_texts)) + 1):
         splits = _balanced_splits(word_texts, rows, all_caps)
@@ -298,8 +299,8 @@ def plan_row_splits(
             _fitted_size(row, base_size_px, safe_width_px, width_factor, all_caps)
             for row in _rows_text(word_texts, splits)
         )
-        best = (size, splits)
-        if size >= MIN_FONT_SIZE_PX:
+        best = (size, splits)  # more rows never fit worse — keep the last
+        if size >= base_size_px:
             return best
     assert best is not None
     return best

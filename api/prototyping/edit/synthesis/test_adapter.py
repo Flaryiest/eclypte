@@ -771,3 +771,65 @@ def test_adapt_lyrics_malformed_plan_never_fails_the_edit():
         tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH,
                    lyrics_plan=plan, lyrics_timing=LYRICS_TIMING)
         assert tl.overlays == [], f"plan {plan!r} should drop, not raise"
+
+
+# --- head/tail anchor guard ------------------------------------------------
+
+def test_anchor_guard_relocates_unbacked_head_anchor():
+    # Source is 300s; the head danger zone is the first ~10s. An anchor at
+    # 2.0s with no query result near it is almost certainly a logo/title
+    # card the agent invented — relocate it to the nearest query-backed
+    # timestamp outside the danger zones.
+    shots = [
+        {"start_time": 0.0, "end_time": 2.0, "source_timestamp": 2.0},
+        {"start_time": 2.0, "end_time": 4.0, "source_timestamp": 150.0},
+    ]
+    sink = {}
+    tl = adapt(shots, SONG, VIDEO, SRC_PATH, AUDIO_PATH,
+               query_anchors=[50.0, 150.0], report_sink=sink)
+    assert tl.shots[0].source.start_sec == pytest.approx(50.0)
+    assert len(sink["anchor_relocations"]) == 1
+    assert sink["anchor_relocations"][0]["from_sec"] == pytest.approx(2.0)
+
+
+def test_anchor_guard_keeps_query_backed_head_anchor():
+    shots = [
+        {"start_time": 0.0, "end_time": 2.0, "source_timestamp": 4.0},
+        {"start_time": 2.0, "end_time": 4.0, "source_timestamp": 150.0},
+    ]
+    tl = adapt(shots, SONG, VIDEO, SRC_PATH, AUDIO_PATH,
+               query_anchors=[4.5, 150.0])  # 4.0 is within tolerance of 4.5
+    assert tl.shots[0].source.start_sec == pytest.approx(4.0)
+
+
+def test_anchor_guard_relocates_unbacked_tail_anchor():
+    # 300s source: tail danger zone is the last ~10s. 297s is credits bait.
+    shots = [
+        {"start_time": 0.0, "end_time": 2.0, "source_timestamp": 50.0},
+        {"start_time": 2.0, "end_time": 4.0, "source_timestamp": 297.0},
+    ]
+    tl = adapt(shots, SONG, VIDEO, SRC_PATH, AUDIO_PATH,
+               query_anchors=[50.0, 150.0])
+    assert tl.shots[1].source.start_sec == pytest.approx(150.0)
+
+
+def test_anchor_guard_inactive_without_query_anchors():
+    shots = [
+        {"start_time": 0.0, "end_time": 2.0, "source_timestamp": 2.0},
+        {"start_time": 2.0, "end_time": 4.0, "source_timestamp": 150.0},
+    ]
+    tl = adapt(shots, SONG, VIDEO, SRC_PATH, AUDIO_PATH)
+    assert tl.shots[0].source.start_sec == pytest.approx(2.0)
+
+
+def test_anchor_guard_leaves_interior_anchors_alone():
+    # Anchors outside the danger zones are the agent's creative choice even
+    # when not query-backed (small offsets from queries are legitimate).
+    shots = [
+        {"start_time": 0.0, "end_time": 2.0, "source_timestamp": 120.0},
+        {"start_time": 2.0, "end_time": 4.0, "source_timestamp": 200.0},
+    ]
+    tl = adapt(shots, SONG, VIDEO, SRC_PATH, AUDIO_PATH,
+               query_anchors=[50.0, 150.0])
+    assert tl.shots[0].source.start_sec == pytest.approx(120.0)
+    assert tl.shots[1].source.start_sec == pytest.approx(200.0)
