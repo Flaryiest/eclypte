@@ -764,3 +764,22 @@ def test_auto_publish_send_crash_does_not_break_tick():
     assert send.calls == ["p_auto"]
     assert state.items[0].status == "editing"
     assert repo.get_autopilot_state(user_id=USER).last_tick_at is not None
+
+
+def test_auto_send_pass_skips_when_another_pass_holds_send_lock():
+    from api.autopilot import SEND_LOCK
+
+    repo = build_repo()
+    send = RecordingSend()
+    save_post(repo, post_id="p_auto")
+    save_state(repo, auto_publish=True)
+
+    assert SEND_LOCK.acquire(blocking=False)
+    try:
+        tick(repo, RecordingStarts(), send=send)
+    finally:
+        SEND_LOCK.release()
+    assert send.calls == []  # concurrent pass skipped, no double-send
+
+    tick(repo, RecordingStarts(), send=send)
+    assert send.calls == ["p_auto"]  # next tick retries normally

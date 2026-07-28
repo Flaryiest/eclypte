@@ -45,6 +45,11 @@ ACTIVE_ITEM_STATUSES = {"analyzing", "editing"}
 # this single-replica deployment; R2 has no conditional writes to lean on.
 STATE_LOCK = threading.Lock()
 
+# Serializes auto-send passes so concurrent ticks (background loop + manual
+# tick) can't double-send the same ready post; sends stay outside STATE_LOCK
+# so slow Buffer/R2 I/O never blocks state reads/writes.
+SEND_LOCK = threading.Lock()
+
 
 class StartMusicAnalysis(Protocol):
     def __call__(self, user_id: str, *, audio: dict[str, str]) -> str: ...
@@ -561,19 +566,24 @@ def _auto_send_ready_posts(
     """
     if not state.auto_publish or send_ready_post is None or state.halted_reason is not None:
         return
-    queued_count = len(repo.list_publishing_posts(user_id, status="queued"))
-    if queued_count > 2 * state.daily_target:
+    if not SEND_LOCK.acquire(blocking=False):
         return
-    for post in repo.list_publishing_posts(user_id, status="ready"):
-        if not post.auto_created:
-            continue
-        if post.last_error and _within_backoff(post.updated_at, now):
-            continue
-        try:
-            send_ready_post(user_id, post=post)
-        except Exception:  # noqa: BLE001 — sends must never break the tick
-            logger.warning("auto-send crashed for post %s", post.post_id, exc_info=True)
-            continue
+    try:
+        queued_count = len(repo.list_publishing_posts(user_id, status="queued"))
+        if queued_count > 2 * state.daily_target:
+            return
+        for post in repo.list_publishing_posts(user_id, status="ready"):
+            if not post.auto_created:
+                continue
+            if post.last_error and _within_backoff(post.updated_at, now):
+                continue
+            try:
+                send_ready_post(user_id, post=post)
+            except Exception:  # noqa: BLE001 — sends must never break the tick
+                logger.warning("auto-send crashed for post %s", post.post_id, exc_info=True)
+                continue
+    finally:
+        SEND_LOCK.release()
 
 
 def _within_backoff(updated_at: str, now_dt: datetime) -> bool:
