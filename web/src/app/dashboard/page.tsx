@@ -67,13 +67,16 @@ export default function HomePage() {
     const assets = useMemo(() => assetsResource.data ?? [], [assetsResource.data])
 
     const readyPosts = useMemo(() => posts.filter((post) => post.status === "ready" || post.status === "draft"), [posts])
-    const postedPosts = useMemo(
-        () =>
-            posts
-                .filter((post) => post.status === "published" || post.status === "queued" || post.status === "scheduled")
-                .slice(0, POSTED_STRIP_LIMIT),
-        [posts],
-    )
+    const postedPosts = useMemo(() => {
+        const relevant = posts.filter(
+            (post) => post.status === "published" || post.status === "queued" || post.status === "scheduled",
+        )
+        const inFlight = relevant.filter((post) => post.status !== "published")
+        const published = relevant
+            .filter((post) => post.status === "published")
+            .sort((a, b) => (b.posted_at ?? b.updated_at).localeCompare(a.posted_at ?? a.updated_at))
+        return [...inFlight, ...published].slice(0, POSTED_STRIP_LIMIT)
+    }, [posts])
     const workingItems = useMemo(
         () => (autopilot?.items ?? []).filter((item) => ["analyzing", "editing"].includes(item.status)),
         [autopilot],
