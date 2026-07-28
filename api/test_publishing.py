@@ -1256,3 +1256,19 @@ def test_listing_carries_performance_scores():
 
     # No primary metric -> no score, even though the post is published.
     assert by_id["post_no_metrics"]["performance_score"] is None
+
+
+def test_get_post_distinguishes_not_found_from_errors():
+    from api.publishing import BufferClient, BufferPostNotFoundError
+
+    client = BufferClient(api_key="k")
+    # Clean null with no errors: the post is gone from Buffer.
+    client._graphql = lambda p: {"data": {"post": None}}
+    with pytest.raises(BufferPostNotFoundError):
+        client.get_post(post_id="buf_gone")
+
+    # Malformed shape stays a generic client error.
+    client._graphql = lambda p: {"data": {"post": {"status": "sent"}}}
+    with pytest.raises(BufferClientError) as excinfo:
+        client.get_post(post_id="buf_1")
+    assert not isinstance(excinfo.value, BufferPostNotFoundError)

@@ -320,17 +320,17 @@ export default function HomePage() {
                     </button>
                 </div>
             )}
-            {autopilot?.waiting_for_library && (
+            {autopilot?.enabled && autopilot?.waiting_for_library && (
                 <p className={styles.smallText}>
                     Waiting for library content — add a film and a song so autopilot can pair them.
                 </p>
             )}
-            {autopilot?.recycling && (
+            {autopilot?.enabled && autopilot?.recycling && (
                 <p className={styles.smallText}>
                     Recycling your library — add films or songs for fresh combos.
                 </p>
             )}
-            {autopilot?.backlog_paused && (
+            {autopilot?.enabled && autopilot?.backlog_paused && (
                 <p className={styles.smallText}>
                     Holding off on new reels until the queued ones post.
                 </p>

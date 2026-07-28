@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Protocol
 
 from api.publishing import (
+    BufferPostNotFoundError,
     BufferPostResult,
     apply_buffer_status,
     apply_post_metrics,
@@ -654,10 +655,17 @@ def _reconcile_buffer_statuses(
                     continue
                 checked += 1
                 result: BufferPostResult | None = None
+                vanished = False
                 try:
                     result = fetch_post_status(
                         user_id, buffer_post_id=post.buffer_post_id
                     )
+                except BufferPostNotFoundError:
+                    # Deleted in Buffer's UI (the natural cleanup for an
+                    # over-full queue). Converge to canceled — otherwise the
+                    # phantom counts against the send ceiling and the
+                    # creation brake forever.
+                    vanished = True
                 except Exception:  # noqa: BLE001 — reconcile must never break the tick
                     logger.warning(
                         "status reconcile failed for post %s",
@@ -672,7 +680,13 @@ def _reconcile_buffer_statuses(
                     continue
                 if fresh.status not in {"queued", "scheduled"}:
                     continue  # changed mid-fetch (canceled/marked); leave it
-                if result is not None:
+                if vanished:
+                    logger.warning(
+                        "post %s no longer exists in Buffer; marking canceled",
+                        post.post_id,
+                    )
+                    fresh = fresh.model_copy(update={"status": "canceled"})
+                elif result is not None:
                     fresh = apply_buffer_status(fresh, result, now=now_iso)
                 repo.save_publishing_post(
                     fresh.model_copy(update={"status_checked_at": now_iso})
@@ -712,12 +726,22 @@ def _auto_send_ready_posts(
         # accumulated ready backlog once dumped weeks of packages into Buffer
         # at go-live. Growth is tracked via each send's returned record (the
         # fake/live callable both return the saved post).
-        queued_count = len(repo.list_publishing_posts(user_id, status="queued"))
+        # Scheduled posts occupy Buffer slots too — count them toward the
+        # ceiling for symmetry with the creation brake.
+        queued_count = len(repo.list_publishing_posts(user_id, status="queued")) + len(
+            repo.list_publishing_posts(user_id, status="scheduled")
+        )
         sent_this_pass = 0
+        failed_this_pass = 0
         for post in repo.list_publishing_posts(user_id, status="ready"):
             if queued_count >= 2 * state.daily_target:
                 break
             if sent_this_pass >= state.daily_target:
+                break
+            if failed_this_pass >= state.daily_target:
+                # A systemic Buffer outage over a large ready backlog would
+                # otherwise burn an R2 media copy + Buffer call per ready
+                # post per pass; the 30-min backoff takes over from here.
                 break
             if not post.auto_created:
                 continue
@@ -727,10 +751,13 @@ def _auto_send_ready_posts(
                 result = send_ready_post(user_id, post=post)
             except Exception:  # noqa: BLE001 — sends must never break the tick
                 logger.warning("auto-send crashed for post %s", post.post_id, exc_info=True)
+                failed_this_pass += 1
                 continue
             if result is not None and result.status in {"queued", "scheduled"}:
                 queued_count += 1
                 sent_this_pass += 1
+            else:
+                failed_this_pass += 1
     finally:
         SEND_LOCK.release()
 

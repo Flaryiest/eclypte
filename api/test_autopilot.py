@@ -788,7 +788,7 @@ def test_auto_publish_backstop_skips_when_queue_is_deep():
     repo = build_repo()
     send = RecordingSend()
     save_post(repo, post_id="p_ready")
-    for i in range(7):  # > 2 * daily_target (3)
+    for i in range(7):  # >= 2 * daily_target — ceiling already exceeded
         save_post(repo, post_id=f"p_q{i}", status="queued")
     save_state(repo, auto_publish=True)
 
@@ -881,6 +881,47 @@ def test_reconcile_respects_cadence():
     tick(repo, RecordingStarts(), status=fetch)
 
     assert fetch.calls == []
+
+
+def test_reconcile_marks_buffer_deleted_post_canceled():
+    # A queued post deleted in Buffer's UI must converge to canceled — a
+    # phantom "queued" record would count against the send ceiling and the
+    # creation brake forever.
+    from api.publishing import BufferPostNotFoundError
+
+    class NotFoundFetch:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, user_id, *, buffer_post_id):
+            self.calls.append(buffer_post_id)
+            raise BufferPostNotFoundError("gone")
+
+    repo = build_repo()
+    fetch = NotFoundFetch()
+    save_post(repo, post_id="p_q", status="queued", buffer_post_id="buf_gone")
+    save_state(repo)
+
+    tick(repo, RecordingStarts(), status=fetch)
+
+    stored = next(p for p in repo.list_publishing_posts(USER) if p.post_id == "p_q")
+    assert stored.status == "canceled"
+    assert stored.status_checked_at is not None
+    assert stored.last_error is None
+
+
+def test_auto_publish_caps_failed_attempts_per_pass():
+    # A systemic send failure must not burn a media copy + Buffer call for
+    # every ready post in one pass.
+    repo = build_repo()
+    send = RecordingSend(fail=True)
+    for i in range(5):
+        save_post(repo, post_id=f"p_{i}")
+    save_state(repo, auto_publish=True, daily_target=2)
+
+    tick(repo, RecordingStarts(), send=send)
+
+    assert len(send.calls) == 2
 
 
 def test_reconcile_failure_stamps_check_but_not_last_error():

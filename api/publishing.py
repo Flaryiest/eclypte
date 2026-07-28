@@ -53,6 +53,10 @@ class BufferClientError(RuntimeError):
     pass
 
 
+class BufferPostNotFoundError(BufferClientError):
+    """Buffer has no such post (deleted in Buffer's UI, or expired)."""
+
+
 class BufferClient:
     def __init__(self, *, api_key: str, api_url: str = "https://api.buffer.com"):
         self._api_key = api_key
@@ -99,6 +103,11 @@ class BufferClient:
         if response.get("errors"):
             raise BufferClientError(_first_error_message(response["errors"]))
         post = response.get("data", {}).get("post")
+        if post is None:
+            # A clean null with no errors: the post no longer exists in Buffer
+            # (deleted in its UI, or expired). Distinct from a transport error
+            # so callers can converge the local record instead of retrying.
+            raise BufferPostNotFoundError("Buffer has no post with this id")
         if not isinstance(post, dict) or not post.get("id"):
             raise BufferClientError("Buffer did not return a post")
         return _buffer_post_result(post)

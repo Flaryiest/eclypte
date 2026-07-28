@@ -806,8 +806,12 @@ def create_app(
                 return send_post_to_buffer(repo, store=store, post=post, mode="queue")
             except PostAlreadySentError:
                 # Another sender won the race; the stored record is already
-                # queued with its Buffer link — do not touch it.
-                return post
+                # queued with its Buffer link — return it fresh (not the stale
+                # ready snapshot) so the send budget counts the real growth.
+                try:
+                    return repo.load_publishing_post(user_id=uid, post_id=post.post_id)
+                except KeyError:
+                    return post
             except SendToBufferError as exc:
                 logger.warning("autopilot send failed for post %s: %s", post.post_id, exc)
                 return repo.save_publishing_post(
