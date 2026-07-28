@@ -10,6 +10,7 @@ the tick itself stays fast and unit-testable.
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 import threading
 from dataclasses import dataclass
@@ -21,6 +22,8 @@ from api.storage.models import AutopilotItem, AutopilotState, PublishingPostReco
 from api.storage.refs import FileVersionRef, RunRef
 from api.storage.repository import StorageRepository
 from api.timeutil import utc_now as utc_now_iso
+
+logger = logging.getLogger("eclypte.autopilot")
 
 TRIM_TARGET_SEC = 25.0
 TRIM_MIN_SEC = 20.0
@@ -255,14 +258,26 @@ def run_autopilot_tick(
     now: datetime | None = None,
 ) -> AutopilotState:
     with STATE_LOCK:
-        return _run_tick_locked(
+        state = _run_tick_locked(
             repo,
             user_id=user_id,
             start_music_analysis=start_music_analysis,
             start_edit=start_edit,
-            send_ready_post=send_ready_post,
             now=now,
         )
+    # Auto-send does real network I/O (R2 media copy + Buffer HTTP call) per
+    # post, so it runs outside STATE_LOCK: it only reads autopilot state and
+    # mutates publishing posts, which the lock never protected, and holding
+    # the lock for a multi-post send would block every dashboard autopilot
+    # route for as long as the sends take.
+    _auto_send_ready_posts(
+        repo,
+        user_id=user_id,
+        state=state,
+        send_ready_post=send_ready_post,
+        now=now or datetime.now(timezone.utc),
+    )
+    return state
 
 
 def _run_tick_locked(
@@ -271,7 +286,6 @@ def _run_tick_locked(
     user_id: str,
     start_music_analysis: StartMusicAnalysis,
     start_edit: StartEdit,
-    send_ready_post: SendReadyPost | None,
     now: datetime | None,
 ) -> AutopilotState:
     now_dt = now or datetime.now(timezone.utc)
@@ -442,19 +456,6 @@ def _run_tick_locked(
                         packaged_counts[today] = packaged_counts.get(today, 0) + 1
                         consecutive_failures = 0
 
-    # Auto-publish: push ready auto-created packages into Buffer's queue.
-    # Buffer's channel posting schedule decides when each actually posts; the
-    # gap until that slot is the human veto window.
-    if state.auto_publish and send_ready_post is not None and state.halted_reason is None:
-        queued_count = len(repo.list_publishing_posts(user_id, status="queued"))
-        if queued_count <= 2 * state.daily_target:
-            for post in repo.list_publishing_posts(user_id, status="ready"):
-                if not post.auto_created:
-                    continue
-                if post.last_error and _within_backoff(post.updated_at, now_dt):
-                    continue
-                send_ready_post(user_id, post=post)
-
     halted_reason = state.halted_reason
     if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
         halted_reason = (
@@ -541,6 +542,38 @@ def _run_tick_locked(
         }
     )
     return repo.save_autopilot_state(state)
+
+
+def _auto_send_ready_posts(
+    repo: StorageRepository,
+    *,
+    user_id: str,
+    state: AutopilotState,
+    send_ready_post: SendReadyPost | None,
+    now: datetime,
+) -> None:
+    """Push ready auto-created packages into Buffer's queue.
+
+    Runs outside STATE_LOCK (see `run_autopilot_tick`): it only reads
+    autopilot state and mutates publishing posts, neither of which the lock
+    protects. Buffer's channel posting schedule decides when each actually
+    posts; the gap until that slot is the human veto window.
+    """
+    if not state.auto_publish or send_ready_post is None or state.halted_reason is not None:
+        return
+    queued_count = len(repo.list_publishing_posts(user_id, status="queued"))
+    if queued_count > 2 * state.daily_target:
+        return
+    for post in repo.list_publishing_posts(user_id, status="ready"):
+        if not post.auto_created:
+            continue
+        if post.last_error and _within_backoff(post.updated_at, now):
+            continue
+        try:
+            send_ready_post(user_id, post=post)
+        except Exception:  # noqa: BLE001 — sends must never break the tick
+            logger.warning("auto-send crashed for post %s", post.post_id, exc_info=True)
+            continue
 
 
 def _within_backoff(updated_at: str, now_dt: datetime) -> bool:

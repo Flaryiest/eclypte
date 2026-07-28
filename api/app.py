@@ -814,7 +814,7 @@ def create_app(
                         update={"last_error": str(exc), "updated_at": utc_now()}
                     )
                 )
-            except (BufferClientError, ValueError) as exc:
+            except Exception as exc:
                 logger.warning("autopilot send failed for post %s: %s", post.post_id, exc)
                 return repo.save_publishing_post(
                     post.model_copy(

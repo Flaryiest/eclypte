@@ -689,6 +689,8 @@ class RecordingSend:
 
     def __call__(self, user_id, *, post):
         self.calls.append(post.post_id)
+        if self.fail:
+            raise RuntimeError("send exploded")
         return post.model_copy(update={"status": "queued"})
 
 
@@ -743,3 +745,22 @@ def test_auto_publish_backstop_skips_when_queue_is_deep():
     tick(repo, RecordingStarts(), send=send)
 
     assert send.calls == []
+
+
+def test_auto_publish_send_crash_does_not_break_tick():
+    # A rogue send_ready_post (the "never raises" contract broken) must not
+    # abort the tick: the rest of the tick's work still completes and the
+    # state still gets saved, so a manual /v1/autopilot/tick doesn't 500 and
+    # legitimate progress this tick isn't lost.
+    repo = build_repo()
+    starts = RecordingStarts()
+    send = RecordingSend(fail=True)
+    save_post(repo, post_id="p_auto")
+    publish_song_with_analysis(repo)
+    save_state(repo, auto_publish=True, items=[make_item()])
+
+    state = tick(repo, starts, send=send)
+
+    assert send.calls == ["p_auto"]
+    assert state.items[0].status == "editing"
+    assert repo.get_autopilot_state(user_id=USER).last_tick_at is not None
