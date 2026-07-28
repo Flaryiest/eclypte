@@ -763,7 +763,7 @@ def create_app(
     def autopilot_loop_configured() -> bool:
         return os.environ.get("ECLYPTE_AUTOPILOT") == "1"
 
-    def autopilot_callables(repo: StorageRepository, schedule):
+    def autopilot_callables(repo: StorageRepository, schedule, store: ObjectStore):
         def start_music_analysis(uid: str, *, audio: dict[str, str]) -> str:
             run = create_workflow_run(
                 repo,
@@ -804,7 +804,25 @@ def create_app(
             job = start_edit_job(request=request, schedule=schedule, repo=repo, uid=uid)
             return job.run_id
 
-        return start_music_analysis, start_edit
+        def send_ready_post(uid: str, *, post: PublishingPostRecord) -> PublishingPostRecord:
+            try:
+                return send_post_to_buffer(repo, store=store, post=post, mode="queue")
+            except SendToBufferError as exc:
+                logger.warning("autopilot send failed for post %s: %s", post.post_id, exc)
+                return repo.save_publishing_post(
+                    exc.record.model_copy(
+                        update={"last_error": str(exc), "updated_at": utc_now()}
+                    )
+                )
+            except (BufferClientError, ValueError) as exc:
+                logger.warning("autopilot send failed for post %s: %s", post.post_id, exc)
+                return repo.save_publishing_post(
+                    post.model_copy(
+                        update={"last_error": str(exc), "updated_at": utc_now()}
+                    )
+                )
+
+        return start_music_analysis, start_edit, send_ready_post
 
     def autopilot_status_response(state) -> AutopilotStatusResponse:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -829,7 +847,12 @@ def create_app(
         repo = build_background_repository()
         if repo is None:
             return
-        start_music_analysis, start_edit = autopilot_callables(repo, _spawn_workflow)
+        resolved_store = store or get_object_store(required=False)
+        if resolved_store is None:
+            return
+        start_music_analysis, start_edit, send_ready_post = autopilot_callables(
+            repo, _spawn_workflow, resolved_store
+        )
         for uid in repo.list_autopilot_user_ids():
             try:
                 run_autopilot_tick(
@@ -837,6 +860,7 @@ def create_app(
                     user_id=uid,
                     start_music_analysis=start_music_analysis,
                     start_edit=start_edit,
+                    send_ready_post=send_ready_post,
                 )
             except Exception:
                 logger.exception("autopilot tick failed for user %s", uid)
@@ -1462,15 +1486,17 @@ def create_app(
         background_tasks: BackgroundTasks,
         repo: StorageRepository = Depends(repository),
         uid: str = Depends(user_id),
+        resolved_store: ObjectStore = Depends(resolve_store),
     ) -> AutopilotStatusResponse:
-        start_music_analysis, start_edit = autopilot_callables(
-            repo, background_tasks.add_task
+        start_music_analysis, start_edit, send_ready_post = autopilot_callables(
+            repo, background_tasks.add_task, resolved_store
         )
         state = run_autopilot_tick(
             repo,
             user_id=uid,
             start_music_analysis=start_music_analysis,
             start_edit=start_edit,
+            send_ready_post=send_ready_post,
         )
         return autopilot_status_response(state)
 

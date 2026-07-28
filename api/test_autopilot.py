@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from api.autopilot import combo_key, pair_key, run_autopilot_tick, select_next_pair, select_trim_windows
-from api.storage.models import AutopilotItem, AutopilotState
+from api.storage.models import AutopilotItem, AutopilotState, PublishingPostRecord
 from api.storage.refs import FileRef, RunRef
 from api.storage.repository import StorageRepository
 from api.storage.test_fakes import InMemoryObjectStore
@@ -49,12 +49,13 @@ def save_state(repo, **overrides):
     return repo.save_autopilot_state(state)
 
 
-def tick(repo, starts):
+def tick(repo, starts, send=None):
     return run_autopilot_tick(
         repo,
         user_id=USER,
         start_music_analysis=starts.start_music_analysis,
         start_edit=starts.start_edit,
+        send_ready_post=send,
         now=NOW,
     )
 
@@ -661,3 +662,84 @@ def test_halt_stops_replenish():
     state = tick(repo, starts)
 
     assert state.items == []
+
+
+def save_post(repo, *, post_id, status="ready", auto_created=True, last_error=None,
+              updated_at="2026-06-09T11:00:00Z"):
+    return repo.save_publishing_post(
+        PublishingPostRecord(
+            post_id=post_id,
+            owner_user_id=USER,
+            render_file_id=f"rf_{post_id}",
+            render_version_id=f"rv_{post_id}",
+            render_display_name="Autopilot Reel",
+            status=status,
+            auto_created=auto_created,
+            last_error=last_error,
+            created_at="2026-06-09T11:00:00Z",
+            updated_at=updated_at,
+        )
+    )
+
+
+class RecordingSend:
+    def __init__(self, fail=False):
+        self.calls = []
+        self.fail = fail
+
+    def __call__(self, user_id, *, post):
+        self.calls.append(post.post_id)
+        return post.model_copy(update={"status": "queued"})
+
+
+def test_auto_publish_sends_ready_auto_created_posts():
+    repo = build_repo()
+    starts = RecordingStarts()
+    send = RecordingSend()
+    save_post(repo, post_id="p_auto")
+    save_post(repo, post_id="p_manual", auto_created=False)
+    save_state(repo, auto_publish=True)
+
+    tick(repo, starts, send=send)
+
+    assert send.calls == ["p_auto"]  # manual packages stay review-gated
+
+
+def test_auto_publish_off_sends_nothing():
+    repo = build_repo()
+    send = RecordingSend()
+    save_post(repo, post_id="p_auto")
+    save_state(repo)  # auto_publish defaults False
+
+    tick(repo, RecordingStarts(), send=send)
+
+    assert send.calls == []
+
+
+def test_auto_publish_backoff_skips_recently_failed_post():
+    repo = build_repo()
+    send = RecordingSend()
+    # Failed 5 minutes before NOW -> inside the 30-min backoff.
+    save_post(repo, post_id="p_recent", last_error="buffer down",
+              updated_at="2026-06-09T11:55:00Z")
+    # Failed long ago -> retried.
+    save_post(repo, post_id="p_stale", last_error="buffer down",
+              updated_at="2026-06-09T09:00:00Z")
+    save_state(repo, auto_publish=True)
+
+    tick(repo, RecordingStarts(), send=send)
+
+    assert send.calls == ["p_stale"]
+
+
+def test_auto_publish_backstop_skips_when_queue_is_deep():
+    repo = build_repo()
+    send = RecordingSend()
+    save_post(repo, post_id="p_ready")
+    for i in range(7):  # > 2 * daily_target (3)
+        save_post(repo, post_id=f"p_q{i}", status="queued")
+    save_state(repo, auto_publish=True)
+
+    tick(repo, RecordingStarts(), send=send)
+
+    assert send.calls == []

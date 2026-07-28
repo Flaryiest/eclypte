@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from typing import Protocol
 
 from api.publishing import create_publish_post_for_render
-from api.storage.models import AutopilotItem, AutopilotState, RunManifest
+from api.storage.models import AutopilotItem, AutopilotState, PublishingPostRecord, RunManifest
 from api.storage.refs import FileVersionRef, RunRef
 from api.storage.repository import StorageRepository
 from api.timeutil import utc_now as utc_now_iso
@@ -32,6 +32,9 @@ COMBO_WINDOW_BUCKET_SEC = 5
 MAX_CONSECUTIVE_FAILURES = 3
 MAX_FINISHED_ITEMS = 50
 PACKAGED_COUNT_RETENTION_DAYS = 14
+# A failed auto-send is retried after this many seconds; a fresh error-free
+# package sends immediately (no backoff applies until a send actually fails).
+AUTO_SEND_RETRY_BACKOFF_SEC = 1800
 
 ACTIVE_ITEM_STATUSES = {"analyzing", "editing"}
 
@@ -55,6 +58,12 @@ class StartEdit(Protocol):
         title: str,
         export_options: dict[str, object] | None,
     ) -> str: ...
+
+
+class SendReadyPost(Protocol):
+    def __call__(
+        self, user_id: str, *, post: "PublishingPostRecord"
+    ) -> "PublishingPostRecord": ...
 
 
 def combo_key(
@@ -242,6 +251,7 @@ def run_autopilot_tick(
     user_id: str,
     start_music_analysis: StartMusicAnalysis,
     start_edit: StartEdit,
+    send_ready_post: SendReadyPost | None = None,
     now: datetime | None = None,
 ) -> AutopilotState:
     with STATE_LOCK:
@@ -250,6 +260,7 @@ def run_autopilot_tick(
             user_id=user_id,
             start_music_analysis=start_music_analysis,
             start_edit=start_edit,
+            send_ready_post=send_ready_post,
             now=now,
         )
 
@@ -260,6 +271,7 @@ def _run_tick_locked(
     user_id: str,
     start_music_analysis: StartMusicAnalysis,
     start_edit: StartEdit,
+    send_ready_post: SendReadyPost | None,
     now: datetime | None,
 ) -> AutopilotState:
     now_dt = now or datetime.now(timezone.utc)
@@ -430,6 +442,19 @@ def _run_tick_locked(
                         packaged_counts[today] = packaged_counts.get(today, 0) + 1
                         consecutive_failures = 0
 
+    # Auto-publish: push ready auto-created packages into Buffer's queue.
+    # Buffer's channel posting schedule decides when each actually posts; the
+    # gap until that slot is the human veto window.
+    if state.auto_publish and send_ready_post is not None and state.halted_reason is None:
+        queued_count = len(repo.list_publishing_posts(user_id, status="queued"))
+        if queued_count <= 2 * state.daily_target:
+            for post in repo.list_publishing_posts(user_id, status="ready"):
+                if not post.auto_created:
+                    continue
+                if post.last_error and _within_backoff(post.updated_at, now_dt):
+                    continue
+                send_ready_post(user_id, post=post)
+
     halted_reason = state.halted_reason
     if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
         halted_reason = (
@@ -516,6 +541,16 @@ def _run_tick_locked(
         }
     )
     return repo.save_autopilot_state(state)
+
+
+def _within_backoff(updated_at: str, now_dt: datetime) -> bool:
+    try:
+        stamped = datetime.strptime(updated_at, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc
+        )
+    except ValueError:
+        return False
+    return (now_dt - stamped).total_seconds() < AUTO_SEND_RETRY_BACKOFF_SEC
 
 
 def _list_pairable_assets(
