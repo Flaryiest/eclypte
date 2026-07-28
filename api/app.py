@@ -1323,6 +1323,14 @@ def create_app(
         uid: str = Depends(user_id),
     ) -> PublishingPostView:
         post = publishing_post_or_404(repo, uid, post_id)
+        if post.buffer_post_id and post.status in {"queued", "scheduled"}:
+            client = resolve_buffer_client()
+            try:
+                client.delete_post(post_id=post.buffer_post_id)
+            except BufferClientError as exc:
+                # Veto failed: leave the post queued and visible rather than
+                # marking it canceled while Buffer still holds it.
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
         saved = repo.save_publishing_post(
             post.model_copy(
                 update={

@@ -18,6 +18,8 @@ from api.storage.refs import FileRef
 from api.storage.repository import StorageRepository
 from api.storage.test_fakes import InMemoryObjectStore
 
+USER = "user_123"
+
 
 class RecordingBufferClient:
     def __init__(self):
@@ -676,6 +678,30 @@ def make_ready_post(*, body: bytes = b"render-video"):
     return repo, store, post
 
 
+def build_publishing_test_app(*, buffer_client):
+    """A TestClient wired to a fresh repo/store with the given (fake) Buffer client
+    injected via create_app's seam — the same pattern the send-buffer API tests use.
+    Returns (app_client, repo, store) so the caller can seed posts through the repo
+    and then hit the same data through the API.
+    """
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    app_client = TestClient(
+        create_app(store=store, workflow_runner=NoopWorkflowRunner(), buffer_client=buffer_client)
+    )
+    return app_client, repo, store
+
+
+def save_queued_post(repo: StorageRepository, *, buffer_post_id: str, body: bytes = b"render-video"):
+    """A `ready` post (real render_output backed) flipped to `queued` with a
+    buffer_post_id, as if send-buffer already ran. For cancel-veto tests."""
+    render = _publish_render(repo, body=body)
+    post = create_publish_post_for_render(repo, user_id=USER, render_output=render)
+    return repo.save_publishing_post(
+        post.model_copy(update={"status": "queued", "buffer_post_id": buffer_post_id})
+    )
+
+
 def test_create_post_resolves_movie_and_song_names_from_render_lineage():
     from api.storage.refs import FileRef, RunRef
 
@@ -846,6 +872,84 @@ def test_send_post_to_buffer_failure_raises_with_prepared_record(monkeypatch):
     # The prepared record (public copy done) is attached; status untouched.
     assert excinfo.value.record.public_media_key
     assert excinfo.value.record.status == "ready"
+
+
+def test_delete_post_payload_and_parsing():
+    from api.publishing import BufferClient, build_buffer_delete_post_payload
+
+    payload = build_buffer_delete_post_payload(post_id="buf_1")
+    assert payload["variables"]["input"]["id"] == "buf_1"
+    assert "deletePost" in payload["query"]
+
+    client = BufferClient(api_key="k")
+    client._graphql = lambda p: {"data": {"deletePost": {"success": True}}}
+    client.delete_post(post_id="buf_1")  # no raise
+
+    client._graphql = lambda p: {"errors": [{"message": "not found"}]}
+    with pytest.raises(BufferClientError):
+        client.delete_post(post_id="buf_1")
+
+
+def test_cancel_queued_post_deletes_from_buffer():
+    # API-level: a queued post with a buffer_post_id is deleted in Buffer, then
+    # canceled locally; an unsent ready post cancels without touching Buffer.
+    client_calls = []
+
+    class FakeBufferClient:
+        def delete_post(self, *, post_id):
+            client_calls.append(post_id)
+
+    app_client, repo, store = build_publishing_test_app(buffer_client=FakeBufferClient())
+    queued = save_queued_post(repo, buffer_post_id="buf_9")  # helper: ready post flipped to queued
+    response = app_client.post(
+        f"/v1/publishing/posts/{queued.post_id}/cancel", headers={"X-User-Id": USER}
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "canceled"
+    assert client_calls == ["buf_9"]
+
+
+def test_cancel_ready_post_does_not_call_buffer():
+    # A post that was never sent to Buffer (no buffer_post_id) cancels locally
+    # without any Buffer interaction, exactly as before this feature.
+    client_calls = []
+
+    class FakeBufferClient:
+        def delete_post(self, *, post_id):
+            client_calls.append(post_id)
+
+    app_client, repo, store = build_publishing_test_app(buffer_client=FakeBufferClient())
+    render = _publish_render(repo, body=b"ready-video")
+    post = create_publish_post_for_render(repo, user_id=USER, render_output=render)
+
+    response = app_client.post(
+        f"/v1/publishing/posts/{post.post_id}/cancel", headers={"X-User-Id": USER}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "canceled"
+    assert client_calls == []
+
+
+def test_cancel_queued_post_502s_and_leaves_post_untouched_when_buffer_delete_fails():
+    # The human veto must not silently succeed locally if Buffer still holds (and may
+    # still send) the post — a delete failure surfaces as a 502 and the record is
+    # left exactly as it was (still queued, still visible for retry).
+    class FailingDeleteBufferClient:
+        def delete_post(self, *, post_id):
+            raise BufferClientError("Buffer delete failed")
+
+    app_client, repo, store = build_publishing_test_app(buffer_client=FailingDeleteBufferClient())
+    queued = save_queued_post(repo, buffer_post_id="buf_9")
+
+    response = app_client.post(
+        f"/v1/publishing/posts/{queued.post_id}/cancel", headers={"X-User-Id": USER}
+    )
+
+    assert response.status_code == 502
+    reloaded = repo.load_publishing_post(user_id=USER, post_id=queued.post_id)
+    assert reloaded.status == "queued"
+    assert reloaded.buffer_post_id == "buf_9"
 
 
 def test_send_post_to_buffer_missing_config_raises_config_error(monkeypatch):

@@ -101,6 +101,16 @@ class BufferClient:
             raise BufferClientError("Buffer did not return a post")
         return _buffer_post_result(post)
 
+    def delete_post(self, *, post_id: str) -> None:
+        response = self._graphql(build_buffer_delete_post_payload(post_id=post_id))
+        if response.get("errors"):
+            raise BufferClientError(_first_error_message(response["errors"]))
+        result = response.get("data", {}).get("deletePost")
+        if not isinstance(result, dict):
+            raise BufferClientError("Buffer did not return a deletePost result")
+        if result.get("message"):
+            raise BufferClientError(str(result["message"]))
+
     def get_channel(self, *, channel_id: str) -> BufferChannelStatus:
         response = self._graphql(build_buffer_channel_payload(channel_id=channel_id))
         if response.get("errors"):
@@ -196,6 +206,20 @@ def build_buffer_get_post_payload(*, post_id: str) -> dict[str, Any]:
                 status
                 externalLink
                 sentAt
+              }
+            }
+        """,
+        "variables": {"input": {"id": post_id}},
+    }
+
+
+def build_buffer_delete_post_payload(*, post_id: str) -> dict[str, Any]:
+    return {
+        "query": """
+            mutation DeletePost($input: DeletePostInput!) {
+              deletePost(input: $input) {
+                ... on PostActionSuccess { success }
+                ... on MutationError { message }
               }
             }
         """,
