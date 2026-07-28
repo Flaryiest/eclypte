@@ -33,6 +33,7 @@ from api.publishing import (
     BufferClientError,
     BufferChannelStatus,
     BufferConfigError,
+    PostAlreadySentError,
     SendToBufferError,
     apply_buffer_status,
     create_publish_post_for_render,
@@ -795,6 +796,10 @@ def create_app(
         def send_ready_post(uid: str, *, post: PublishingPostRecord) -> PublishingPostRecord:
             try:
                 return send_post_to_buffer(repo, store=store, post=post, mode="queue")
+            except PostAlreadySentError:
+                # Another sender won the race; the stored record is already
+                # queued with its Buffer link — do not touch it.
+                return post
             except SendToBufferError as exc:
                 logger.warning("autopilot send failed for post %s: %s", post.post_id, exc)
                 return repo.save_publishing_post(
@@ -1284,6 +1289,8 @@ def create_app(
         except BufferConfigError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except PostAlreadySentError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except SendToBufferError as exc:
             repo.save_publishing_post(

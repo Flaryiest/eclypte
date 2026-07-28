@@ -538,6 +538,10 @@ class SendToBufferError(Exception):
         self.cause = cause
 
 
+class PostAlreadySentError(Exception):
+    """The post's fresh status shows it was already sent; refuse to re-send."""
+
+
 def resolve_buffer_channel_id_env() -> str:
     channel_id = os.environ.get("BUFFER_INSTAGRAM_CHANNEL_ID")
     if not channel_id:
@@ -587,7 +591,7 @@ def send_post_to_buffer(
     # two passes racing the same ready post would both call Buffer.
     fresh = repo.load_publishing_post(user_id=post.owner_user_id, post_id=post.post_id)
     if fresh.status in {"queued", "scheduled", "published"}:
-        raise ValueError(f"post already {fresh.status}")
+        raise PostAlreadySentError(f"post already {fresh.status}")
     prepared = prepare_public_media_copy(
         repo, store=store, post=fresh, public_base_url=public_base_url
     )

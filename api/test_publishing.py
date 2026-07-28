@@ -879,20 +879,60 @@ def test_send_post_to_buffer_refuses_already_queued_post(monkeypatch):
     # route races the autopilot tick's auto-send pass: whichever call sees the
     # post go to "queued" (or later) first wins, and the other call must
     # refuse rather than create a second Instagram post.
-    from api.publishing import send_post_to_buffer
+    from api.publishing import PostAlreadySentError, send_post_to_buffer
 
     monkeypatch.setenv("BUFFER_INSTAGRAM_CHANNEL_ID", "chan_1")
     monkeypatch.setenv("ECLYPTE_R2_PUBLIC_BASE_URL", "https://media.example.com")
     repo, store, post = make_ready_post()
     # Another pass already sent it -- flip the stored record to queued.
-    repo.save_publishing_post(post.model_copy(update={"status": "queued"}))
+    repo.save_publishing_post(
+        post.model_copy(update={"status": "queued", "buffer_post_id": "buf_live"})
+    )
 
     client = RecordingBufferClient()
-    with pytest.raises(ValueError, match="already queued"):
+    with pytest.raises(PostAlreadySentError, match="already queued"):
         # Called with the STALE ready record the caller still holds.
         send_post_to_buffer(repo, store=store, post=post, mode="queue", client=client)
 
     assert client.calls == []
+    # The refusal must not touch the stored record: it stays queued with its
+    # Buffer link intact, so the cancel-veto and status refresh keep working.
+    reloaded = repo.load_publishing_post(user_id=post.owner_user_id, post_id=post.post_id)
+    assert reloaded.status == "queued"
+    assert reloaded.buffer_post_id == "buf_live"
+
+
+def test_autopilot_tick_send_handler_does_not_clobber_post_on_already_sent_refusal(monkeypatch):
+    # Regression for the exact race PostAlreadySentError exists to prevent:
+    # the autopilot tick's real send_ready_post callable (api.app) must not
+    # save a stale "ready" record over a post another sender already moved
+    # past ready when send_post_to_buffer refuses with PostAlreadySentError.
+    # Drives the real callable through the tick route (not a fake), so a
+    # regression in app.py's exception handling ordering would fail this.
+    from api.autopilot import AutopilotState
+    from api.publishing import PostAlreadySentError
+
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    render = _publish_render(repo, body=b"render-video")
+    post = create_publish_post_for_render(
+        repo, user_id=USER, render_output=render, auto_created=True
+    )
+    repo.save_autopilot_state(AutopilotState(owner_user_id=USER, enabled=True, auto_publish=True))
+
+    def raiser(*args, **kwargs):
+        raise PostAlreadySentError("post already queued")
+
+    monkeypatch.setattr("api.app.send_post_to_buffer", raiser)
+
+    app_client = TestClient(create_app(store=store, workflow_runner=NoopWorkflowRunner()))
+    response = app_client.post("/v1/autopilot/tick", headers={"X-User-Id": USER})
+
+    assert response.status_code == 200
+    reloaded = repo.load_publishing_post(user_id=USER, post_id=post.post_id)
+    assert reloaded.status == "ready"
+    assert reloaded.last_error is None
+    assert reloaded.updated_at == post.updated_at
 
 
 def test_delete_post_payload_and_parsing():
