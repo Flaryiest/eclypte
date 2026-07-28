@@ -616,6 +616,36 @@ def test_auto_pair_waits_for_library_when_empty():
     assert state.waiting_for_library is True
     assert state.halted_reason is None
 
+    # A second tick after the missing song shows up re-evaluates replenish
+    # fresh: the flag must flip back to False rather than latching True from
+    # the prior tick, and the library now being complete lets replenish pair
+    # and consume a new item in this same tick.
+    publish_asset(repo, file_id="f_song", kind="song_audio")
+
+    state = tick(repo, starts)
+
+    assert state.waiting_for_library is False
+    assert state.recycling is False
+    assert len(state.items) == 1
+    assert state.items[0].auto_paired is True
+    assert state.items[0].status == "analyzing"
+
+
+def test_recycling_flag_clears_when_auto_pair_turned_off():
+    repo = build_repo()
+    starts = RecordingStarts()
+    save_state(
+        repo,
+        recycling=True,
+        waiting_for_library=True,
+        auto_pair=False,
+    )
+
+    state = tick(repo, starts)
+
+    assert state.recycling is False
+    assert state.waiting_for_library is False
+
 
 def test_auto_pair_skips_when_pending_item_exists():
     repo = build_repo()
@@ -705,6 +735,19 @@ def test_auto_publish_sends_ready_auto_created_posts():
     tick(repo, starts, send=send)
 
     assert send.calls == ["p_auto"]  # manual packages stay review-gated
+
+
+def test_auto_publish_skips_when_autopilot_paused():
+    # A paused autopilot (enabled=False) must not auto-send even if
+    # auto_publish is on -- a manual tick while paused shouldn't leak sends.
+    repo = build_repo()
+    send = RecordingSend()
+    save_post(repo, post_id="p_auto")
+    save_state(repo, enabled=False, auto_publish=True)
+
+    tick(repo, RecordingStarts(), send=send)
+
+    assert send.calls == []
 
 
 def test_auto_publish_off_sends_nothing():

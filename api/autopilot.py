@@ -308,8 +308,12 @@ def _run_tick_locked(
     consecutive_failures = state.consecutive_failures
     exhausted_pairs = list(state.exhausted_pairs)
     last_paired_at = dict(state.last_paired_at)
-    recycling = state.recycling
-    waiting_for_library = state.waiting_for_library
+    # Re-derived fresh each tick (not carried over from prior state): stale
+    # True values must not persist when auto_pair is off, a pending item
+    # already exists, or capacity is full — the replenish gate below is the
+    # only place that stamps them True.
+    recycling = False
+    waiting_for_library = False
 
     def fail_item(item: AutopilotItem, error: str, *, count_failure: bool = True) -> AutopilotItem:
         nonlocal consecutive_failures
@@ -564,7 +568,12 @@ def _auto_send_ready_posts(
     protects. Buffer's channel posting schedule decides when each actually
     posts; the gap until that slot is the human veto window.
     """
-    if not state.auto_publish or send_ready_post is None or state.halted_reason is not None:
+    if (
+        not state.enabled
+        or not state.auto_publish
+        or send_ready_post is None
+        or state.halted_reason is not None
+    ):
         return
     if not SEND_LOCK.acquire(blocking=False):
         return
