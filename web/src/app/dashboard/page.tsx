@@ -823,7 +823,7 @@ function ReviewSheet({
                     <p className={styles.smallText}>{post.hashtags.join(" ")}</p>
                     <p className={styles.smallText}>{postedLabel(post)}</p>
                     {post.status === "queued" && (
-                        <p className={styles.smallText}>Posts at your next Buffer slot — cancel to veto.</p>
+                        <p className={styles.smallText}>Posts at your next scheduled slot — cancel to veto.</p>
                     )}
                 </>
             )}
