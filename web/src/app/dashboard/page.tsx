@@ -154,7 +154,13 @@ export default function HomePage() {
         setPosts((current = []) => current.map((post) => (post.post_id === next.post_id ? next : post)))
     }
 
-    const updateSettings = async (input: { enabled?: boolean; dailyTarget?: number; clearHalt?: boolean }) => {
+    const updateSettings = async (input: {
+        enabled?: boolean
+        dailyTarget?: number
+        clearHalt?: boolean
+        autoPair?: boolean
+        autoPublish?: boolean
+    }) => {
         if (!api) {
             return
         }
@@ -256,6 +262,26 @@ export default function HomePage() {
                         onClick={() => updateSettings({ enabled: !autopilot?.enabled })}
                         disabled={isSavingSettings}
                     />
+                    Pick pairs for me
+                    <button
+                        type="button"
+                        role="switch"
+                        className={`${styles.switchButton} ${autopilot?.auto_pair ? styles.switchButtonOn : ""}`}
+                        aria-checked={Boolean(autopilot?.auto_pair)}
+                        aria-label="Pick pairs for me"
+                        onClick={() => updateSettings({ autoPair: !autopilot?.auto_pair })}
+                        disabled={isSavingSettings}
+                    />
+                    Post without review
+                    <button
+                        type="button"
+                        role="switch"
+                        className={`${styles.switchButton} ${autopilot?.auto_publish ? styles.switchButtonOn : ""}`}
+                        aria-checked={Boolean(autopilot?.auto_publish)}
+                        aria-label="Post without review"
+                        onClick={() => updateSettings({ autoPublish: !autopilot?.auto_publish })}
+                        disabled={isSavingSettings}
+                    />
                     {!autopilot?.loop_configured && (
                         <button className={styles.ghostButton} type="button" onClick={runTick} disabled={isTicking}>
                             {isTicking ? <Spinner /> : <Zap size={15} />} Run now
@@ -279,6 +305,16 @@ export default function HomePage() {
                         {isSavingSettings ? <Spinner /> : <Play size={15} />} Resume
                     </button>
                 </div>
+            )}
+            {autopilot?.waiting_for_library && (
+                <p className={styles.smallText}>
+                    Waiting for library content — add a film and a song so autopilot can pair them.
+                </p>
+            )}
+            {autopilot?.recycling && (
+                <p className={styles.smallText}>
+                    Recycling your library — add films or songs for fresh combos.
+                </p>
             )}
             {banner && <div className={styles.errorBanner}>{banner}</div>}
 
@@ -340,7 +376,7 @@ export default function HomePage() {
                     {failedItems.map((item) => (
                         <ProgressRow
                             key={item.item_id}
-                            title={itemTitle(item, assetById)}
+                            title={`${itemTitle(item, assetById)}${item.auto_paired ? " · auto-paired" : ""}`}
                             stageText="Didn't work"
                             percent={null}
                             error={item.last_error ?? "Something went wrong — remove it below and try again."}
@@ -373,7 +409,10 @@ export default function HomePage() {
                                     ) : (
                                         <span className={styles.queueThumb} aria-hidden />
                                     )}
-                                    <span className={styles.truncate}>{itemTitle(item, assetById)}</span>
+                                    <span className={styles.truncate}>
+                                        {itemTitle(item, assetById)}
+                                        {item.auto_paired ? " · auto-paired" : ""}
+                                    </span>
                                     <span style={{ marginLeft: "auto", display: "inline-flex", gap: "0.6rem", alignItems: "center" }}>
                                         {item.status === "failed" && <span className={styles.smallText} style={{ margin: 0, color: "var(--danger)" }}>didn&apos;t work</span>}
                                         <button
@@ -487,7 +526,7 @@ function itemTitle(item: AutopilotItem, assetById: Map<string, AssetSummary>) {
 // show its live percent + ETA; analyzing shows the stage sentence.
 function WorkingRow({ item, jobs, assets }: { item: AutopilotItem; jobs: EditJobStatus[]; assets: Map<string, AssetSummary> }) {
     const job = item.edit_run_id ? jobs.find((candidate) => candidate.run_id === item.edit_run_id) ?? null : null
-    const title = itemTitle(item, assets)
+    const title = `${itemTitle(item, assets)}${item.auto_paired ? " · auto-paired" : ""}`
     if (item.status === "editing" && job) {
         return <EditingRow title={title} job={job} item={item} />
     }
@@ -680,6 +719,34 @@ function ReviewSheet({
                                 {busy === "mark" ? <Spinner /> : null} Mark as posted
                             </button>
                         )}
+                        {inFlight && (
+                            <span className={styles.sheetActionsRight}>
+                                <button
+                                    className={styles.dangerButton}
+                                    type="button"
+                                    onClick={() => {
+                                        // Two-step confirm: canceling now vetoes the queued/scheduled post
+                                        // and deletes it from Buffer server-side.
+                                        if (!confirmSkip) {
+                                            setConfirmSkip(true)
+                                            confirmTimerRef.current = setTimeout(() => setConfirmSkip(false), 3000)
+                                            return
+                                        }
+                                        if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
+                                        setConfirmSkip(false)
+                                        act("cancel", async () => {
+                                            replacePost(await api.cancelPublishingPost(post.post_id))
+                                            toast("Canceled")
+                                            onClose()
+                                        })
+                                    }}
+                                    disabled={busy !== null}
+                                >
+                                    {busy === "cancel" ? <Spinner /> : null}
+                                    {confirmSkip ? "Really cancel?" : "Cancel"}
+                                </button>
+                            </span>
+                        )}
                         {post.post_url && (
                             <a className={styles.detailLink} href={post.post_url} target="_blank" rel="noreferrer">
                                 Open on Instagram
@@ -755,6 +822,9 @@ function ReviewSheet({
                     <p className={styles.proseText}>{post.caption}</p>
                     <p className={styles.smallText}>{post.hashtags.join(" ")}</p>
                     <p className={styles.smallText}>{postedLabel(post)}</p>
+                    {post.status === "queued" && (
+                        <p className={styles.smallText}>Posts at your next Buffer slot — cancel to veto.</p>
+                    )}
                 </>
             )}
             {post.last_error && <div className={styles.errorBanner}>{post.last_error}</div>}

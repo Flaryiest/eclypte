@@ -162,6 +162,7 @@ export type AutopilotItem = {
     last_error: string | null
     created_at: string
     updated_at: string
+    auto_paired: boolean
 }
 
 export type AutopilotStatus = {
@@ -174,6 +175,10 @@ export type AutopilotStatus = {
     pending: number
     items: AutopilotItem[]
     loop_configured: boolean
+    auto_pair: boolean
+    auto_publish: boolean
+    recycling: boolean
+    waiting_for_library: boolean
 }
 
 export type AutopilotQueueItemInput = {
@@ -431,7 +436,13 @@ export class EclypteApiClient {
     }
 
     async updateAutopilot(
-        input: { enabled?: boolean; dailyTarget?: number; clearHalt?: boolean },
+        input: {
+            enabled?: boolean
+            dailyTarget?: number
+            clearHalt?: boolean
+            autoPair?: boolean
+            autoPublish?: boolean
+        },
         signal?: AbortSignal,
     ) {
         return this.request<AutopilotStatus>("/v1/autopilot", {
@@ -440,6 +451,8 @@ export class EclypteApiClient {
                 enabled: input.enabled,
                 daily_target: input.dailyTarget,
                 clear_halt: input.clearHalt ?? false,
+                auto_pair: input.autoPair,
+                auto_publish: input.autoPublish,
             }),
             signal,
         })
