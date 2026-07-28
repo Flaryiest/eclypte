@@ -83,6 +83,8 @@ changing bundled worker code.
                         ▼
    create_publish_post ─► OpenAI Gen-Z caption ─► status "ready"  ◄── HUMAN REVIEW GATE
                        ─► user approves ─► send-buffer (queue | schedule | now) ─► Instagram Reel
+                       ─► status "published" ─► autopilot tick / refresh-status:
+                            Buffer post.metrics ─► performance_score (log vs. trailing median)
 ```
 
 `run_edit_pipeline` is the parent workflow: it chains music → video → timeline → render **inline in
@@ -92,7 +94,11 @@ extend it further: `auto_pair` has autopilot pick the next film×song pair itsel
 requiring a manually queued one (LRU-rotated over the saved library); `auto_publish` skips the pause
 after `status "ready"` and calls `send-buffer` (queue mode) automatically — the diagram's
 `HUMAN REVIEW GATE` becomes a post-send veto window (`cancel` now deletes the post from Buffer)
-rather than a pre-send approval.
+rather than a pre-send approval. Once a post is `published`, a separate **performance feedback loop
+(Phase 1)** closes the diagram: the autopilot tick's metrics-refresh pass (and, on demand,
+`refresh-status`) polls `BufferClient.get_post_metrics` on a 12h cadence, and each publishing-post
+list response scores the reel with `performance_score` — ingestion and visibility only; no
+steering yet.
 
 ---
 
@@ -115,7 +121,7 @@ rather than a pre-send approval.
 - **`workflows.py`** (~1900 lines) — `WorkflowRunner` protocol + `DefaultWorkflowRunner`; every
   `run_*` workflow. Version-gates CLIP-index reuse via `CLIP_INDEX_BUILD_STEP`; caps usable source
   at `credits.content_end_sec`; fails a run if the timeline is >0.75s shorter than the trimmed song.
-- **`autopilot.py`** (~660 lines) — `run_autopilot_tick` state machine
+- **`autopilot.py`** (~760 lines) — `run_autopilot_tick` state machine
   (`pending → analyzing → editing → packaged`). Ranks ~20–30s (≈25s) trim windows by
   energy (chorus bonus + 5s lead-in), dedupes `(video, song, window)`, always uses
   `reels_cinematic`, **halts after 3 consecutive failures**, and auto-creates `ready` review
@@ -126,14 +132,25 @@ rather than a pre-send approval.
   (`_auto_send_ready_posts`, outside `STATE_LOCK`, serialized by its own non-blocking `SEND_LOCK`)
   that sends `ready`+`auto_created` posts to Buffer's queue, backing off 30 min on failure and
   pausing once queued posts exceed 2× `daily_target` — send failures never trip the 3-failure halt.
-  `STATE_LOCK` (single-replica only) still guards the state read-modify-write. Loop runs when
-  `ECLYPTE_AUTOPILOT=1`.
-- **`publishing.py`** (~780 lines) — `BufferClient` (GraphQL, Instagram `reel`, plus a `deletePost`
-  mutation), OpenAI caption generation (`ECLYPTE_CAPTION_MODEL`, default `gpt-5.4-mini`;
-  deterministic fallback), public R2 media copy, a shared `send_post_to_buffer` (used by both the
-  `send-buffer` route and autopilot's `auto_publish` pass), and Buffer status reconciliation. `now`
-  posts via a near-future `dueAt` (Buffer has no instant publish); `cancel` on a queued/scheduled
-  post now deletes it from Buffer first — the veto for anything sent, manually or by `auto_publish`.
+  A third pass, **`_refresh_post_metrics`** (also outside `STATE_LOCK`, its own non-blocking
+  `METRICS_LOCK`), then pulls Buffer's per-post metrics for every `published` post regardless of
+  `auto_pair`/`auto_publish`/halt — a 12h cadence, a 20-post/pass cap, 30-day retirement, saving
+  onto a freshly reloaded record so a concurrent status change is never reverted; failures log and
+  stamp the checked time only, never `last_error`/the halt. Since the background loop only ticks
+  users with an enabled marker, pausing autopilot pauses this metrics pass too (the manual
+  `refresh-status` route still works). `STATE_LOCK` (single-replica only) still guards the state
+  read-modify-write. Loop runs when `ECLYPTE_AUTOPILOT=1`.
+- **`publishing.py`** (~890 lines) — `BufferClient` (GraphQL, Instagram `reel`, plus `deletePost` and
+  `get_post_metrics` mutations/queries), OpenAI caption generation (`ECLYPTE_CAPTION_MODEL`, default
+  `gpt-5.4-mini`; deterministic fallback), public R2 media copy, a shared `send_post_to_buffer` (used
+  by both the `send-buffer` route and autopilot's `auto_publish` pass), and Buffer status
+  reconciliation. `now` posts via a near-future `dueAt` (Buffer has no instant publish); `cancel` on
+  a queued/scheduled post now deletes it from Buffer first — the veto for anything sent, manually or
+  by `auto_publish`. **Performance feedback loop (Phase 1):** `apply_post_metrics` (pure fold —
+  a `PostMetricsSnapshot` lands in `metrics_history` only when the reading changed, capped at the
+  first 2 + last 10; never touches `last_error`/status) and `performance_score` (pure —
+  `log(primary)` minus `log(median primary)` across a post's ≤10 most recent published peers, `None`
+  under 5 scored posts) turn raw Buffer metrics into what the dashboard renders.
 - **`export_options.py`** — the single home for export behavior: `reels_9_16` (fill + `crop_focus_x`),
   `reels_cinematic` (letterbox, baked bars — autopilot default), `youtube_16_9` (letterbox — backend
   default), and `trim_song_analysis()`.
@@ -141,8 +158,11 @@ rather than a pre-send approval.
 
 ### Storage substrate — `api/storage/`
 - **`models.py`** — all Pydantic records (`extra="forbid"`): `FileManifest`, `FileVersionMeta`,
-  `RunManifest`, `RunEvent`, `UploadReservation`, synthesis records, `PublishingPostRecord`; the
-  `ArtifactKind` literal and status enums.
+  `RunManifest`, `RunEvent`, `UploadReservation`, synthesis records, `PublishingPostRecord`,
+  `PostMetricsSnapshot`; the `ArtifactKind` literal and status enums. `PublishingPostRecord`'s
+  performance-feedback fields (`metrics`, `metrics_updated_at`/`metrics_checked_at`,
+  `metrics_history: list[PostMetricsSnapshot]`, `source_video_file_id`/`song_file_id`) are all
+  additive with safe defaults so pre-Phase-1 R2 JSON still loads.
 - **`repository.py`** — `StorageRepository`, the API-facing facade. File/upload/synthesis/publishing/
   autopilot state → **R2 JSON**; run manifests/events → a pluggable **RunStore**
   (`PostgresRunStore` when `DATABASE_URL` is set, else `R2RunStore`); durable run writes mirrored to
@@ -295,11 +315,18 @@ Breaking any of these silently breaks another layer:
   (`reels_cinematic`, ~25s energy windows, review-gated Buffer publishing, AI captions) — now with
   opt-in autonomy: `auto_pair` (LRU-rotates the saved library, with exhaustion + recycle) and
   `auto_publish` (drains ready packages into Buffer's queue, trading manual review for a
-  Buffer-schedule-driven veto window via the extended `cancel` route).
+  Buffer-schedule-driven veto window via the extended `cancel` route). On top of that, a
+  **performance feedback loop (Phase 1)** closes the posting loop: a tick pass and `refresh-status`
+  ingest Buffer's per-post metrics into `PublishingPostRecord`, and a baseline-relative
+  `performance_score` (log vs. the account's own trailing median) surfaces on the dashboard's
+  posted-reel cards and review sheet — ingestion + visibility only, no adaptive steering yet.
 - **Deferred:** text-behind-subject masking for kinetic lyrics (needs a GPU segmentation matte);
   `whip` transition and `hold` effect (cut/no-op); a YouTube publishing path (16:9 renders exist,
   no upload integration); a single-scene vs. full-source-montage retention experiment; per-shot
-  crop focus for fill-mode reels.
+  crop focus for fill-mode reels; performance feedback loop Phase 2 (adaptive pairing/window
+  steering from `performance_score`); Buffer post metrics are licensed for personal
+  workflows/automations only — a known multi-tenant blocker (upgrade path: direct Meta "Instagram
+  API with Instagram Login", not built).
 - **Notable soft spots:** temp auth is effectively no auth; the autopilot state lock is
   single-replica only; git history still carries ~600 MB of media blobs (working-tree media was
   trimmed, but clone-size relief would need a history rewrite or LFS — a deliberate deferral).

@@ -113,7 +113,7 @@ Routes:
 - `GET /v1/files/{file_id}/versions/{version_id}/download-url` returns a presigned R2 GET URL.
 - `POST /v1/music/analyses`, `POST /v1/video/analyses`, `POST /v1/timelines`, and `POST /v1/renders` create run manifests and schedule background work. Renders publish a `render_output` MP4 and a `render_poster` JPEG thumbnail.
 - `GET /v1/publishing/config` reports non-secret Buffer/OpenAI/public-media setup.
-- `GET /v1/publishing/posts`, `POST /v1/publishing/posts`, `PATCH /v1/publishing/posts/{post_id}`, `POST /v1/publishing/posts/{post_id}/regenerate-caption`, `POST /v1/publishing/posts/{post_id}/send-buffer`, `POST /v1/publishing/posts/{post_id}/refresh-status` (back-fills the live permalink from Buffer), `POST /v1/publishing/posts/{post_id}/mark-posted` (manual override when a sent post can't be reconciled from Buffer), and `POST /v1/publishing/posts/{post_id}/cancel` manage review-gated Buffer publishing packages (sent as Instagram Reels). `cancel` on a `queued`/`scheduled` post now deletes it from Buffer first (the human veto) — it fails with a 502 and leaves the post untouched if Buffer refuses the delete.
+- `GET /v1/publishing/posts` (each post carries a `performance_score` scored against the account's recent published cohort), `POST /v1/publishing/posts`, `PATCH /v1/publishing/posts/{post_id}`, `POST /v1/publishing/posts/{post_id}/regenerate-caption`, `POST /v1/publishing/posts/{post_id}/send-buffer`, `POST /v1/publishing/posts/{post_id}/refresh-status` (back-fills the live permalink from Buffer, and — for a `published` post — pulls the latest per-post metrics too; a metrics-pull failure logs and is swallowed, never surfaced as an error), `POST /v1/publishing/posts/{post_id}/mark-posted` (manual override when a sent post can't be reconciled from Buffer), and `POST /v1/publishing/posts/{post_id}/cancel` manage review-gated Buffer publishing packages (sent as Instagram Reels). `cancel` on a `queued`/`scheduled` post now deletes it from Buffer first (the human veto) — it fails with a 502 and leaves the post untouched if Buffer refuses the delete.
 - `GET /v1/runs/{run_id}` and `GET /v1/runs/{run_id}/events` inspect workflow status.
 - `GET /v1/runs/stream` and `GET /v1/runs/{run_id}/stream` stream Redis-backed run updates when `REDIS_URL` is configured.
 - `POST /internal/progress` records worker progress and requires `X-Eclypte-Internal-Token`.
@@ -144,6 +144,33 @@ Deploy-time check: the cancel veto's `deletePost` GraphQL mutation shape was wri
 against Buffer's documented conventions but has not been confirmed against the live
 schema — verify a cancel round-trip on a queued post before trusting `auto_publish`
 unattended.
+
+Deploy-time check (performance feedback loop, Phase 1): the live-probe step for
+`BufferClient.get_post_metrics` was skipped during implementation (no `BUFFER_API_KEY`
+available locally) — run it against a real sent post as soon as a key is available and
+record which metric `name`s Buffer actually populates for Instagram Reels (floor
+expectation per Buffer's Analyze docs: `impressions`/`likes`/`comments`; hoped-for:
+`views`/`reach`/`saves`/`shares`/`totalTimeWatched`):
+
+```bash
+curl -s https://api.buffer.com -H "Authorization: Bearer $BUFFER_API_KEY" \
+  -H "Content-Type: application/json" -d '{
+  "query": "query Post($input: PostInput!) { post(input: $input) { id metricsUpdatedAt metrics { type name value unit } } }",
+  "variables": {"input": {"id": "<a real sent buffer_post_id from R2 post JSON>"}}
+}' | python3 -m json.tool
+```
+
+The implementation is deliberately shape-agnostic (stores whatever metric names arrive),
+so a floor-only result needs no code change — just update the dashboard's `METRIC_LABELS`
+map (`web/src/app/dashboard/page.tsx`) if a hoped-for name never shows up and its row
+should be dropped instead of falling through `humanizeLabel`.
+
+Licensing note: Buffer post metrics are licensed for "personal workflows and automations
+only" (the personal API key Eclypte uses). That's fine for the current single-operator
+product but is a known blocker before any multi-tenant launch — the documented upgrade
+path is a direct Meta "Instagram API with Instagram Login" integration (full Reels
+metrics: views, reach, saves, shares, avg watch time, skip rate; needs a Meta app + a
+60-day token with a dead-man refresh), not built in Phase 1.
 
 Publishing smoke:
 
@@ -191,6 +218,15 @@ paused once queued posts exceed 2x `daily_target`, send failures never count
 toward the 3-failure halt). With `auto_publish` on,
 `POST /v1/publishing/posts/{post_id}/cancel` on a queued/scheduled post is the
 human veto — it deletes the post from Buffer before marking it canceled.
+
+Every tick also runs a metrics-refresh pass (performance feedback loop, Phase
+1) over `published` posts — independent of `auto_pair`/`auto_publish`/the
+halt, so review-gated mode gets metrics too. It pulls Buffer's per-post
+metrics on a 12h cadence, caps itself at 20 posts/pass, stops polling a post
+after 30 days, and never fails the tick or trips the halt on a fetch error.
+Because the background loop only ticks users with `enabled=true`, pausing
+autopilot pauses this pass along with everything else — use the dashboard's
+manual "Refresh from Buffer" (`refresh-status`) to pull metrics while paused.
 
 Deploy the new R2-aware Modal wrappers before using video-analysis/render API
 jobs against live Modal. Run deploys from `api/prototyping/` so the shared
