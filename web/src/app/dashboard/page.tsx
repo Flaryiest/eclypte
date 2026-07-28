@@ -232,7 +232,7 @@ export default function HomePage() {
 
     const reviewPost = reviewPostId ? posts.find((post) => post.post_id === reviewPostId) ?? null : null
     const madeToday = autopilot?.packaged_today ?? 0
-    const target = autopilot?.daily_target ?? 3
+    const target = autopilot?.daily_target ?? 2
     const banner = error || autopilotResource.error || postsResource.error || jobsResource.error || assetsResource.error
 
     return (

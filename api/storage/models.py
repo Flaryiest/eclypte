@@ -233,7 +233,7 @@ class AutopilotState(BaseModel):
 
     owner_user_id: str
     enabled: bool = False
-    daily_target: int = Field(default=3, ge=1, le=10)
+    daily_target: int = Field(default=2, ge=1, le=10)
     auto_pair: bool = False
     auto_publish: bool = False
     # file_id -> ISO timestamp of the last time replenish paired this asset.

@@ -131,7 +131,7 @@ steering yet.
   exhausted, so the queue never runs dry; **`auto_publish`** runs a separate post-tick pass
   (`_auto_send_ready_posts`, outside `STATE_LOCK`, serialized by its own non-blocking `SEND_LOCK`)
   that sends `ready`+`auto_created` posts to Buffer's queue, backing off 30 min on failure and
-  pausing once queued posts exceed 2× `daily_target` — send failures never trip the 3-failure halt.
+  budgeted per send (max `daily_target` per pass, halting at 2× `daily_target` queued) — send failures never trip the 3-failure halt. A tick-side reconcile pass converges queued/scheduled posts with Buffer's real sent state hourly, and a creation brake pauses pairing while unposted auto-created posts cover 2× the daily target, so production self-throttles to Buffer's actual posting rate.
   A third pass, **`_refresh_post_metrics`** (also outside `STATE_LOCK`, its own non-blocking
   `METRICS_LOCK`), then pulls Buffer's per-post metrics for every `published` post regardless of
   `auto_pair`/`auto_publish`/halt — a 12h cadence, a 20-post/pass cap, 30-day retirement, saving
