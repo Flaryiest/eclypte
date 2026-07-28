@@ -185,9 +185,10 @@ Two default-off autonomy flags extend the loop via `PATCH /v1/autopilot`:
 `auto_pair` lets the tick pick its own film×song pairs (LRU rotation over the
 saved library, skipping/recycling exhausted pairs — `api/autopilot.py::select_next_pair`)
 instead of requiring a manually queued pair; `auto_publish` sends `ready`
-auto-created packages straight to Buffer's queue on a tick (30-minute retry
-backoff on a send failure, paused once queued posts exceed 2x `daily_target`,
-send failures never count toward the 3-failure halt). With `auto_publish` on,
+auto-created packages straight to Buffer's queue on a tick (skipped while
+autopilot is paused or halted, 30-minute retry backoff on a send failure,
+paused once queued posts exceed 2x `daily_target`, send failures never count
+toward the 3-failure halt). With `auto_publish` on,
 `POST /v1/publishing/posts/{post_id}/cancel` on a queued/scheduled post is the
 human veto — it deletes the post from Buffer before marking it canceled.
 
