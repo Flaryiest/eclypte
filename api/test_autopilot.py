@@ -404,6 +404,7 @@ def test_tick_skips_already_used_combo_without_counting_failure():
     assert "already used" in state.items[0].last_error
     assert state.consecutive_failures == 0
     assert state.halted_reason is None
+    assert "file_video::file_song" in state.exhausted_pairs
 
 
 def test_tick_halts_after_three_consecutive_failures():
@@ -563,3 +564,100 @@ def test_select_next_pair_recycles_least_recent_when_all_exhausted():
 def test_select_next_pair_empty_library_returns_none():
     assert select_next_pair([], [_asset("s1")], last_paired_at={}, exhausted_pairs=[]) is None
     assert select_next_pair([_asset("f1")], [], last_paired_at={}, exhausted_pairs=[]) is None
+
+
+def publish_asset(repo, *, file_id, kind, name="asset"):
+    file_ref = FileRef(user_id=USER, file_id=file_id)
+    repo.create_file_manifest(file_ref=file_ref, kind=kind, display_name=name)
+    version_ref = repo.publish_bytes(
+        file_ref=file_ref,
+        body=b"data",
+        content_type="application/octet-stream",
+        original_filename=name,
+        created_by_step="test",
+        derived_from_step="test",
+        input_file_version_ids=[],
+    )
+    return {"file_id": file_id, "version_id": version_ref.version_id}
+
+
+def test_auto_pair_replenishes_one_item_and_stamps_lru():
+    repo = build_repo()
+    starts = RecordingStarts()
+    publish_asset(repo, file_id="f_film", kind="source_video", name="film.mp4")
+    song = publish_asset(repo, file_id="f_song", kind="song_audio", name="song.wav")
+    save_state(repo, auto_pair=True)
+
+    state = tick(repo, starts)
+
+    assert len(state.items) == 1
+    item = state.items[0]
+    assert item.auto_paired is True
+    assert item.source_video_file_id == "f_film"
+    assert item.song_file_id == "f_song"
+    # The synthesized item was consumed by start-new-work in the same tick:
+    # no analysis exists, so it should now be analyzing.
+    assert item.status == "analyzing"
+    assert starts.analysis_calls[0][1] == song
+    assert set(state.last_paired_at) == {"f_film", "f_song"}
+    assert state.waiting_for_library is False
+
+
+def test_auto_pair_waits_for_library_when_empty():
+    repo = build_repo()
+    starts = RecordingStarts()
+    publish_asset(repo, file_id="f_film", kind="source_video")  # no songs
+    save_state(repo, auto_pair=True)
+
+    state = tick(repo, starts)
+
+    assert state.items == []
+    assert state.waiting_for_library is True
+    assert state.halted_reason is None
+
+
+def test_auto_pair_skips_when_pending_item_exists():
+    repo = build_repo()
+    starts = RecordingStarts()
+    publish_asset(repo, file_id="f_film", kind="source_video")
+    publish_asset(repo, file_id="f_song", kind="song_audio")
+    save_state(repo, auto_pair=True, items=[make_item(status="pending")])
+
+    state = tick(repo, starts)
+
+    # The manual pending item is consumed; replenish did not add a second.
+    assert len(state.items) == 1
+    assert state.items[0].auto_paired is False
+
+
+def test_auto_pair_recycles_when_all_pairs_exhausted():
+    repo = build_repo()
+    starts = RecordingStarts()
+    publish_asset(repo, file_id="f_film", kind="source_video")
+    publish_asset(repo, file_id="f_song", kind="song_audio")
+    save_state(
+        repo,
+        auto_pair=True,
+        exhausted_pairs=["f_film::f_song"],
+        used_combos=["f_film|f_song|0", "f_film|f_song|25"],
+        last_paired_at={"f_film": "2026-07-20T00:00:00Z", "f_song": "2026-07-20T00:00:00Z"},
+    )
+
+    state = tick(repo, starts)
+
+    assert state.recycling is True
+    assert state.exhausted_pairs == []
+    assert all(not c.startswith("f_film|f_song|") for c in state.used_combos)
+    assert len(state.items) == 1 and state.items[0].auto_paired is True
+
+
+def test_halt_stops_replenish():
+    repo = build_repo()
+    starts = RecordingStarts()
+    publish_asset(repo, file_id="f_film", kind="source_video")
+    publish_asset(repo, file_id="f_song", kind="song_audio")
+    save_state(repo, auto_pair=True, halted_reason="halted for test")
+
+    state = tick(repo, starts)
+
+    assert state.items == []

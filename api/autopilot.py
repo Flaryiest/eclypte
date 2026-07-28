@@ -10,6 +10,7 @@ the tick itself stays fast and unit-testable.
 from __future__ import annotations
 
 import json
+import secrets
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -274,6 +275,10 @@ def _run_tick_locked(
     used_combos = list(state.used_combos)
     packaged_counts = dict(state.packaged_counts)
     consecutive_failures = state.consecutive_failures
+    exhausted_pairs = list(state.exhausted_pairs)
+    last_paired_at = dict(state.last_paired_at)
+    recycling = state.recycling
+    waiting_for_library = state.waiting_for_library
 
     def fail_item(item: AutopilotItem, error: str, *, count_failure: bool = True) -> AutopilotItem:
         nonlocal consecutive_failures
@@ -330,6 +335,10 @@ def _run_tick_locked(
             None,
         )
         if window is None:
+            if item.song_file_id:
+                key = pair_key(item.source_video_file_id, item.song_file_id)
+                if key not in exhausted_pairs:
+                    exhausted_pairs.append(key)
             return fail_item(
                 item,
                 "every trim window for this video/song pair was already used",
@@ -428,6 +437,46 @@ def _run_tick_locked(
             "fix the queue and clear the halt to resume"
         )
 
+    # Replenish: synthesize one queue item when auto-pair is on and there is
+    # capacity but nothing pending. Runs before start-new-work so the
+    # synthesized item is consumed this same tick.
+    if halted_reason is None and state.auto_pair:
+        has_pending = any(item.status == "pending" for item in items)
+        in_flight = sum(1 for item in items if item.status in ACTIVE_ITEM_STATUSES)
+        packaged_today = packaged_counts.get(today, 0)
+        if not has_pending and in_flight + packaged_today < state.daily_target:
+            films, songs = _list_pairable_assets(repo, user_id=user_id)
+            waiting_for_library = not films or not songs
+            known = {a["file_id"] for a in films + songs}
+            last_paired_at = {k: v for k, v in last_paired_at.items() if k in known}
+            pick = select_next_pair(
+                films,
+                songs,
+                last_paired_at=last_paired_at,
+                exhausted_pairs=exhausted_pairs,
+            )
+            recycling = bool(pick and pick.recycled)
+            if pick is not None:
+                if pick.recycled:
+                    prefix = f"{pick.video['file_id']}|{pick.song['file_id']}|"
+                    used_combos = [c for c in used_combos if not c.startswith(prefix)]
+                    key = pair_key(pick.video["file_id"], pick.song["file_id"])
+                    exhausted_pairs = [k for k in exhausted_pairs if k != key]
+                last_paired_at[pick.video["file_id"]] = now_iso
+                last_paired_at[pick.song["file_id"]] = now_iso
+                items.append(
+                    AutopilotItem(
+                        item_id=f"ap_{secrets.token_hex(6)}",
+                        source_video_file_id=pick.video["file_id"],
+                        source_video_version_id=pick.video["version_id"],
+                        song_file_id=pick.song["file_id"],
+                        song_version_id=pick.song["version_id"],
+                        auto_paired=True,
+                        created_at=now_iso,
+                        updated_at=now_iso,
+                    )
+                )
+
     # Start new work while under the daily target.
     if halted_reason is None:
         while True:
@@ -460,9 +509,29 @@ def _run_tick_locked(
             "packaged_counts": _prune_counts(packaged_counts, today),
             "consecutive_failures": consecutive_failures,
             "halted_reason": halted_reason,
+            "exhausted_pairs": exhausted_pairs,
+            "last_paired_at": last_paired_at,
+            "recycling": recycling,
+            "waiting_for_library": waiting_for_library,
         }
     )
     return repo.save_autopilot_state(state)
+
+
+def _list_pairable_assets(
+    repo: StorageRepository, *, user_id: str
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    films: list[dict[str, str]] = []
+    songs: list[dict[str, str]] = []
+    for manifest in repo.list_file_manifests(user_id):
+        if manifest.archived_at is not None or not manifest.current_version_id:
+            continue
+        entry = {"file_id": manifest.file_id, "version_id": manifest.current_version_id}
+        if manifest.kind == "source_video":
+            films.append(entry)
+        elif manifest.kind == "song_audio":
+            songs.append(entry)
+    return films, songs
 
 
 def _edit_title(repo: StorageRepository, *, user_id: str, item: AutopilotItem) -> str:
