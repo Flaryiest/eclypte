@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import threading
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Protocol
 
@@ -64,6 +65,56 @@ def combo_key(
         return f"{video_file_id}|{song_file_id}|full"
     start_bucket = int(window[0] // COMBO_WINDOW_BUCKET_SEC) * COMBO_WINDOW_BUCKET_SEC
     return f"{video_file_id}|{song_file_id}|{start_bucket}"
+
+
+def pair_key(video_file_id: str, song_file_id: str) -> str:
+    return f"{video_file_id}::{song_file_id}"
+
+
+@dataclass(frozen=True)
+class PairSelection:
+    video: dict[str, str]
+    song: dict[str, str]
+    recycled: bool
+
+
+def select_next_pair(
+    films: list[dict[str, str]],
+    songs: list[dict[str, str]],
+    *,
+    last_paired_at: dict[str, str],
+    exhausted_pairs: list[str],
+) -> PairSelection | None:
+    """LRU rotation: least-recently-paired film x song, skipping exhausted
+    pairs; when everything is exhausted, recycle the least-recently-paired
+    pairing (caller clears its window dedupe)."""
+    if not films or not songs:
+        return None
+
+    def lru(assets: list[dict[str, str]]) -> list[dict[str, str]]:
+        return sorted(
+            assets, key=lambda a: (last_paired_at.get(a["file_id"], ""), a["file_id"])
+        )
+
+    films_lru, songs_lru = lru(films), lru(songs)
+    exhausted = set(exhausted_pairs)
+    for film in films_lru:
+        for song in songs_lru:
+            if pair_key(film["file_id"], song["file_id"]) not in exhausted:
+                return PairSelection(video=film, song=song, recycled=False)
+
+    def pair_recency(film: dict[str, str], song: dict[str, str]) -> tuple[str, str]:
+        stamps = (
+            last_paired_at.get(film["file_id"], ""),
+            last_paired_at.get(song["file_id"], ""),
+        )
+        return (max(stamps), pair_key(film["file_id"], song["file_id"]))
+
+    film, song = min(
+        ((f, s) for f in films_lru for s in songs_lru),
+        key=lambda pair: pair_recency(*pair),
+    )
+    return PairSelection(video=film, song=song, recycled=True)
 
 
 def select_trim_windows(

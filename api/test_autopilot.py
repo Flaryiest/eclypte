@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from api.autopilot import combo_key, run_autopilot_tick, select_trim_windows
+from api.autopilot import combo_key, pair_key, run_autopilot_tick, select_next_pair, select_trim_windows
 from api.storage.models import AutopilotItem, AutopilotState
 from api.storage.refs import FileRef, RunRef
 from api.storage.repository import StorageRepository
@@ -519,3 +519,47 @@ def test_autopilot_endpoints_flow(monkeypatch):
     status_view = client.get("/v1/autopilot")
     assert status_view.status_code == 200
     assert status_view.json()["enabled"] is True
+
+
+def _asset(file_id):
+    return {"file_id": file_id, "version_id": f"v_{file_id}"}
+
+
+def test_select_next_pair_prefers_least_recently_used():
+    films = [_asset("f_new"), _asset("f_old")]
+    songs = [_asset("s_new"), _asset("s_old")]
+    last = {
+        "f_new": "2026-07-27T10:00:00Z",
+        "s_new": "2026-07-27T10:00:00Z",
+        # f_old / s_old never paired -> sort first
+    }
+    pick = select_next_pair(films, songs, last_paired_at=last, exhausted_pairs=[])
+    assert pick.video["file_id"] == "f_old"
+    assert pick.song["file_id"] == "s_old"
+    assert pick.recycled is False
+
+
+def test_select_next_pair_skips_exhausted_pairs():
+    films, songs = [_asset("f1")], [_asset("s1"), _asset("s2")]
+    pick = select_next_pair(
+        films, songs, last_paired_at={}, exhausted_pairs=[pair_key("f1", "s1")]
+    )
+    assert (pick.video["file_id"], pick.song["file_id"]) == ("f1", "s2")
+
+
+def test_select_next_pair_recycles_least_recent_when_all_exhausted():
+    films, songs = [_asset("f1"), _asset("f2")], [_asset("s1")]
+    exhausted = [pair_key("f1", "s1"), pair_key("f2", "s1")]
+    last = {
+        "f1": "2026-07-20T00:00:00Z",
+        "f2": "2026-07-26T00:00:00Z",
+        "s1": "2026-07-26T00:00:00Z",
+    }
+    pick = select_next_pair(films, songs, last_paired_at=last, exhausted_pairs=exhausted)
+    assert pick.recycled is True
+    assert pick.video["file_id"] == "f1"  # max(f1, s1) < max(f2, s1) tie-broken by key
+
+
+def test_select_next_pair_empty_library_returns_none():
+    assert select_next_pair([], [_asset("s1")], last_paired_at={}, exhausted_pairs=[]) is None
+    assert select_next_pair([_asset("f1")], [], last_paired_at={}, exhausted_pairs=[]) is None
