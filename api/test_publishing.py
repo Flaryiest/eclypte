@@ -1202,3 +1202,49 @@ def test_performance_score_log_median_and_cold_start():
 
     fallback = bare.model_copy(update={"metrics": {"impressions": 100.0}})
     assert performance_score(fallback, cohort) is not None    # impressions fallback
+
+
+def test_listing_carries_performance_scores():
+    """GET /v1/publishing/posts (Task 6) attaches each published post's
+    performance_score, computed against its cohort of other recent published
+    posts. Single-post routes are covered elsewhere and stay null (untouched
+    here); this only exercises the list route's wiring."""
+    import math
+
+    app_client, repo, store = build_publishing_test_app(buffer_client=RecordingBufferClient())
+
+    stamp = "2026-06-01T00:00:00Z"
+
+    def published_post(post_id: str, *, day: int, views: float | None):
+        return PublishingPostRecord(
+            post_id=post_id,
+            owner_user_id=USER,
+            status="published",
+            render_file_id=f"file_{post_id}",
+            render_version_id="ver_1",
+            render_display_name="run.mp4",
+            posted_at=f"2026-06-{day:02d}T10:00:00Z",
+            metrics={"views": views} if views is not None else {},
+            created_at=stamp,
+            updated_at=stamp,
+        )
+
+    # 6 baseline posts at views=100 on consecutive days...
+    for i in range(6):
+        repo.save_publishing_post(published_post(f"post_baseline_{i}", day=i + 1, views=100.0))
+    # ...one outperformer at views=200...
+    repo.save_publishing_post(published_post("post_target", day=7, views=200.0))
+    # ...and one published post with no metrics at all.
+    repo.save_publishing_post(published_post("post_no_metrics", day=8, views=None))
+
+    resp = app_client.get("/v1/publishing/posts", headers={"X-User-Id": USER})
+    assert resp.status_code == 200
+    by_id = {p["post_id"]: p for p in resp.json()}
+
+    # Cohort median is 100 (the 6 baseline posts), so log(200/100) == log(2.0).
+    target_score = by_id["post_target"]["performance_score"]
+    assert target_score is not None
+    assert abs(target_score - math.log(2.0)) < 1e-9
+
+    # No primary metric -> no score, even though the post is published.
+    assert by_id["post_no_metrics"]["performance_score"] is None

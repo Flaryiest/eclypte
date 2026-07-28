@@ -41,6 +41,7 @@ from api.publishing import (
     generate_caption_draft,
     optional_bool,
     optional_str,
+    performance_score,
     send_post_to_buffer,
 )
 from api.storage.models import (
@@ -271,6 +272,10 @@ class PublishingPostView(PublishingPostRecord):
 
     poster_url: str | None = None
     render_url: str | None = None
+    # Baseline-relative log score vs the account's recent median; computed
+    # per list response, never persisted. Null until >=5 published posts
+    # carry a primary metric (honest cold start).
+    performance_score: float | None = None
 
 
 class SynthesisReferencesRequest(BaseModel):
@@ -1127,7 +1132,10 @@ def create_app(
         )
 
     def publishing_post_view(
-        post: PublishingPostRecord, uid: str, store: ObjectStore
+        post: PublishingPostRecord,
+        uid: str,
+        store: ObjectStore,
+        performance_score: float | None = None,
     ) -> PublishingPostView:
         poster_url = None
         if post.render_poster_file_id and post.render_poster_version_id:
@@ -1145,7 +1153,12 @@ def create_app(
             ),
             expires_in=DOWNLOAD_URL_EXPIRES_IN,
         )
-        return PublishingPostView(**post.model_dump(), poster_url=poster_url, render_url=render_url)
+        return PublishingPostView(
+            **post.model_dump(),
+            poster_url=poster_url,
+            render_url=render_url,
+            performance_score=performance_score,
+        )
 
     def backfill_render_poster_refs(
         repo: StorageRepository, uid: str, posts: list[PublishingPostRecord]
@@ -1188,7 +1201,22 @@ def create_app(
     ) -> list[PublishingPostView]:
         posts = repo.list_publishing_posts(uid, status=status_filter)
         posts = backfill_render_poster_refs(repo, uid, posts)
-        return [publishing_post_view(post, uid, resolved_store) for post in posts]
+        published = [p for p in posts if p.status == "published"]
+        recent = sorted(
+            published, key=lambda p: p.posted_at or p.updated_at, reverse=True
+        )[:11]  # each post's cohort = the other <=10 most recent
+        scores = {
+            p.post_id: performance_score(
+                p, [c for c in recent if c.post_id != p.post_id][:10]
+            )
+            for p in published
+        }
+        return [
+            publishing_post_view(
+                post, uid, resolved_store, performance_score=scores.get(post.post_id)
+            )
+            for post in posts
+        ]
 
     @app.post(
         "/v1/publishing/posts",
