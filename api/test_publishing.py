@@ -1024,3 +1024,37 @@ def test_send_post_to_buffer_missing_config_raises_config_error(monkeypatch):
     repo, store, post = make_ready_post()
     with pytest.raises(BufferConfigError):
         send_post_to_buffer(repo, store=store, post=post, mode="queue", client=object())
+
+
+def test_get_post_metrics_payload_and_parse():
+    from api.publishing import BufferClient, build_buffer_post_metrics_payload
+
+    payload = build_buffer_post_metrics_payload(post_id="buf_1")
+    assert payload["variables"]["input"]["id"] == "buf_1"
+    assert "metrics" in payload["query"] and "metricsUpdatedAt" in payload["query"]
+
+    client = BufferClient(api_key="k")
+    client._graphql = lambda p: {
+        "data": {
+            "post": {
+                "id": "buf_1",
+                "metricsUpdatedAt": "2026-07-27T06:00:00Z",
+                "metrics": [
+                    {"type": "views", "name": "views", "value": 1234, "unit": "count"},
+                    {"type": "likes", "name": "likes", "value": 56, "unit": "count"},
+                    {"type": "engagementRate", "name": "engagementRate", "value": None},
+                ],
+            }
+        }
+    }
+    metrics, updated_at = client.get_post_metrics(post_id="buf_1")
+    assert metrics == {"views": 1234.0, "likes": 56.0}  # None value skipped
+    assert updated_at == "2026-07-27T06:00:00Z"
+
+    # New post: no metrics ingested yet — empty map, not an error.
+    client._graphql = lambda p: {"data": {"post": {"id": "buf_1", "metricsUpdatedAt": None, "metrics": None}}}
+    assert client.get_post_metrics(post_id="buf_1") == ({}, None)
+
+    client._graphql = lambda p: {"errors": [{"message": "nope"}]}
+    with pytest.raises(BufferClientError):
+        client.get_post_metrics(post_id="buf_1")

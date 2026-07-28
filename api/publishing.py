@@ -113,6 +113,29 @@ class BufferClient:
         if result.get("success") is False:
             raise BufferClientError("Buffer reported the post could not be deleted")
 
+    def get_post_metrics(self, *, post_id: str) -> tuple[dict[str, float], str | None]:
+        """Latest normalized metrics for a sent post.
+
+        Only metrics the provider actually reported are returned — an absent
+        metric is NOT zero. An empty list just means nothing has been
+        ingested yet (metrics arrive ~daily)."""
+        response = self._graphql(build_buffer_post_metrics_payload(post_id=post_id))
+        if response.get("errors"):
+            raise BufferClientError(_first_error_message(response["errors"]))
+        post = response.get("data", {}).get("post")
+        if not isinstance(post, dict) or not post.get("id"):
+            raise BufferClientError("Buffer did not return a post for metrics")
+        metrics: dict[str, float] = {}
+        for entry in post.get("metrics") or []:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name") or entry.get("type")
+            value = entry.get("value")
+            if not name or not isinstance(value, (int, float)):
+                continue
+            metrics[str(name)] = float(value)
+        return metrics, optional_str(post.get("metricsUpdatedAt"))
+
     def get_channel(self, *, channel_id: str) -> BufferChannelStatus:
         response = self._graphql(build_buffer_channel_payload(channel_id=channel_id))
         if response.get("errors"):
@@ -208,6 +231,26 @@ def build_buffer_get_post_payload(*, post_id: str) -> dict[str, Any]:
                 status
                 externalLink
                 sentAt
+              }
+            }
+        """,
+        "variables": {"input": {"id": post_id}},
+    }
+
+
+def build_buffer_post_metrics_payload(*, post_id: str) -> dict[str, Any]:
+    return {
+        "query": """
+            query PostMetrics($input: PostInput!) {
+              post(input: $input) {
+                id
+                metricsUpdatedAt
+                metrics {
+                  type
+                  name
+                  value
+                  unit
+                }
               }
             }
         """,
