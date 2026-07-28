@@ -56,7 +56,7 @@ def test_run_synthesis_loop():
         # First call carries the system prompt via `instructions`; subsequent calls use previous_response_id.
         first_kwargs = mock_create.call_args_list[0].kwargs
         assert "instructions" in first_kwargs
-        assert first_kwargs["model"] == "gpt-5.5"
+        assert first_kwargs["model"] == "gpt-5.6"
         assert first_kwargs["reasoning"] == {"effort": "high"}
         assert first_kwargs["text"] == {"verbosity": "low"}
 

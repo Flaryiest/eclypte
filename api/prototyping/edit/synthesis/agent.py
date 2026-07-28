@@ -13,7 +13,7 @@ from api.prototyping.edit.synthesis.system_prompt import SYSTEM_PROMPT
 
 _ENV_PATH = Path(__file__).resolve().parent / ".env"
 
-MODEL = "gpt-5.5"
+MODEL = "gpt-5.6"
 REASONING_EFFORT = "high"
 VERBOSITY = "low"
 MAX_LOOPS = 10
