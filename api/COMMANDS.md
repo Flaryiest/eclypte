@@ -140,6 +140,11 @@ Operational assumption: the Buffer channel's own posting schedule (e.g. 2 slots/
 configured in Buffer's dashboard, not here — it's what actually paces posts to Instagram, so
 autopilot's `daily_target` (below) should match it.
 
+Deploy-time check: the cancel veto's `deletePost` GraphQL mutation shape was written
+against Buffer's documented conventions but has not been confirmed against the live
+schema — verify a cancel round-trip on a queued post before trusting `auto_publish`
+unattended.
+
 Publishing smoke:
 
 ```powershell
