@@ -1,4 +1,6 @@
 from api.storage.models import (
+    AutopilotItem,
+    AutopilotState,
     DerivedFrom,
     FileManifest,
     FileVersionMeta,
@@ -99,3 +101,42 @@ def test_publishing_post_record_carries_source_and_song_names():
     assert record.song_name == "Unravel"
     # round-trips through JSON (durable storage)
     assert PublishingPostRecord.model_validate_json(record.model_dump_json()).song_name == "Unravel"
+
+
+def test_autopilot_state_autonomy_fields_default_off_and_round_trip():
+    # Legacy persisted JSON (no autonomy fields) must load under extra="forbid".
+    legacy = AutopilotState.model_validate(
+        {"owner_user_id": "u1", "updated_at": "2026-07-27T00:00:00Z"}
+    )
+    assert legacy.auto_pair is False
+    assert legacy.auto_publish is False
+    assert legacy.last_paired_at == {}
+    assert legacy.exhausted_pairs == []
+    assert legacy.recycling is False
+    assert legacy.waiting_for_library is False
+
+    state = legacy.model_copy(
+        update={
+            "auto_pair": True,
+            "auto_publish": True,
+            "last_paired_at": {"file_a": "2026-07-27T01:00:00Z"},
+            "exhausted_pairs": ["file_a::file_b"],
+            "recycling": True,
+            "waiting_for_library": False,
+        }
+    )
+    reloaded = AutopilotState.model_validate(state.model_dump(mode="json"))
+    assert reloaded.last_paired_at == {"file_a": "2026-07-27T01:00:00Z"}
+    assert reloaded.exhausted_pairs == ["file_a::file_b"]
+
+
+def test_autopilot_item_auto_paired_defaults_false():
+    item = AutopilotItem(
+        item_id="ap_1",
+        source_video_file_id="fv",
+        source_video_version_id="vv",
+        created_at="2026-07-27T00:00:00Z",
+        updated_at="2026-07-27T00:00:00Z",
+    )
+    assert item.auto_paired is False
+    assert AutopilotItem.model_validate(item.model_dump(mode="json")).auto_paired is False

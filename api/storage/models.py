@@ -196,6 +196,7 @@ class AutopilotItem(BaseModel):
     song_file_id: str | None = None
     song_version_id: str | None = None
     creative_brief: str = ""
+    auto_paired: bool = False
     status: AutopilotItemStatus = "pending"
     analysis_run_id: str | None = None
     edit_run_id: str | None = None
@@ -213,6 +214,15 @@ class AutopilotState(BaseModel):
     owner_user_id: str
     enabled: bool = False
     daily_target: int = Field(default=3, ge=1, le=10)
+    auto_pair: bool = False
+    auto_publish: bool = False
+    # file_id -> ISO timestamp of the last time replenish paired this asset.
+    last_paired_at: dict[str, str] = Field(default_factory=dict)
+    # "{video_file_id}::{song_file_id}" keys whose trim windows are all used.
+    exhausted_pairs: list[str] = Field(default_factory=list)
+    # Stamped by each replenish run (not computed at read time).
+    recycling: bool = False
+    waiting_for_library: bool = False
     items: list[AutopilotItem] = Field(default_factory=list)
     used_combos: list[str] = Field(default_factory=list)
     consecutive_failures: int = 0
