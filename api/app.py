@@ -815,7 +815,12 @@ def create_app(
                     )
                 )
 
-        return start_music_analysis, start_edit, send_ready_post
+        def fetch_post_metrics(
+            uid: str, *, buffer_post_id: str
+        ) -> tuple[dict[str, float], str | None]:
+            return resolve_buffer_client().get_post_metrics(post_id=buffer_post_id)
+
+        return start_music_analysis, start_edit, send_ready_post, fetch_post_metrics
 
     def autopilot_status_response(state) -> AutopilotStatusResponse:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -847,7 +852,7 @@ def create_app(
         resolved_store = store or get_object_store(required=False)
         if resolved_store is None:
             return
-        start_music_analysis, start_edit, send_ready_post = autopilot_callables(
+        start_music_analysis, start_edit, send_ready_post, fetch_post_metrics = autopilot_callables(
             repo, _spawn_workflow, resolved_store
         )
         for uid in repo.list_autopilot_user_ids():
@@ -858,6 +863,7 @@ def create_app(
                     start_music_analysis=start_music_analysis,
                     start_edit=start_edit,
                     send_ready_post=send_ready_post,
+                    fetch_post_metrics=fetch_post_metrics,
                 )
             except Exception:
                 logger.exception("autopilot tick failed for user %s", uid)
@@ -1491,7 +1497,7 @@ def create_app(
         uid: str = Depends(user_id),
         resolved_store: ObjectStore = Depends(resolve_store),
     ) -> AutopilotStatusResponse:
-        start_music_analysis, start_edit, send_ready_post = autopilot_callables(
+        start_music_analysis, start_edit, send_ready_post, fetch_post_metrics = autopilot_callables(
             repo, background_tasks.add_task, resolved_store
         )
         state = run_autopilot_tick(
@@ -1500,6 +1506,7 @@ def create_app(
             start_music_analysis=start_music_analysis,
             start_edit=start_edit,
             send_ready_post=send_ready_post,
+            fetch_post_metrics=fetch_post_metrics,
         )
         return autopilot_status_response(state)
 

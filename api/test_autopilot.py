@@ -49,13 +49,14 @@ def save_state(repo, **overrides):
     return repo.save_autopilot_state(state)
 
 
-def tick(repo, starts, send=None):
+def tick(repo, starts, send=None, fetch=None):
     return run_autopilot_tick(
         repo,
         user_id=USER,
         start_music_analysis=starts.start_music_analysis,
         start_edit=starts.start_edit,
         send_ready_post=send,
+        fetch_post_metrics=fetch,
         now=NOW,
     )
 
@@ -695,7 +696,8 @@ def test_halt_stops_replenish():
 
 
 def save_post(repo, *, post_id, status="ready", auto_created=True, last_error=None,
-              updated_at="2026-06-09T11:00:00Z"):
+              updated_at="2026-06-09T11:00:00Z", posted_at=None, buffer_post_id=None,
+              metrics_checked_at=None):
     return repo.save_publishing_post(
         PublishingPostRecord(
             post_id=post_id,
@@ -706,6 +708,9 @@ def save_post(repo, *, post_id, status="ready", auto_created=True, last_error=No
             status=status,
             auto_created=auto_created,
             last_error=last_error,
+            posted_at=posted_at,
+            buffer_post_id=buffer_post_id,
+            metrics_checked_at=metrics_checked_at,
             created_at="2026-06-09T11:00:00Z",
             updated_at=updated_at,
         )
@@ -856,3 +861,67 @@ def test_autopilot_settings_round_trip_autonomy_flags():
     body = response.json()
     assert body["auto_pair"] is True
     assert body["auto_publish"] is False
+
+
+class RecordingFetch:
+    def __init__(self, metrics=None, fail=False):
+        self.calls = []
+        self.metrics = metrics if metrics is not None else {"views": 500.0}
+        self.fail = fail
+
+    def __call__(self, user_id, *, buffer_post_id):
+        self.calls.append(buffer_post_id)
+        if self.fail:
+            raise RuntimeError("metrics fetch exploded")
+        return self.metrics, "2026-06-09T06:00:00Z"
+
+
+def test_metrics_pass_polls_published_posts_and_stores(monkeypatch=None):
+    repo = build_repo()
+    fetch = RecordingFetch()
+    save_post(repo, post_id="p_pub", status="published",
+              buffer_post_id="buf_1", posted_at="2026-06-08T12:00:00Z")
+    save_post(repo, post_id="p_ready")  # ready: not polled
+    save_state(repo)
+
+    tick(repo, RecordingStarts(), fetch=fetch)
+
+    assert fetch.calls == ["buf_1"]
+    stored = next(p for p in repo.list_publishing_posts(USER) if p.post_id == "p_pub")
+    assert stored.metrics == {"views": 500.0}
+    assert stored.metrics_checked_at is not None
+    assert len(stored.metrics_history) == 1
+
+
+def test_metrics_pass_respects_cadence_retirement_and_cap():
+    repo = build_repo()
+    fetch = RecordingFetch()
+    # Checked 1h before NOW -> inside the 12h cadence, skipped.
+    save_post(repo, post_id="p_fresh", status="published", buffer_post_id="buf_f",
+              posted_at="2026-06-08T12:00:00Z", metrics_checked_at="2026-06-09T11:00:00Z")
+    # Posted 40 days before NOW -> retired, skipped.
+    save_post(repo, post_id="p_old", status="published", buffer_post_id="buf_o",
+              posted_at="2026-04-30T12:00:00Z")
+    # Stale check -> polled.
+    save_post(repo, post_id="p_due", status="published", buffer_post_id="buf_d",
+              posted_at="2026-06-01T12:00:00Z", metrics_checked_at="2026-06-08T00:00:00Z")
+    save_state(repo)
+
+    tick(repo, RecordingStarts(), fetch=fetch)
+
+    assert fetch.calls == ["buf_d"]
+
+
+def test_metrics_fetch_failure_stamps_check_but_not_last_error():
+    repo = build_repo()
+    fetch = RecordingFetch(fail=True)
+    save_post(repo, post_id="p_pub", status="published",
+              buffer_post_id="buf_1", posted_at="2026-06-08T12:00:00Z")
+    save_state(repo)
+
+    tick(repo, RecordingStarts(), fetch=fetch)  # must not raise
+
+    stored = next(p for p in repo.list_publishing_posts(USER) if p.post_id == "p_pub")
+    assert stored.metrics_checked_at is not None  # won't hammer next tick
+    assert stored.last_error is None
+    assert stored.metrics == {}

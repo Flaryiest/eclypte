@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Protocol
 
-from api.publishing import create_publish_post_for_render
+from api.publishing import apply_post_metrics, create_publish_post_for_render
 from api.storage.models import AutopilotItem, AutopilotState, PublishingPostRecord, RunManifest
 from api.storage.refs import FileVersionRef, RunRef
 from api.storage.repository import StorageRepository
@@ -38,6 +38,10 @@ PACKAGED_COUNT_RETENTION_DAYS = 14
 # A failed auto-send is retried after this many seconds; a fresh error-free
 # package sends immediately (no backoff applies until a send actually fails).
 AUTO_SEND_RETRY_BACKOFF_SEC = 1800
+
+METRICS_REFRESH_INTERVAL_SEC = 43200  # ~12h; Buffer ingests metrics daily
+METRICS_RETENTION_DAYS = 30           # metrics have settled; stop polling
+METRICS_MAX_PER_PASS = 20
 
 ACTIVE_ITEM_STATUSES = {"analyzing", "editing"}
 
@@ -72,6 +76,12 @@ class SendReadyPost(Protocol):
     def __call__(
         self, user_id: str, *, post: "PublishingPostRecord"
     ) -> "PublishingPostRecord": ...
+
+
+class FetchPostMetrics(Protocol):
+    def __call__(
+        self, user_id: str, *, buffer_post_id: str
+    ) -> tuple[dict[str, float], str | None]: ...
 
 
 def combo_key(
@@ -260,6 +270,7 @@ def run_autopilot_tick(
     start_music_analysis: StartMusicAnalysis,
     start_edit: StartEdit,
     send_ready_post: SendReadyPost | None = None,
+    fetch_post_metrics: FetchPostMetrics | None = None,
     now: datetime | None = None,
 ) -> AutopilotState:
     with STATE_LOCK:
@@ -280,6 +291,12 @@ def run_autopilot_tick(
         user_id=user_id,
         state=state,
         send_ready_post=send_ready_post,
+        now=now or datetime.now(timezone.utc),
+    )
+    _refresh_post_metrics(
+        repo,
+        user_id=user_id,
+        fetch_post_metrics=fetch_post_metrics,
         now=now or datetime.now(timezone.utc),
     )
     return state
@@ -603,6 +620,63 @@ def _within_backoff(updated_at: str, now_dt: datetime) -> bool:
     except ValueError:
         return False
     return (now_dt - stamped).total_seconds() < AUTO_SEND_RETRY_BACKOFF_SEC
+
+
+def _refresh_post_metrics(
+    repo: StorageRepository,
+    *,
+    user_id: str,
+    fetch_post_metrics: FetchPostMetrics | None,
+    now: datetime,
+) -> None:
+    """Pull per-post performance for published posts on a slow cadence.
+
+    Runs outside STATE_LOCK and regardless of the autonomy flags — metrics
+    are wanted in review-gated mode too. Best-effort by contract: failures
+    log and stamp the check time (so the next tick doesn't hammer) but never
+    touch last_error (it drives the auto-send backoff) or the halt."""
+    if fetch_post_metrics is None:
+        return
+    now_iso = utc_now_iso(now)
+    refreshed = 0
+    for post in repo.list_publishing_posts(user_id, status="published"):
+        if refreshed >= METRICS_MAX_PER_PASS:
+            break
+        if not post.buffer_post_id:
+            continue
+        if post.metrics_checked_at and not _older_than(
+            post.metrics_checked_at, now, METRICS_REFRESH_INTERVAL_SEC
+        ):
+            continue
+        if post.posted_at and _older_than(
+            post.posted_at, now, METRICS_RETENTION_DAYS * 86400
+        ):
+            continue
+        refreshed += 1
+        try:
+            metrics, updated_at = fetch_post_metrics(
+                user_id, buffer_post_id=post.buffer_post_id
+            )
+        except Exception:  # noqa: BLE001 — metrics must never break the tick
+            logger.warning(
+                "metrics fetch failed for post %s", post.post_id, exc_info=True
+            )
+            metrics, updated_at = {}, None
+        repo.save_publishing_post(
+            apply_post_metrics(
+                post, metrics=metrics, metrics_updated_at=updated_at, now=now_iso
+            )
+        )
+
+
+def _older_than(stamp: str, now_dt: datetime, seconds: float) -> bool:
+    try:
+        parsed = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc
+        )
+    except ValueError:
+        return True  # unparseable stamp: treat as due rather than starving
+    return (now_dt - parsed).total_seconds() > seconds
 
 
 def _list_pairable_assets(
