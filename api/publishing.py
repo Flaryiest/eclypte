@@ -581,8 +581,15 @@ def send_post_to_buffer(
     else:
         buffer_mode = "addToQueue"
         due_at = scheduled_at or post.scheduled_at
+    # Re-check the post's current status right before doing any send work:
+    # the caller's `post` can be stale if another pass (the autopilot tick's
+    # auto-send, or a concurrent manual send) already sent it. Without this,
+    # two passes racing the same ready post would both call Buffer.
+    fresh = repo.load_publishing_post(user_id=post.owner_user_id, post_id=post.post_id)
+    if fresh.status in {"queued", "scheduled", "published"}:
+        raise ValueError(f"post already {fresh.status}")
     prepared = prepare_public_media_copy(
-        repo, store=store, post=post, public_base_url=public_base_url
+        repo, store=store, post=fresh, public_base_url=public_base_url
     )
     buffer_client = client if client is not None else BufferClient.from_env()
     try:

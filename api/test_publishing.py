@@ -874,6 +874,27 @@ def test_send_post_to_buffer_failure_raises_with_prepared_record(monkeypatch):
     assert excinfo.value.record.status == "ready"
 
 
+def test_send_post_to_buffer_refuses_already_queued_post(monkeypatch):
+    # Guards against double-sending the same post when the manual send-buffer
+    # route races the autopilot tick's auto-send pass: whichever call sees the
+    # post go to "queued" (or later) first wins, and the other call must
+    # refuse rather than create a second Instagram post.
+    from api.publishing import send_post_to_buffer
+
+    monkeypatch.setenv("BUFFER_INSTAGRAM_CHANNEL_ID", "chan_1")
+    monkeypatch.setenv("ECLYPTE_R2_PUBLIC_BASE_URL", "https://media.example.com")
+    repo, store, post = make_ready_post()
+    # Another pass already sent it -- flip the stored record to queued.
+    repo.save_publishing_post(post.model_copy(update={"status": "queued"}))
+
+    client = RecordingBufferClient()
+    with pytest.raises(ValueError, match="already queued"):
+        # Called with the STALE ready record the caller still holds.
+        send_post_to_buffer(repo, store=store, post=post, mode="queue", client=client)
+
+    assert client.calls == []
+
+
 def test_delete_post_payload_and_parsing():
     from api.publishing import BufferClient, build_buffer_delete_post_payload
 

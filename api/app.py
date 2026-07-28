@@ -396,24 +396,6 @@ def create_app(
         except BufferClientError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    def resolve_buffer_channel_id() -> str:
-        channel_id = os.environ.get("BUFFER_INSTAGRAM_CHANNEL_ID")
-        if not channel_id:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="BUFFER_INSTAGRAM_CHANNEL_ID is not configured",
-            )
-        return channel_id
-
-    def resolve_public_media_base_url() -> str:
-        base_url = os.environ.get("ECLYPTE_R2_PUBLIC_BASE_URL")
-        if not base_url:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="ECLYPTE_R2_PUBLIC_BASE_URL is not configured",
-            )
-        return base_url
-
     def channel_status_response(
         channel: object,
         *,
