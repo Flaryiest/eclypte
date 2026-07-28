@@ -155,7 +155,7 @@ expectation per Buffer's Analyze docs: `impressions`/`likes`/`comments`; hoped-f
 ```bash
 curl -s https://api.buffer.com -H "Authorization: Bearer $BUFFER_API_KEY" \
   -H "Content-Type: application/json" -d '{
-  "query": "query Post($input: PostInput!) { post(input: $input) { id metricsUpdatedAt metrics { type name value unit } } }",
+  "query": "query PostMetrics($input: PostInput!) { post(input: $input) { id metricsUpdatedAt metrics { type name value unit } } }",
   "variables": {"input": {"id": "<a real sent buffer_post_id from R2 post JSON>"}}
 }' | python3 -m json.tool
 ```

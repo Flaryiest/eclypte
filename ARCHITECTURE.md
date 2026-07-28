@@ -149,7 +149,7 @@ steering yet.
   by `auto_publish`. **Performance feedback loop (Phase 1):** `apply_post_metrics` (pure fold —
   a `PostMetricsSnapshot` lands in `metrics_history` only when the reading changed, capped at the
   first 2 + last 10; never touches `last_error`/status) and `performance_score` (pure —
-  `log(primary)` minus `log(median primary)` across a post's ≤10 most recent published peers, `None`
+  `log(primary)` minus `log(median primary)` across a post's ≤10 most recent published peers (primary = the post's `views` metric, falling back to `impressions`; the value must be > 0 to score), `None`
   under 5 scored posts) turn raw Buffer metrics into what the dashboard renders.
 - **`export_options.py`** — the single home for export behavior: `reels_9_16` (fill + `crop_focus_x`),
   `reels_cinematic` (letterbox, baked bars — autopilot default), `youtube_16_9` (letterbox — backend
