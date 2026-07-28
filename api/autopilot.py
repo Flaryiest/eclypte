@@ -599,19 +599,31 @@ def _auto_send_ready_posts(
     if not SEND_LOCK.acquire(blocking=False):
         return
     try:
+        # Budget both ceilings on every send, not once per pass: Buffer's
+        # queue must never exceed 2x the daily target, and a single pass must
+        # never queue more than daily_target reels — a first pass over an
+        # accumulated ready backlog once dumped weeks of packages into Buffer
+        # at go-live. Growth is tracked via each send's returned record (the
+        # fake/live callable both return the saved post).
         queued_count = len(repo.list_publishing_posts(user_id, status="queued"))
-        if queued_count > 2 * state.daily_target:
-            return
+        sent_this_pass = 0
         for post in repo.list_publishing_posts(user_id, status="ready"):
+            if queued_count >= 2 * state.daily_target:
+                break
+            if sent_this_pass >= state.daily_target:
+                break
             if not post.auto_created:
                 continue
             if post.last_error and _within_backoff(post.updated_at, now):
                 continue
             try:
-                send_ready_post(user_id, post=post)
+                result = send_ready_post(user_id, post=post)
             except Exception:  # noqa: BLE001 — sends must never break the tick
                 logger.warning("auto-send crashed for post %s", post.post_id, exc_info=True)
                 continue
+            if result is not None and result.status in {"queued", "scheduled"}:
+                queued_count += 1
+                sent_this_pass += 1
     finally:
         SEND_LOCK.release()
 

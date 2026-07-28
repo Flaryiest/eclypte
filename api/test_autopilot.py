@@ -795,6 +795,37 @@ def test_auto_publish_backstop_skips_when_queue_is_deep():
     assert send.calls == []
 
 
+def test_auto_publish_caps_sends_per_pass_at_daily_target():
+    # A first pass over an accumulated ready backlog must trickle, not dump:
+    # at most daily_target sends per pass (the go-live pass once pushed weeks
+    # of ready packages into Buffer at once).
+    repo = build_repo()
+    send = RecordingSend()
+    for i in range(5):
+        save_post(repo, post_id=f"p_{i}")
+    save_state(repo, auto_publish=True, daily_target=2)
+
+    tick(repo, RecordingStarts(), send=send)
+
+    assert len(send.calls) == 2
+
+
+def test_auto_publish_send_budget_counts_queue_growth_mid_pass():
+    # queued=3 with target=2 leaves budget for exactly one more queued post
+    # (2*2 - 3); the ceiling must be re-checked per send, not once per pass.
+    repo = build_repo()
+    send = RecordingSend()
+    save_post(repo, post_id="p_a")
+    save_post(repo, post_id="p_b")
+    for i in range(3):
+        save_post(repo, post_id=f"p_q{i}", status="queued")
+    save_state(repo, auto_publish=True, daily_target=2)
+
+    tick(repo, RecordingStarts(), send=send)
+
+    assert len(send.calls) == 1
+
+
 def test_auto_publish_send_crash_does_not_break_tick():
     # A rogue send_ready_post (the "never raises" contract broken) must not
     # abort the tick: the rest of the tick's work still completes and the
