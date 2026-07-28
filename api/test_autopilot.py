@@ -783,3 +783,33 @@ def test_auto_send_pass_skips_when_another_pass_holds_send_lock():
 
     tick(repo, RecordingStarts(), send=send)
     assert send.calls == ["p_auto"]  # next tick retries normally
+
+
+def test_autopilot_settings_round_trip_autonomy_flags():
+    # Mirror test_autopilot_endpoints_flow's app construction exactly.
+    from fastapi.testclient import TestClient
+
+    from api.app import create_app
+    from api.test_api_v1 import RecordingWorkflowRunner
+
+    store = InMemoryObjectStore()
+    app = create_app(store=store, workflow_runner=RecordingWorkflowRunner())
+    client = TestClient(app)
+    headers = {"X-User-Id": USER}
+
+    response = client.patch(
+        "/v1/autopilot", headers=headers,
+        json={"enabled": True, "auto_pair": True, "auto_publish": True},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["auto_pair"] is True
+    assert body["auto_publish"] is True
+    assert body["recycling"] is False
+    assert body["waiting_for_library"] is False
+
+    # Flags persist and can be turned off independently.
+    response = client.patch("/v1/autopilot", headers=headers, json={"auto_publish": False})
+    body = response.json()
+    assert body["auto_pair"] is True
+    assert body["auto_publish"] is False

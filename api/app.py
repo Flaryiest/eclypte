@@ -298,12 +298,18 @@ class AutopilotQueueRequest(BaseModel):
 class AutopilotUpdateRequest(BaseModel):
     enabled: bool | None = None
     daily_target: int | None = Field(default=None, ge=1, le=10)
+    auto_pair: bool | None = None
+    auto_publish: bool | None = None
     clear_halt: bool = False
 
 
 class AutopilotStatusResponse(BaseModel):
     enabled: bool
     daily_target: int
+    auto_pair: bool
+    auto_publish: bool
+    recycling: bool
+    waiting_for_library: bool
     halted_reason: str | None
     last_tick_at: str | None
     packaged_today: int
@@ -829,6 +835,10 @@ def create_app(
         return AutopilotStatusResponse(
             enabled=state.enabled,
             daily_target=state.daily_target,
+            auto_pair=state.auto_pair,
+            auto_publish=state.auto_publish,
+            recycling=state.recycling,
+            waiting_for_library=state.waiting_for_library,
             halted_reason=state.halted_reason,
             last_tick_at=state.last_tick_at,
             packaged_today=state.packaged_counts.get(today, 0),
@@ -1411,6 +1421,10 @@ def create_app(
                 update["enabled"] = request.enabled
             if request.daily_target is not None:
                 update["daily_target"] = request.daily_target
+            if request.auto_pair is not None:
+                update["auto_pair"] = request.auto_pair
+            if request.auto_publish is not None:
+                update["auto_publish"] = request.auto_publish
             if request.clear_halt:
                 update["halted_reason"] = None
                 update["consecutive_failures"] = 0
