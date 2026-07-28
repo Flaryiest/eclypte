@@ -148,6 +148,13 @@ class SynthesisReferenceRecord(BaseModel):
     updated_at: str
 
 
+class PostMetricsSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    captured_at: str
+    metrics: dict[str, float]
+
+
 class PublishingPostRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -182,6 +189,16 @@ class PublishingPostRecord(BaseModel):
     post_url: str | None = None
     last_error: str | None = None
     auto_created: bool = False
+    # Latest per-post performance pulled from the publishing provider. A
+    # metric absent from the map was not reported — absent is NOT zero.
+    metrics: dict[str, float] = Field(default_factory=dict)
+    metrics_updated_at: str | None = None   # provider's ingestion stamp
+    metrics_checked_at: str | None = None   # our last poll (cadence control)
+    metrics_history: list[PostMetricsSnapshot] = Field(default_factory=list)
+    # Lineage ids captured at packaging so Phase 2 attribution never has to
+    # walk run manifests.
+    source_video_file_id: str | None = None
+    song_file_id: str | None = None
     source_run_id: str | None = None
     created_at: str
     updated_at: str

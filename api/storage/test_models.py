@@ -4,6 +4,8 @@ from api.storage.models import (
     DerivedFrom,
     FileManifest,
     FileVersionMeta,
+    PostMetricsSnapshot,
+    PublishingPostRecord,
     RunEvent,
     RunManifest,
     RunStep,
@@ -140,3 +142,43 @@ def test_autopilot_item_auto_paired_defaults_false():
     )
     assert item.auto_paired is False
     assert AutopilotItem.model_validate(item.model_dump(mode="json")).auto_paired is False
+
+
+def test_publishing_post_metrics_fields_default_empty_and_round_trip():
+    legacy = PublishingPostRecord.model_validate(
+        {
+            "post_id": "pub_1",
+            "owner_user_id": "u1",
+            "status": "ready",
+            "render_file_id": "rf",
+            "render_version_id": "rv",
+            "render_display_name": "reel.mp4",
+            "created_at": "2026-07-27T00:00:00Z",
+            "updated_at": "2026-07-27T00:00:00Z",
+        }
+    )
+    assert legacy.metrics == {}
+    assert legacy.metrics_updated_at is None
+    assert legacy.metrics_checked_at is None
+    assert legacy.metrics_history == []
+    assert legacy.source_video_file_id is None
+    assert legacy.song_file_id is None
+
+    stamped = legacy.model_copy(
+        update={
+            "metrics": {"views": 1200.0, "likes": 88.0},
+            "metrics_updated_at": "2026-07-27T09:00:00Z",
+            "metrics_checked_at": "2026-07-27T10:00:00Z",
+            "metrics_history": [
+                PostMetricsSnapshot(
+                    captured_at="2026-07-26T10:00:00Z", metrics={"views": 400.0}
+                )
+            ],
+            "source_video_file_id": "file_film",
+            "song_file_id": "file_song",
+        }
+    )
+    reloaded = PublishingPostRecord.model_validate(stamped.model_dump(mode="json"))
+    assert reloaded.metrics == {"views": 1200.0, "likes": 88.0}
+    assert reloaded.metrics_history[0].metrics == {"views": 400.0}
+    assert reloaded.song_file_id == "file_song"
