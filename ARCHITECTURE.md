@@ -13,7 +13,10 @@ Eclypte is an **AI AMV / short-form "reel" creator**. A user uploads a **song** 
 audio format, auto-converted server-side) and a **source film/anime MP4**. The system analyzes both
 deterministically, has an **LLM agent plan a beat-synced edit timeline**, renders it to an MP4, and
 (optionally) publishes it to Instagram Reels via Buffer. A queue-driven **autopilot** can run the
-whole loop unattended, stopping only at a human review gate before anything is posted.
+whole loop unattended; by default it stops at a human review gate before anything is posted, but two
+opt-in autonomy flags (`auto_pair`, `auto_publish`) let it pick its own film×song pairs and push
+straight into Buffer's queue, trading the pre-send review gate for a post-send veto window governed
+by Buffer's own posting schedule.
 
 It is deliberately **quality-over-speed**: every scene/frame of video and every beat of audio is
 analyzed before an edit is composed, so a single finished video can take **hours** (movie analysis
@@ -84,7 +87,12 @@ changing bundled worker code.
 
 `run_edit_pipeline` is the parent workflow: it chains music → video → timeline → render **inline in
 one background thread** (parallelism happens *inside* Modal, not across child runs), reusing any
-already-completed analyses. **Autopilot** drives this same pipeline on a schedule.
+already-completed analyses. **Autopilot** drives this same pipeline on a schedule. Two opt-in flags
+extend it further: `auto_pair` has autopilot pick the next film×song pair itself instead of
+requiring a manually queued one (LRU-rotated over the saved library); `auto_publish` skips the pause
+after `status "ready"` and calls `send-buffer` (queue mode) automatically — the diagram's
+`HUMAN REVIEW GATE` becomes a post-send veto window (`cancel` now deletes the post from Buffer)
+rather than a pre-send approval.
 
 ---
 
@@ -107,16 +115,25 @@ already-completed analyses. **Autopilot** drives this same pipeline on a schedul
 - **`workflows.py`** (~1900 lines) — `WorkflowRunner` protocol + `DefaultWorkflowRunner`; every
   `run_*` workflow. Version-gates CLIP-index reuse via `CLIP_INDEX_BUILD_STEP`; caps usable source
   at `credits.content_end_sec`; fails a run if the timeline is >0.75s shorter than the trimmed song.
-- **`autopilot.py`** (~500 lines) — `run_autopilot_tick` state machine
+- **`autopilot.py`** (~660 lines) — `run_autopilot_tick` state machine
   (`pending → analyzing → editing → packaged`). Ranks ~20–30s (≈25s) trim windows by
   energy (chorus bonus + 5s lead-in), dedupes `(video, song, window)`, always uses
   `reels_cinematic`, **halts after 3 consecutive failures**, and auto-creates `ready` review
-  packages (`auto_created=true`) — it **never auto-posts**. Guarded by an in-process `STATE_LOCK`
-  (single-replica only). Loop runs when `ECLYPTE_AUTOPILOT=1`.
-- **`publishing.py`** (~680 lines) — `BufferClient` (GraphQL, Instagram `reel`), OpenAI caption
-  generation (`ECLYPTE_CAPTION_MODEL`, default `gpt-5.4-mini`; deterministic fallback), public R2
-  media copy, and Buffer status reconciliation. `now` posts via a near-future `dueAt` (Buffer has no
-  instant publish).
+  packages (`auto_created=true`) — review-gated by default. Two per-user opt-in flags extend it:
+  **`auto_pair`** adds a replenish step that LRU-rotates saved films × songs (`select_next_pair`),
+  skipping pairs in `exhausted_pairs` and recycling the least-recently-paired pair once everything is
+  exhausted, so the queue never runs dry; **`auto_publish`** runs a separate post-tick pass
+  (`_auto_send_ready_posts`, outside `STATE_LOCK`, serialized by its own non-blocking `SEND_LOCK`)
+  that sends `ready`+`auto_created` posts to Buffer's queue, backing off 30 min on failure and
+  pausing once queued posts exceed 2× `daily_target` — send failures never trip the 3-failure halt.
+  `STATE_LOCK` (single-replica only) still guards the state read-modify-write. Loop runs when
+  `ECLYPTE_AUTOPILOT=1`.
+- **`publishing.py`** (~780 lines) — `BufferClient` (GraphQL, Instagram `reel`, plus a `deletePost`
+  mutation), OpenAI caption generation (`ECLYPTE_CAPTION_MODEL`, default `gpt-5.4-mini`;
+  deterministic fallback), public R2 media copy, a shared `send_post_to_buffer` (used by both the
+  `send-buffer` route and autopilot's `auto_publish` pass), and Buffer status reconciliation. `now`
+  posts via a near-future `dueAt` (Buffer has no instant publish); `cancel` on a queued/scheduled
+  post now deletes it from Buffer first — the veto for anything sent, manually or by `auto_publish`.
 - **`export_options.py`** — the single home for export behavior: `reels_9_16` (fill + `crop_focus_x`),
   `reels_cinematic` (letterbox, baked bars — autopilot default), `youtube_16_9` (letterbox — backend
   default), and `trim_song_analysis()`.
@@ -275,7 +292,10 @@ Breaking any of these silently breaks another layer:
   (grades, impact.shake + auto-accents, real speed_ramp), and plan-time reference-derived style
   profiles — plus **kinetic lyrics** on top (word-synced ASS/libass lyric text with
   footage-adaptive layout and a curated font catalog). Autopilot Reels growth continues underneath
-  (`reels_cinematic`, ~25s energy windows, review-gated Buffer publishing, AI captions).
+  (`reels_cinematic`, ~25s energy windows, review-gated Buffer publishing, AI captions) — now with
+  opt-in autonomy: `auto_pair` (LRU-rotates the saved library, with exhaustion + recycle) and
+  `auto_publish` (drains ready packages into Buffer's queue, trading manual review for a
+  Buffer-schedule-driven veto window via the extended `cancel` route).
 - **Deferred:** text-behind-subject masking for kinetic lyrics (needs a GPU segmentation matte);
   `whip` transition and `hold` effect (cut/no-op); a YouTube publishing path (16:9 renders exist,
   no upload integration); a single-scene vs. full-source-montage retention experiment; per-shot

@@ -113,7 +113,7 @@ Routes:
 - `GET /v1/files/{file_id}/versions/{version_id}/download-url` returns a presigned R2 GET URL.
 - `POST /v1/music/analyses`, `POST /v1/video/analyses`, `POST /v1/timelines`, and `POST /v1/renders` create run manifests and schedule background work. Renders publish a `render_output` MP4 and a `render_poster` JPEG thumbnail.
 - `GET /v1/publishing/config` reports non-secret Buffer/OpenAI/public-media setup.
-- `GET /v1/publishing/posts`, `POST /v1/publishing/posts`, `PATCH /v1/publishing/posts/{post_id}`, `POST /v1/publishing/posts/{post_id}/regenerate-caption`, `POST /v1/publishing/posts/{post_id}/send-buffer`, `POST /v1/publishing/posts/{post_id}/refresh-status` (back-fills the live permalink from Buffer), `POST /v1/publishing/posts/{post_id}/mark-posted` (manual override when a sent post can't be reconciled from Buffer), and `POST /v1/publishing/posts/{post_id}/cancel` manage review-gated Buffer publishing packages (sent as Instagram Reels).
+- `GET /v1/publishing/posts`, `POST /v1/publishing/posts`, `PATCH /v1/publishing/posts/{post_id}`, `POST /v1/publishing/posts/{post_id}/regenerate-caption`, `POST /v1/publishing/posts/{post_id}/send-buffer`, `POST /v1/publishing/posts/{post_id}/refresh-status` (back-fills the live permalink from Buffer), `POST /v1/publishing/posts/{post_id}/mark-posted` (manual override when a sent post can't be reconciled from Buffer), and `POST /v1/publishing/posts/{post_id}/cancel` manage review-gated Buffer publishing packages (sent as Instagram Reels). `cancel` on a `queued`/`scheduled` post now deletes it from Buffer first (the human veto) — it fails with a 502 and leaves the post untouched if Buffer refuses the delete.
 - `GET /v1/runs/{run_id}` and `GET /v1/runs/{run_id}/events` inspect workflow status.
 - `GET /v1/runs/stream` and `GET /v1/runs/{run_id}/stream` stream Redis-backed run updates when `REDIS_URL` is configured.
 - `POST /internal/progress` records worker progress and requires `X-Eclypte-Internal-Token`.
@@ -135,6 +135,10 @@ export ECLYPTE_R2_PUBLIC_BASE_URL="https://media.example.com"
 export OPENAI_API_KEY="..."
 export ECLYPTE_CAPTION_MODEL="gpt-5.4-mini"
 ```
+
+Operational assumption: the Buffer channel's own posting schedule (e.g. 2 slots/day) is
+configured in Buffer's dashboard, not here — it's what actually paces posts to Instagram, so
+autopilot's `daily_target` (below) should match it.
 
 Publishing smoke:
 
@@ -171,6 +175,16 @@ curl -X POST -H "X-User-Id: local_dev" \
 Manage state via `GET/PATCH /v1/autopilot` and `POST /v1/autopilot/queue`;
 auto-created packages appear as `ready` on the dashboard Home feed (`/dashboard`)
 for approval (`/dashboard/publish` now redirects there).
+
+Two default-off autonomy flags extend the loop via `PATCH /v1/autopilot`:
+`auto_pair` lets the tick pick its own film×song pairs (LRU rotation over the
+saved library, skipping/recycling exhausted pairs — `api/autopilot.py::select_next_pair`)
+instead of requiring a manually queued pair; `auto_publish` sends `ready`
+auto-created packages straight to Buffer's queue on a tick (30-minute retry
+backoff on a send failure, paused once queued posts exceed 2x `daily_target`,
+send failures never count toward the 3-failure halt). With `auto_publish` on,
+`POST /v1/publishing/posts/{post_id}/cancel` on a queued/scheduled post is the
+human veto — it deletes the post from Buffer before marking it canceled.
 
 Deploy the new R2-aware Modal wrappers before using video-analysis/render API
 jobs against live Modal. Run deploys from `api/prototyping/` so the shared
