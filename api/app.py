@@ -318,6 +318,7 @@ class AutopilotStatusResponse(BaseModel):
     auto_publish: bool
     recycling: bool
     waiting_for_library: bool
+    backlog_paused: bool
     halted_reason: str | None
     last_tick_at: str | None
     packaged_today: int
@@ -847,6 +848,7 @@ def create_app(
             auto_publish=state.auto_publish,
             recycling=state.recycling,
             waiting_for_library=state.waiting_for_library,
+            backlog_paused=state.backlog_paused,
             halted_reason=state.halted_reason,
             last_tick_at=state.last_tick_at,
             packaged_today=state.packaged_counts.get(today, 0),

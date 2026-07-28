@@ -191,6 +191,7 @@ export type AutopilotStatus = {
     auto_publish: boolean
     recycling: boolean
     waiting_for_library: boolean
+    backlog_paused: boolean
 }
 
 export type AutopilotQueueItemInput = {

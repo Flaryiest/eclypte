@@ -330,6 +330,11 @@ export default function HomePage() {
                     Recycling your library — add films or songs for fresh combos.
                 </p>
             )}
+            {autopilot?.backlog_paused && (
+                <p className={styles.smallText}>
+                    Holding off on new reels until the queued ones post.
+                </p>
+            )}
             {banner && <div className={styles.errorBanner}>{banner}</div>}
 
             {/* Ready for you */}

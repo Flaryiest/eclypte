@@ -243,6 +243,9 @@ class AutopilotState(BaseModel):
     # Stamped by each replenish run (not computed at read time).
     recycling: bool = False
     waiting_for_library: bool = False
+    # True while replenish is holding off because unposted auto-created
+    # posts (ready/queued/scheduled) already cover 2x the daily target.
+    backlog_paused: bool = False
     items: list[AutopilotItem] = Field(default_factory=list)
     used_combos: list[str] = Field(default_factory=list)
     consecutive_failures: int = 0

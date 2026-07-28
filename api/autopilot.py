@@ -363,6 +363,7 @@ def _run_tick_locked(
     # only place that stamps them True.
     recycling = False
     waiting_for_library = False
+    backlog_paused = False
 
     def fail_item(item: AutopilotItem, error: str, *, count_failure: bool = True) -> AutopilotItem:
         nonlocal consecutive_failures
@@ -529,6 +530,21 @@ def _run_tick_locked(
         in_flight = sum(1 for item in items if item.status in ACTIVE_ITEM_STATUSES)
         packaged_today = packaged_counts.get(today, 0)
         if not has_pending and in_flight + packaged_today < state.daily_target:
+            # Creation brake: production must not outrun Buffer's posting
+            # slots. While unposted auto-created posts already cover 2x the
+            # daily target, skip pairing entirely — the backlog drains at
+            # Buffer's schedule, then production resumes.
+            unposted_backlog = sum(
+                1
+                for p in repo.list_publishing_posts(user_id)
+                if p.auto_created and p.status in {"ready", "queued", "scheduled"}
+            )
+            backlog_paused = unposted_backlog >= 2 * state.daily_target
+        if (
+            not has_pending
+            and in_flight + packaged_today < state.daily_target
+            and not backlog_paused
+        ):
             films, songs = _list_pairable_assets(repo, user_id=user_id)
             waiting_for_library = not films or not songs
             known = {a["file_id"] for a in films + songs}
@@ -597,6 +613,7 @@ def _run_tick_locked(
             "last_paired_at": last_paired_at,
             "recycling": recycling,
             "waiting_for_library": waiting_for_library,
+            "backlog_paused": backlog_paused,
         }
     )
     return repo.save_autopilot_state(state)

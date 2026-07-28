@@ -797,6 +797,42 @@ def test_auto_publish_backstop_skips_when_queue_is_deep():
     assert send.calls == []
 
 
+def test_replenish_pauses_while_unposted_backlog_is_deep():
+    # Creation brake: don't make more reels while ready/queued/scheduled
+    # auto-created posts already cover 2x the daily target — production must
+    # not outrun Buffer's posting slots.
+    repo = build_repo()
+    starts = RecordingStarts()
+    publish_asset(repo, file_id="f_film", kind="source_video")
+    publish_asset(repo, file_id="f_song", kind="song_audio")
+    for i in range(4):  # >= 2 * daily_target (2)
+        save_post(repo, post_id=f"p_{i}")
+    save_state(repo, auto_pair=True, daily_target=2)
+
+    state = tick(repo, starts)
+
+    assert state.items == []
+    assert state.backlog_paused is True
+    assert state.halted_reason is None
+
+
+def test_replenish_resumes_when_backlog_drains():
+    repo = build_repo()
+    starts = RecordingStarts()
+    publish_asset(repo, file_id="f_film", kind="source_video")
+    publish_asset(repo, file_id="f_song", kind="song_audio")
+    save_post(repo, post_id="p_0")  # one unposted
+    # Published posts do not count toward the backlog.
+    save_post(repo, post_id="p_done", status="published",
+              posted_at="2026-06-08T12:00:00Z")
+    save_state(repo, auto_pair=True, daily_target=2)
+
+    state = tick(repo, starts)
+
+    assert len(state.items) == 1
+    assert state.backlog_paused is False
+
+
 class RecordingStatusFetch:
     def __init__(self, fail=False):
         self.calls = []
@@ -952,6 +988,7 @@ def test_autopilot_settings_round_trip_autonomy_flags():
     assert body["auto_publish"] is True
     assert body["recycling"] is False
     assert body["waiting_for_library"] is False
+    assert body["backlog_paused"] is False
 
     # Flags persist and can be turned off independently.
     response = client.patch("/v1/autopilot", headers=headers, json={"auto_publish": False})
