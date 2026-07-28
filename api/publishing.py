@@ -3,13 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
+import math
 import os
 import re
+from statistics import median
 from typing import Any, Literal
 from urllib import request as urlrequest
 from urllib.error import HTTPError, URLError
 
-from api.storage.models import PublishingPostRecord
+from api.storage.models import PostMetricsSnapshot, PublishingPostRecord
 from api.storage.r2_client import ObjectStore
 from api.storage.refs import FileRef, FileVersionRef, RunRef
 from api.storage.repository import StorageRepository
@@ -740,6 +742,57 @@ def immediate_due_at(lead_seconds: int | None = None) -> str:
     lead_seconds = max(0, lead_seconds)
     due = datetime.now(timezone.utc) + timedelta(seconds=lead_seconds)
     return due.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+METRICS_HISTORY_HEAD = 2   # earliest readings ≈ the ~24h provisional
+METRICS_HISTORY_TAIL = 10  # the settle curve
+
+
+def apply_post_metrics(
+    post: PublishingPostRecord,
+    *,
+    metrics: dict[str, float],
+    metrics_updated_at: str | None,
+    now: str,
+) -> PublishingPostRecord:
+    """Fold a metrics reading into the record. Pure; never touches
+    last_error/status. An empty reading only moves the checked stamp —
+    absent is not zero and never clobbers stored values."""
+    update: dict[str, object] = {"metrics_checked_at": now, "updated_at": now}
+    if metrics and metrics != post.metrics:
+        history = [*post.metrics_history, PostMetricsSnapshot(captured_at=now, metrics=metrics)]
+        if len(history) > METRICS_HISTORY_HEAD + METRICS_HISTORY_TAIL:
+            history = history[:METRICS_HISTORY_HEAD] + history[-METRICS_HISTORY_TAIL:]
+        update.update(
+            metrics=metrics, metrics_updated_at=metrics_updated_at, metrics_history=history
+        )
+    return post.model_copy(update=update)
+
+
+def _primary_metric(post: PublishingPostRecord) -> float | None:
+    for name in ("views", "impressions"):
+        value = post.metrics.get(name)
+        if value is not None and value > 0:
+            return value
+    return None
+
+
+def performance_score(
+    post: PublishingPostRecord, cohort: list[PublishingPostRecord]
+) -> float | None:
+    """log(primary) − log(median primary of the cohort); None on cold start.
+
+    Baseline-relative because reel counts are heavy-tailed — absolute
+    thresholds don't survive account drift."""
+    primary = _primary_metric(post)
+    if primary is None:
+        return None
+    cohort_primaries = [
+        value for value in (_primary_metric(p) for p in cohort) if value is not None
+    ]
+    if len(cohort_primaries) < 5:
+        return None
+    return math.log(primary) - math.log(median(cohort_primaries))
 
 
 # Buffer Post.status values that mean the post has gone live on the channel.

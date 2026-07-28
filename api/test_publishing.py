@@ -1058,3 +1058,69 @@ def test_get_post_metrics_payload_and_parse():
     client._graphql = lambda p: {"errors": [{"message": "nope"}]}
     with pytest.raises(BufferClientError):
         client.get_post_metrics(post_id="buf_1")
+
+
+def test_apply_post_metrics_snapshots_and_stamps():
+    from api.publishing import apply_post_metrics
+
+    repo, store, post = make_ready_post()
+    now1 = "2026-07-27T10:00:00Z"
+    updated = apply_post_metrics(
+        post, metrics={"views": 100.0}, metrics_updated_at="2026-07-27T06:00:00Z", now=now1
+    )
+    assert updated.metrics == {"views": 100.0}
+    assert updated.metrics_checked_at == now1
+    assert len(updated.metrics_history) == 1
+    assert updated.last_error is None and updated.status == post.status
+
+    # Identical values: stamps move, no new snapshot.
+    updated2 = apply_post_metrics(
+        updated, metrics={"views": 100.0}, metrics_updated_at="2026-07-27T06:00:00Z",
+        now="2026-07-27T22:00:00Z",
+    )
+    assert len(updated2.metrics_history) == 1
+    assert updated2.metrics_checked_at == "2026-07-27T22:00:00Z"
+
+    # Empty response never clobbers stored values.
+    updated3 = apply_post_metrics(
+        updated2, metrics={}, metrics_updated_at=None, now="2026-07-28T10:00:00Z"
+    )
+    assert updated3.metrics == {"views": 100.0}
+    assert updated3.metrics_history == updated2.metrics_history
+
+
+def test_apply_post_metrics_history_cap_keeps_head_and_tail():
+    from api.publishing import apply_post_metrics
+
+    repo, store, post = make_ready_post()
+    for i in range(15):
+        post = apply_post_metrics(
+            post, metrics={"views": float(i + 1)}, metrics_updated_at=None,
+            now=f"2026-07-{10 + i:02d}T00:00:00Z",
+        )
+    history = post.metrics_history
+    assert len(history) == 12
+    assert history[0].metrics == {"views": 1.0}   # head preserved
+    assert history[1].metrics == {"views": 2.0}
+    assert history[-1].metrics == {"views": 15.0}  # tail is most recent
+
+
+def test_performance_score_log_median_and_cold_start():
+    import math
+    from api.publishing import performance_score
+
+    def scored_post(views):
+        _, _, p = make_ready_post()
+        return p.model_copy(update={"metrics": {"views": float(views)}})
+
+    cohort = [scored_post(v) for v in (100, 100, 100, 100, 100)]
+    target = scored_post(200)
+    score = performance_score(target, cohort)
+    assert score is not None and abs(score - math.log(2.0)) < 1e-9
+
+    assert performance_score(target, cohort[:4]) is None      # <5 scored posts
+    _, _, bare = make_ready_post()
+    assert performance_score(bare, cohort) is None            # no primary metric
+
+    fallback = bare.model_copy(update={"metrics": {"impressions": 100.0}})
+    assert performance_score(fallback, cohort) is not None    # impressions fallback
