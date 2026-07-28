@@ -194,6 +194,9 @@ class PublishingPostRecord(BaseModel):
     metrics: dict[str, float] = Field(default_factory=dict)
     metrics_updated_at: str | None = None   # provider's ingestion stamp
     metrics_checked_at: str | None = None   # our last poll (cadence control)
+    # Last tick-side Buffer status reconcile for a queued/scheduled post
+    # (cadence control for the server-side sent-status convergence pass).
+    status_checked_at: str | None = None
     metrics_history: list[PostMetricsSnapshot] = Field(default_factory=list)
     # Lineage ids captured at packaging so Phase 2 attribution never has to
     # walk run manifests.

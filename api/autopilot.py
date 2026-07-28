@@ -17,7 +17,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Protocol
 
-from api.publishing import apply_post_metrics, create_publish_post_for_render
+from api.publishing import (
+    BufferPostResult,
+    apply_buffer_status,
+    apply_post_metrics,
+    create_publish_post_for_render,
+)
 from api.storage.models import AutopilotItem, AutopilotState, PublishingPostRecord, RunManifest
 from api.storage.refs import FileVersionRef, RunRef
 from api.storage.repository import StorageRepository
@@ -43,6 +48,12 @@ METRICS_REFRESH_INTERVAL_SEC = 43200  # ~12h; Buffer ingests metrics daily
 METRICS_RETENTION_DAYS = 30           # metrics have settled; stop polling
 METRICS_MAX_PER_PASS = 20
 
+# Server-side sent-status convergence for queued/scheduled posts: without it,
+# statuses only update while the dashboard is open (the browser poll), so the
+# send budget and creation brake would act on stale counts unattended.
+STATUS_RECONCILE_INTERVAL_SEC = 3600  # Buffer slots are hours apart
+STATUS_RECONCILE_MAX_PER_PASS = 10
+
 ACTIVE_ITEM_STATUSES = {"analyzing", "editing"}
 
 # Serializes state read-modify-write between the tick loop and API routes in
@@ -57,6 +68,9 @@ SEND_LOCK = threading.Lock()
 # Serializes metrics passes the same way SEND_LOCK serializes sends; a
 # concurrent pass just skips (the 12h cadence retries next tick).
 METRICS_LOCK = threading.Lock()
+
+# Serializes status-reconcile passes (same non-blocking skip pattern).
+RECONCILE_LOCK = threading.Lock()
 
 
 class StartMusicAnalysis(Protocol):
@@ -86,6 +100,10 @@ class FetchPostMetrics(Protocol):
     def __call__(
         self, user_id: str, *, buffer_post_id: str
     ) -> tuple[dict[str, float], str | None]: ...
+
+
+class FetchPostStatus(Protocol):
+    def __call__(self, user_id: str, *, buffer_post_id: str) -> "BufferPostResult": ...
 
 
 def combo_key(
@@ -275,6 +293,7 @@ def run_autopilot_tick(
     start_edit: StartEdit,
     send_ready_post: SendReadyPost | None = None,
     fetch_post_metrics: FetchPostMetrics | None = None,
+    fetch_post_status: FetchPostStatus | None = None,
     now: datetime | None = None,
 ) -> AutopilotState:
     with STATE_LOCK:
@@ -285,6 +304,15 @@ def run_autopilot_tick(
             start_edit=start_edit,
             now=now,
         )
+    # Status reconcile runs BEFORE auto-send so the send budget (and the next
+    # tick's creation brake) see real queued/published counts even with the
+    # dashboard closed.
+    _reconcile_buffer_statuses(
+        repo,
+        user_id=user_id,
+        fetch_post_status=fetch_post_status,
+        now=now or datetime.now(timezone.utc),
+    )
     # Auto-send does real network I/O (R2 media copy + Buffer HTTP call) per
     # post, so it runs outside STATE_LOCK: it only reads autopilot state and
     # mutates publishing posts, which the lock never protected, and holding
@@ -572,6 +600,68 @@ def _run_tick_locked(
         }
     )
     return repo.save_autopilot_state(state)
+
+
+def _reconcile_buffer_statuses(
+    repo: StorageRepository,
+    *,
+    user_id: str,
+    fetch_post_status: FetchPostStatus | None,
+    now: datetime,
+) -> None:
+    """Converge queued/scheduled posts with Buffer's real sent state.
+
+    Runs outside STATE_LOCK, regardless of the autonomy flags — review-gated
+    posts need status convergence too. Best-effort by contract: a failure
+    logs and stamps `status_checked_at` only (so the next tick doesn't
+    hammer), never `last_error` or the halt."""
+    if fetch_post_status is None:
+        return
+    if not RECONCILE_LOCK.acquire(blocking=False):
+        return
+    try:
+        now_iso = utc_now_iso(now)
+        checked = 0
+        for status in ("queued", "scheduled"):
+            for post in repo.list_publishing_posts(user_id, status=status):
+                if checked >= STATUS_RECONCILE_MAX_PER_PASS:
+                    return
+                if not post.buffer_post_id:
+                    continue
+                if post.status_checked_at and not _older_than(
+                    post.status_checked_at,
+                    now,
+                    STATUS_RECONCILE_INTERVAL_SEC,
+                    on_unparseable=True,
+                ):
+                    continue
+                checked += 1
+                result: BufferPostResult | None = None
+                try:
+                    result = fetch_post_status(
+                        user_id, buffer_post_id=post.buffer_post_id
+                    )
+                except Exception:  # noqa: BLE001 — reconcile must never break the tick
+                    logger.warning(
+                        "status reconcile failed for post %s",
+                        post.post_id,
+                        exc_info=True,
+                    )
+                try:
+                    fresh = repo.load_publishing_post(
+                        user_id=user_id, post_id=post.post_id
+                    )
+                except KeyError:
+                    continue
+                if fresh.status not in {"queued", "scheduled"}:
+                    continue  # changed mid-fetch (canceled/marked); leave it
+                if result is not None:
+                    fresh = apply_buffer_status(fresh, result, now=now_iso)
+                repo.save_publishing_post(
+                    fresh.model_copy(update={"status_checked_at": now_iso})
+                )
+    finally:
+        RECONCILE_LOCK.release()
 
 
 def _auto_send_ready_posts(

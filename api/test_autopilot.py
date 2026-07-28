@@ -49,7 +49,7 @@ def save_state(repo, **overrides):
     return repo.save_autopilot_state(state)
 
 
-def tick(repo, starts, send=None, fetch=None):
+def tick(repo, starts, send=None, fetch=None, status=None):
     return run_autopilot_tick(
         repo,
         user_id=USER,
@@ -57,6 +57,7 @@ def tick(repo, starts, send=None, fetch=None):
         start_edit=starts.start_edit,
         send_ready_post=send,
         fetch_post_metrics=fetch,
+        fetch_post_status=status,
         now=NOW,
     )
 
@@ -697,7 +698,7 @@ def test_halt_stops_replenish():
 
 def save_post(repo, *, post_id, status="ready", auto_created=True, last_error=None,
               updated_at="2026-06-09T11:00:00Z", posted_at=None, buffer_post_id=None,
-              metrics_checked_at=None):
+              metrics_checked_at=None, status_checked_at=None):
     return repo.save_publishing_post(
         PublishingPostRecord(
             post_id=post_id,
@@ -711,6 +712,7 @@ def save_post(repo, *, post_id, status="ready", auto_created=True, last_error=No
             posted_at=posted_at,
             buffer_post_id=buffer_post_id,
             metrics_checked_at=metrics_checked_at,
+            status_checked_at=status_checked_at,
             created_at="2026-06-09T11:00:00Z",
             updated_at=updated_at,
         )
@@ -793,6 +795,70 @@ def test_auto_publish_backstop_skips_when_queue_is_deep():
     tick(repo, RecordingStarts(), send=send)
 
     assert send.calls == []
+
+
+class RecordingStatusFetch:
+    def __init__(self, fail=False):
+        self.calls = []
+        self.fail = fail
+
+    def __call__(self, user_id, *, buffer_post_id):
+        self.calls.append(buffer_post_id)
+        if self.fail:
+            raise RuntimeError("status fetch exploded")
+        from api.publishing import BufferPostResult
+
+        return BufferPostResult(
+            post_id=buffer_post_id,
+            status="sent",
+            post_url="https://instagram.com/p/live",
+            sent_at="2026-06-09T09:00:00Z",
+        )
+
+
+def test_reconcile_flips_stale_queued_post_to_published():
+    # Statuses must converge server-side: with the dashboard closed, a queued
+    # post that Buffer already sent still flips to published on a tick, so the
+    # send budget and creation brake see real counts.
+    repo = build_repo()
+    fetch = RecordingStatusFetch()
+    save_post(repo, post_id="p_q", status="queued", buffer_post_id="buf_1")
+    save_state(repo)  # auto_publish OFF: reconcile runs regardless
+
+    tick(repo, RecordingStarts(), status=fetch)
+
+    assert fetch.calls == ["buf_1"]
+    stored = next(p for p in repo.list_publishing_posts(USER) if p.post_id == "p_q")
+    assert stored.status == "published"
+    assert stored.post_url == "https://instagram.com/p/live"
+    assert stored.status_checked_at is not None
+
+
+def test_reconcile_respects_cadence():
+    repo = build_repo()
+    fetch = RecordingStatusFetch()
+    # Checked 30 minutes before NOW -> inside the 1h cadence, skipped.
+    save_post(repo, post_id="p_q", status="queued", buffer_post_id="buf_1",
+              status_checked_at="2026-06-09T11:30:00Z")
+    save_state(repo)
+
+    tick(repo, RecordingStarts(), status=fetch)
+
+    assert fetch.calls == []
+
+
+def test_reconcile_failure_stamps_check_but_not_last_error():
+    repo = build_repo()
+    fetch = RecordingStatusFetch(fail=True)
+    save_post(repo, post_id="p_q", status="queued", buffer_post_id="buf_1")
+    save_state(repo)
+
+    tick(repo, RecordingStarts(), status=fetch)  # must not raise
+
+    stored = next(p for p in repo.list_publishing_posts(USER) if p.post_id == "p_q")
+    assert stored.status == "queued"
+    assert stored.status_checked_at is not None
+    assert stored.last_error is None
 
 
 def test_auto_publish_caps_sends_per_pass_at_daily_target():
