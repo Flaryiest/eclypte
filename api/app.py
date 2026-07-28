@@ -36,6 +36,7 @@ from api.publishing import (
     PostAlreadySentError,
     SendToBufferError,
     apply_buffer_status,
+    apply_post_metrics,
     create_publish_post_for_render,
     generate_caption_draft,
     optional_bool,
@@ -1342,6 +1343,27 @@ def create_app(
             )
             return publishing_post_view(saved, uid, resolved_store)
         saved = repo.save_publishing_post(apply_buffer_status(post, result, now=utc_now()))
+        if saved.status == "published" and saved.buffer_post_id:
+            try:
+                metrics, metrics_updated_at = client.get_post_metrics(
+                    post_id=saved.buffer_post_id
+                )
+                saved = repo.save_publishing_post(
+                    apply_post_metrics(
+                        saved,
+                        metrics=metrics,
+                        metrics_updated_at=metrics_updated_at,
+                        now=utc_now(),
+                    )
+                )
+            except BufferClientError as exc:
+                # Metrics are decoration on this route; a failure must not
+                # touch last_error (auto-send backoff) or fail the refresh.
+                logger.warning(
+                    "metrics fetch failed during refresh for post %s: %s",
+                    saved.post_id,
+                    exc,
+                )
         return publishing_post_view(saved, uid, resolved_store)
 
     @app.post("/v1/publishing/posts/{post_id}/cancel", response_model=PublishingPostView)

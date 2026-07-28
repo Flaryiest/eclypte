@@ -26,6 +26,7 @@ class RecordingBufferClient:
         self.calls = []
         self.channel_calls = []
         self.post_calls = []
+        self.metrics_calls = []
 
     def create_video_post(self, *, channel_id, text, media_url, mode, due_at=None):
         self.calls.append(
@@ -62,6 +63,12 @@ class RecordingBufferClient:
             status="sent",
             post_url="https://instagram.com/reel/abc123",
         )
+
+    def get_post_metrics(self, *, post_id):
+        # Base fake reports no metrics (absent, not zero) — tests that care about
+        # the metrics-pull behavior itself use MetricsBufferClient below.
+        self.metrics_calls.append(post_id)
+        return {}, None
 
 
 class QueuedBufferClient(RecordingBufferClient):
@@ -116,6 +123,30 @@ class FailingBufferClient(RecordingBufferClient):
 
     def get_channel(self, *, channel_id):
         raise BufferClientError("Buffer channel lookup failed")
+
+
+class MetricsBufferClient(RecordingBufferClient):
+    """get_post always reports sent; get_post_metrics either returns a fixed
+    reading or raises, per test — for the refresh-status metrics-pull tests."""
+
+    def __init__(self, *, metrics_result=None, metrics_error: Exception | None = None):
+        super().__init__()
+        self._metrics_result = metrics_result
+        self._metrics_error = metrics_error
+
+    def get_post(self, *, post_id):
+        self.post_calls.append(post_id)
+        return BufferPostResult(
+            post_id=post_id,
+            status="sent",
+            post_url="https://instagram.com/reel/abc123",
+        )
+
+    def get_post_metrics(self, *, post_id):
+        self.metrics_calls.append(post_id)
+        if self._metrics_error is not None:
+            raise self._metrics_error
+        return self._metrics_result
 
 
 class FakeCaptionResponse:
@@ -513,6 +544,51 @@ def test_refresh_status_records_error_without_502(monkeypatch):
     assert buffer.post_calls == ["buf_err"]
 
 
+def test_refresh_status_pulls_metrics_for_published_post(monkeypatch):
+    # After apply_buffer_status flips a post to published, refresh-status must
+    # additionally pull metrics for it in the same request.
+    monkeypatch.setenv("BUFFER_INSTAGRAM_CHANNEL_ID", "channel_instagram")
+    monkeypatch.setenv("ECLYPTE_R2_PUBLIC_BASE_URL", "https://media.example.com")
+    buffer = MetricsBufferClient(metrics_result=({"views": 321.0}, "2026-07-27T06:00:00Z"))
+    app_client, repo, store = build_publishing_test_app(buffer_client=buffer)
+    post = save_queued_post(repo, buffer_post_id="buf_metrics")
+
+    response = app_client.post(
+        f"/v1/publishing/posts/{post.post_id}/refresh-status",
+        headers={"X-User-Id": USER},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "published"
+    assert body["metrics"] == {"views": 321.0}
+    assert buffer.post_calls == ["buf_metrics"]
+    assert buffer.metrics_calls == ["buf_metrics"]
+
+
+def test_refresh_status_metrics_failure_does_not_set_last_error(monkeypatch):
+    # A metrics-pull failure is decoration on this route: the status update from
+    # get_post must still land, and the failure must not touch last_error (which
+    # drives auto-send backoff) or fail the request.
+    monkeypatch.setenv("BUFFER_INSTAGRAM_CHANNEL_ID", "channel_instagram")
+    monkeypatch.setenv("ECLYPTE_R2_PUBLIC_BASE_URL", "https://media.example.com")
+    buffer = MetricsBufferClient(
+        metrics_error=BufferClientError("Buffer HTTP 500: metrics unavailable")
+    )
+    app_client, repo, store = build_publishing_test_app(buffer_client=buffer)
+    post = save_queued_post(repo, buffer_post_id="buf_metrics_fail")
+
+    response = app_client.post(
+        f"/v1/publishing/posts/{post.post_id}/refresh-status",
+        headers={"X-User-Id": USER},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "published"
+    assert body["last_error"] is None
+
+
 def test_mark_posted_override_moves_post_to_published(monkeypatch):
     monkeypatch.setenv("BUFFER_INSTAGRAM_CHANNEL_ID", "channel_instagram")
     monkeypatch.setenv("ECLYPTE_R2_PUBLIC_BASE_URL", "https://media.example.com")
@@ -741,6 +817,8 @@ def test_create_post_resolves_movie_and_song_names_from_render_lineage():
 
     assert post.source_name == "Spirited Away"
     assert post.song_name == "Unravel"
+    assert post.source_video_file_id == "file_video"
+    assert post.song_file_id == "file_song"
 
 
 def test_regenerate_caption_passes_persisted_names(monkeypatch):

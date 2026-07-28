@@ -528,6 +528,8 @@ def create_publish_post_for_render(
     # no poster ref (backfilled lazily at list time if it appears later).
     poster_file_id: str | None = None
     poster_version_id: str | None = None
+    source_video_file_id: str | None = None
+    song_file_id: str | None = None
     if manifest.source_run_id:
         try:
             source_run = repo.load_run_manifest(
@@ -535,6 +537,8 @@ def create_publish_post_for_render(
             )
             poster_file_id = source_run.outputs.get("render_poster_file_id")
             poster_version_id = source_run.outputs.get("render_poster_version_id")
+            source_video_file_id = source_run.inputs.get("source_video_file_id")
+            song_file_id = source_run.inputs.get("audio_file_id")
         except KeyError:
             pass
     draft = generate_caption_draft(
@@ -563,6 +567,8 @@ def create_publish_post_for_render(
         source_run_id=manifest.source_run_id,
         source_name=source_name,
         song_name=song_name,
+        source_video_file_id=source_video_file_id,
+        song_file_id=song_file_id,
         created_at=now,
         updated_at=now,
     )
