@@ -7,6 +7,7 @@ import { Play, Plus, RefreshCw, Zap } from "lucide-react"
 import {
     DashboardPage,
     FadeImg,
+    MetaList,
     PostedStripSkeleton,
     ProgressRow,
     QueueRowsSkeleton,
@@ -20,6 +21,7 @@ import {
     errorMessage,
     formatClock,
     formatDate,
+    humanizeLabel,
     humanizeStageDetail,
     stripExtension,
     useToast,
@@ -456,6 +458,16 @@ export default function HomePage() {
                                         <span className={styles.postedThumb} aria-hidden />
                                     )}
                                     <p className={styles.postedMeta}>{postedLabel(post)}</p>
+                                    {post.status === "published" && (
+                                        metricsLine(post) ? (
+                                            <p className={styles.postedMeta}>
+                                                {metricsLine(post)}
+                                                {relativeChip(post.performance_score) ? ` · ${relativeChip(post.performance_score)}` : ""}
+                                            </p>
+                                        ) : (
+                                            <p className={styles.postedMeta}>numbers arrive about a day after posting</p>
+                                        )
+                                    )}
                                 </button>
                             )
                         })}
@@ -512,6 +524,44 @@ function postedLabel(post: PublishingPost) {
         return `scheduled ${post.scheduled_at ? formatDate(post.scheduled_at) : ""}`
     }
     return "queued"
+}
+
+// Raw provider metric names -> creator-facing words. "impressions" is the
+// views fallback (some platforms report only one or the other) — both read
+// as "views" so creators never see the raw provider vocabulary.
+const METRIC_LABELS: Record<string, string> = {
+    views: "views",
+    impressions: "views",
+    likes: "likes",
+    comments: "comments",
+    shares: "shares",
+    saves: "saves",
+    reach: "reached",
+}
+
+// A short "1,234 views · 56 likes" summary for the posted-strip card. A
+// metric key absent from post.metrics was never reported — it is skipped,
+// never rendered as 0. impressions is suppressed once real views exist so
+// the same number never shows twice under two labels.
+function metricsLine(post: PublishingPost): string | null {
+    const parts: string[] = []
+    for (const key of ["views", "impressions", "likes", "comments", "shares", "saves"]) {
+        const value = post.metrics?.[key]
+        if (value === undefined) continue
+        if (key === "impressions" && post.metrics?.views !== undefined) continue
+        parts.push(`${Math.round(value).toLocaleString()} ${METRIC_LABELS[key]}`)
+    }
+    return parts.length ? parts.join(" · ") : null
+}
+
+// Log-relative performance score -> a short relative-to-median chip. Null
+// (fewer than 5 scored posts yet) means no chip at all, not "0x".
+function relativeChip(score: number | null): string | null {
+    if (score === null || score === undefined) return null
+    const ratio = Math.exp(score)
+    if (ratio >= 1.5) return `${ratio.toFixed(1)}× your median`
+    if (ratio <= 1 / 1.5) return "below median"
+    return "around median"
 }
 
 function itemTitle(item: AutopilotItem, assetById: Map<string, AssetSummary>) {
@@ -825,11 +875,58 @@ function ReviewSheet({
                     {post.status === "queued" && (
                         <p className={styles.smallText}>Posts at your next scheduled slot — cancel to veto.</p>
                     )}
+                    {post.status === "published" && (
+                        <div style={{ marginTop: "0.6rem" }}>
+                            <h2 className={styles.settingsGroupTitle}>How it&apos;s doing</h2>
+                            {Object.keys(post.metrics).length > 0 ? (
+                                <MetaList items={metricsMetaItems(post)} />
+                            ) : (
+                                <p className={styles.smallText}>Numbers arrive about a day after posting.</p>
+                            )}
+                            {post.metrics_history.length > 0 && (
+                                <ul
+                                    style={{
+                                        margin: "0.5rem 0 0",
+                                        padding: 0,
+                                        listStyle: "none",
+                                        display: "flex",
+                                        flexDirection: "column",
+                                        gap: "0.25rem",
+                                    }}
+                                >
+                                    {[...post.metrics_history].reverse().map((snapshot, index) => (
+                                        <li key={index} className={styles.smallText} style={{ margin: 0 }}>
+                                            {historySnapshotLabel(snapshot)}
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                    )}
                 </>
             )}
             {post.last_error && <div className={styles.errorBanner}>{post.last_error}</div>}
         </Sheet>
     )
+}
+
+// Every reported metric, one row each, in creator words. A metric absent
+// from post.metrics is simply not in this list — never shown as 0.
+function metricsMetaItems(post: PublishingPost) {
+    return Object.entries(post.metrics).map(([key, value]) => ({
+        label: METRIC_LABELS[key] ?? humanizeLabel(key),
+        value: Math.round(value).toLocaleString(),
+    }))
+}
+
+// One line per history snapshot: date + its views (falling back to
+// impressions) only — the full per-metric breakdown lives in the current
+// metricsMetaItems rows above, so history stays scannable.
+function historySnapshotLabel(snapshot: { captured_at: string; metrics: Record<string, number> }): string {
+    const views = snapshot.metrics.views ?? snapshot.metrics.impressions
+    return views !== undefined
+        ? `${formatDate(snapshot.captured_at)} · ${Math.round(views).toLocaleString()} views`
+        : formatDate(snapshot.captured_at)
 }
 
 function toLocalDateTimeInput(value: string | null) {

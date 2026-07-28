@@ -135,6 +135,18 @@ export type PublishingPost = {
     source_run_id: string | null
     source_name?: string
     song_name?: string
+    // Per-post performance pulled from the publishing provider. A metric
+    // absent from the map was not reported — absent is NOT zero, never
+    // render a missing key as 0.
+    metrics: Record<string, number>
+    metrics_updated_at: string | null
+    metrics_checked_at: string | null
+    metrics_history: Array<{ captured_at: string; metrics: Record<string, number> }>
+    // Log-relative performance vs. the account's recent median. Null until
+    // at least 5 scored posts exist — null means no chip, not "0x".
+    performance_score: number | null
+    source_video_file_id: string | null
+    song_file_id: string | null
     created_at: string
     updated_at: string
 }
