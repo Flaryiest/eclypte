@@ -498,6 +498,93 @@ def create_publish_post_for_render(
     return repo.save_publishing_post(record)
 
 
+class BufferConfigError(BufferClientError):
+    """Buffer publishing is not configured (missing env)."""
+
+
+class SendToBufferError(Exception):
+    """Buffer rejected the send. `record` is the prepared post (public media
+    copy already made, status untouched) so callers decide the failure policy."""
+
+    def __init__(self, record: PublishingPostRecord, cause: BufferClientError):
+        super().__init__(str(cause))
+        self.record = record
+        self.cause = cause
+
+
+def resolve_buffer_channel_id_env() -> str:
+    channel_id = os.environ.get("BUFFER_INSTAGRAM_CHANNEL_ID")
+    if not channel_id:
+        raise BufferConfigError("BUFFER_INSTAGRAM_CHANNEL_ID is not configured")
+    return channel_id
+
+
+def resolve_public_media_base_url_env() -> str:
+    base_url = os.environ.get("ECLYPTE_R2_PUBLIC_BASE_URL")
+    if not base_url:
+        raise BufferConfigError("ECLYPTE_R2_PUBLIC_BASE_URL is not configured")
+    return base_url
+
+
+def send_post_to_buffer(
+    repo: StorageRepository,
+    *,
+    store: ObjectStore,
+    post: PublishingPostRecord,
+    mode: str,
+    scheduled_at: str | None = None,
+    client: Any | None = None,
+) -> PublishingPostRecord:
+    """Shared send path used by the send-buffer route and the autopilot tick.
+
+    Mode mapping mirrors the API contract: "now" -> customScheduled at
+    immediate_due_at(); "schedule" -> customScheduled at the given/stored
+    scheduled_at; "queue" -> addToQueue (Buffer's posting schedule decides
+    when it publishes).
+    """
+    channel_id = resolve_buffer_channel_id_env()
+    public_base_url = resolve_public_media_base_url_env()
+    if mode == "now":
+        buffer_mode: BufferShareMode = "customScheduled"
+        due_at: str | None = immediate_due_at()
+    elif mode == "schedule":
+        buffer_mode = "customScheduled"
+        due_at = scheduled_at or post.scheduled_at
+        if not due_at:
+            raise ValueError("scheduled_at is required for schedule mode")
+    else:
+        buffer_mode = "addToQueue"
+        due_at = scheduled_at or post.scheduled_at
+    prepared = prepare_public_media_copy(
+        repo, store=store, post=post, public_base_url=public_base_url
+    )
+    buffer_client = client if client is not None else BufferClient.from_env()
+    try:
+        result = buffer_client.create_video_post(
+            channel_id=channel_id,
+            text=format_post_text(prepared.caption, prepared.hashtags),
+            media_url=prepared.public_media_url or "",
+            mode=buffer_mode,
+            due_at=due_at,
+        )
+    except BufferClientError as exc:
+        raise SendToBufferError(prepared, exc) from exc
+    return repo.save_publishing_post(
+        prepared.model_copy(
+            update={
+                "status": queue_status_for_mode(buffer_mode),
+                "buffer_channel_id": channel_id,
+                "buffer_post_id": result.post_id,
+                "buffer_status": result.status,
+                "scheduled_at": due_at,
+                "post_url": result.post_url,
+                "last_error": None,
+                "updated_at": _utc_now(),
+            }
+        )
+    )
+
+
 def prepare_public_media_copy(
     repo: StorageRepository,
     *,

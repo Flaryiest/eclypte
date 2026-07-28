@@ -32,15 +32,14 @@ from api.publishing import (
     BufferClient,
     BufferClientError,
     BufferChannelStatus,
+    BufferConfigError,
+    SendToBufferError,
     apply_buffer_status,
     create_publish_post_for_render,
-    format_post_text,
     generate_caption_draft,
-    immediate_due_at,
     optional_bool,
     optional_str,
-    prepare_public_media_copy,
-    queue_status_for_mode,
+    send_post_to_buffer,
 )
 from api.storage.models import (
     ArtifactKind,
@@ -1257,42 +1256,22 @@ def create_app(
         post = publishing_post_or_404(repo, uid, post_id)
         if post.status == "canceled":
             raise HTTPException(status_code=400, detail="publishing post is canceled")
-        channel_id = resolve_buffer_channel_id()
-        public_base_url = resolve_public_media_base_url()
-        if request.mode == "now":
-            # Post immediately: a customScheduled post due just ahead of now bypasses the
-            # posting-schedule queue. dueAt is computed server-side (Buffer rejects past
-            # times) and ignores any stored/requested schedule.
-            mode = "customScheduled"
-            due_at: str | None = immediate_due_at()
-        elif request.mode == "schedule":
-            mode = "customScheduled"
-            due_at = request.scheduled_at or post.scheduled_at
-            if not due_at:
-                raise HTTPException(
-                    status_code=400, detail="scheduled_at is required for schedule mode"
-                )
-        else:
-            mode = "addToQueue"
-            due_at = request.scheduled_at or post.scheduled_at
-        prepared = prepare_public_media_copy(
-            repo,
-            store=resolved_store,
-            post=post,
-            public_base_url=public_base_url,
-        )
-        client = resolve_buffer_client()
         try:
-            result = client.create_video_post(
-                channel_id=channel_id,
-                text=format_post_text(prepared.caption, prepared.hashtags),
-                media_url=prepared.public_media_url or "",
-                mode=mode,
-                due_at=due_at,
+            saved = send_post_to_buffer(
+                repo,
+                store=resolved_store,
+                post=post,
+                mode=request.mode,
+                scheduled_at=request.scheduled_at,
+                client=resolve_buffer_client(),
             )
-        except BufferClientError as exc:
+        except BufferConfigError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except SendToBufferError as exc:
             repo.save_publishing_post(
-                prepared.model_copy(
+                exc.record.model_copy(
                     update={
                         "status": "failed",
                         "last_error": str(exc),
@@ -1301,20 +1280,6 @@ def create_app(
                 )
             )
             raise HTTPException(status_code=502, detail=str(exc)) from exc
-        saved = repo.save_publishing_post(
-            prepared.model_copy(
-                update={
-                    "status": queue_status_for_mode(mode),
-                    "buffer_channel_id": channel_id,
-                    "buffer_post_id": result.post_id,
-                    "buffer_status": result.status,
-                    "scheduled_at": due_at,
-                    "post_url": result.post_url,
-                    "last_error": None,
-                    "updated_at": utc_now(),
-                }
-            )
-        )
         return publishing_post_view(saved, uid, resolved_store)
 
     @app.post(

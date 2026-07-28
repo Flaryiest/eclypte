@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
 from api.app import create_app
@@ -658,6 +659,23 @@ def _publish_render(repo: StorageRepository, *, body=b"render"):
     return {"file_id": file_ref.file_id, "version_id": version_ref.version_id}
 
 
+def make_ready_post(*, body: bytes = b"render-video"):
+    """A fresh repo/store plus a `ready` publishing post backed by a real render_output.
+
+    Shared setup for the send_post_to_buffer tests (and any other test that just
+    needs a post to send).
+    """
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    render = _publish_render(repo, body=body)
+    post = create_publish_post_for_render(
+        repo,
+        user_id="user_123",
+        render_output=render,
+    )
+    return repo, store, post
+
+
 def test_create_post_resolves_movie_and_song_names_from_render_lineage():
     from api.storage.refs import FileRef, RunRef
 
@@ -785,3 +803,55 @@ def test_create_post_captures_render_poster_ref_from_source_run():
 
     assert post.render_poster_file_id == "file_poster"
     assert post.render_poster_version_id == "ver_poster"
+
+
+def test_send_post_to_buffer_queue_mode_shared_function(monkeypatch):
+    from api.publishing import SendToBufferError, send_post_to_buffer
+
+    monkeypatch.setenv("BUFFER_INSTAGRAM_CHANNEL_ID", "chan_1")
+    monkeypatch.setenv("ECLYPTE_R2_PUBLIC_BASE_URL", "https://media.example.com")
+    repo, store, post = make_ready_post()
+
+    class RecordingBufferClient:
+        def __init__(self):
+            self.calls = []
+
+        def create_video_post(self, **kwargs):
+            self.calls.append(kwargs)
+            return BufferPostResult(post_id="buf_1", status="added", post_url=None, sent_at=None)
+
+    client = RecordingBufferClient()
+    saved = send_post_to_buffer(repo, store=store, post=post, mode="queue", client=client)
+
+    assert saved.status == "queued"
+    assert saved.buffer_post_id == "buf_1"
+    assert saved.public_media_url and saved.public_media_url.startswith("https://media.example.com/")
+    assert client.calls[0]["mode"] == "addToQueue"
+    assert client.calls[0]["due_at"] is None
+
+
+def test_send_post_to_buffer_failure_raises_with_prepared_record(monkeypatch):
+    from api.publishing import SendToBufferError, send_post_to_buffer
+
+    monkeypatch.setenv("BUFFER_INSTAGRAM_CHANNEL_ID", "chan_1")
+    monkeypatch.setenv("ECLYPTE_R2_PUBLIC_BASE_URL", "https://media.example.com")
+    repo, store, post = make_ready_post()
+
+    class BrokenBufferClient:
+        def create_video_post(self, **kwargs):
+            raise BufferClientError("buffer down")
+
+    with pytest.raises(SendToBufferError) as excinfo:
+        send_post_to_buffer(repo, store=store, post=post, mode="queue", client=BrokenBufferClient())
+    # The prepared record (public copy done) is attached; status untouched.
+    assert excinfo.value.record.public_media_key
+    assert excinfo.value.record.status == "ready"
+
+
+def test_send_post_to_buffer_missing_config_raises_config_error(monkeypatch):
+    from api.publishing import BufferConfigError, send_post_to_buffer
+
+    monkeypatch.delenv("BUFFER_INSTAGRAM_CHANNEL_ID", raising=False)
+    repo, store, post = make_ready_post()
+    with pytest.raises(BufferConfigError):
+        send_post_to_buffer(repo, store=store, post=post, mode="queue", client=object())
