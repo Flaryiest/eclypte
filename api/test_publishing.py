@@ -587,6 +587,7 @@ def test_refresh_status_metrics_failure_does_not_set_last_error(monkeypatch):
     body = response.json()
     assert body["status"] == "published"
     assert body["last_error"] is None
+    assert buffer.metrics_calls == ["buf_metrics_fail"]  # the metrics pull did happen
 
 
 def test_mark_posted_override_moves_post_to_published(monkeypatch):
@@ -1148,23 +1149,30 @@ def test_apply_post_metrics_snapshots_and_stamps():
     )
     assert updated.metrics == {"views": 100.0}
     assert updated.metrics_checked_at == now1
+    assert updated.updated_at == now1  # a changed reading does move updated_at
     assert len(updated.metrics_history) == 1
     assert updated.last_error is None and updated.status == post.status
 
-    # Identical values: stamps move, no new snapshot.
+    # Identical values: metrics_checked_at moves, no new snapshot, and
+    # updated_at must NOT move -- a cadence stamp must not reorder
+    # updated_at-sorted listings.
     updated2 = apply_post_metrics(
         updated, metrics={"views": 100.0}, metrics_updated_at="2026-07-27T06:00:00Z",
         now="2026-07-27T22:00:00Z",
     )
     assert len(updated2.metrics_history) == 1
     assert updated2.metrics_checked_at == "2026-07-27T22:00:00Z"
+    assert updated2.updated_at == now1  # unchanged from the last real change
 
-    # Empty response never clobbers stored values.
+    # Empty response never clobbers stored values, and (same as above) must
+    # not move updated_at either.
     updated3 = apply_post_metrics(
         updated2, metrics={}, metrics_updated_at=None, now="2026-07-28T10:00:00Z"
     )
     assert updated3.metrics == {"views": 100.0}
     assert updated3.metrics_history == updated2.metrics_history
+    assert updated3.metrics_checked_at == "2026-07-28T10:00:00Z"
+    assert updated3.updated_at == now1  # still unchanged
 
 
 def test_apply_post_metrics_history_cap_keeps_head_and_tail():

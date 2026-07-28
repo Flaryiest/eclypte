@@ -763,14 +763,19 @@ def apply_post_metrics(
 ) -> PublishingPostRecord:
     """Fold a metrics reading into the record. Pure; never touches
     last_error/status. An empty reading only moves the checked stamp —
-    absent is not zero and never clobbers stored values."""
-    update: dict[str, object] = {"metrics_checked_at": now, "updated_at": now}
+    absent is not zero and never clobbers stored values. Only a changed
+    reading moves updated_at — a cadence stamp must not reorder
+    updated_at-sorted listings."""
+    update: dict[str, object] = {"metrics_checked_at": now}
     if metrics and metrics != post.metrics:
         history = [*post.metrics_history, PostMetricsSnapshot(captured_at=now, metrics=metrics)]
         if len(history) > METRICS_HISTORY_HEAD + METRICS_HISTORY_TAIL:
             history = history[:METRICS_HISTORY_HEAD] + history[-METRICS_HISTORY_TAIL:]
         update.update(
-            metrics=metrics, metrics_updated_at=metrics_updated_at, metrics_history=history
+            metrics=metrics,
+            metrics_updated_at=metrics_updated_at,
+            metrics_history=history,
+            updated_at=now,
         )
     return post.model_copy(update=update)
 

@@ -652,11 +652,17 @@ def _refresh_post_metrics(
             if not post.buffer_post_id:
                 continue
             if post.metrics_checked_at and not _older_than(
-                post.metrics_checked_at, now, METRICS_REFRESH_INTERVAL_SEC
+                post.metrics_checked_at,
+                now,
+                METRICS_REFRESH_INTERVAL_SEC,
+                on_unparseable=True,
             ):
                 continue
             if post.posted_at and _older_than(
-                post.posted_at, now, METRICS_RETENTION_DAYS * 86400
+                post.posted_at,
+                now,
+                METRICS_RETENTION_DAYS * 86400,
+                on_unparseable=False,
             ):
                 continue
             refreshed += 1
@@ -687,13 +693,21 @@ def _refresh_post_metrics(
         METRICS_LOCK.release()
 
 
-def _older_than(stamp: str, now_dt: datetime, seconds: float) -> bool:
+def _older_than(
+    stamp: str, now_dt: datetime, seconds: float, *, on_unparseable: bool
+) -> bool:
+    """Whether `stamp` is more than `seconds` in the past.
+
+    `on_unparseable` forces each call site to choose what an unparseable
+    stamp means for it: the cadence check wants True (poll it — treat as
+    due rather than starving), the retirement check wants False (do NOT
+    retire it — keep polling rather than abandoning it forever)."""
     try:
         parsed = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(
             tzinfo=timezone.utc
         )
     except ValueError:
-        return True  # unparseable stamp: treat as due rather than starving
+        return on_unparseable
     return (now_dt - parsed).total_seconds() > seconds
 
 

@@ -876,7 +876,7 @@ class RecordingFetch:
         return self.metrics, "2026-06-09T06:00:00Z"
 
 
-def test_metrics_pass_polls_published_posts_and_stores(monkeypatch=None):
+def test_metrics_pass_polls_published_posts_and_stores():
     repo = build_repo()
     fetch = RecordingFetch()
     save_post(repo, post_id="p_pub", status="published",
@@ -910,6 +910,22 @@ def test_metrics_pass_respects_cadence_retirement_and_cap():
     tick(repo, RecordingStarts(), fetch=fetch)
 
     assert fetch.calls == ["buf_d"]
+
+
+def test_metrics_pass_polls_post_with_foreign_posted_at_format():
+    # posted_at stores Buffer's raw sentAt verbatim; its format isn't verified
+    # against the live schema. A millis-form stamp is unparseable by our
+    # strptime, but that must never retire the post forever -- it should keep
+    # getting polled every tick until posted_at is normalized.
+    repo = build_repo()
+    fetch = RecordingFetch()
+    save_post(repo, post_id="p_pub", status="published",
+              buffer_post_id="buf_1", posted_at="2026-06-08T12:00:00.000Z")
+    save_state(repo)
+
+    tick(repo, RecordingStarts(), fetch=fetch)
+
+    assert fetch.calls == ["buf_1"]
 
 
 def test_metrics_fetch_failure_stamps_check_but_not_last_error():

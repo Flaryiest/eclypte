@@ -163,7 +163,9 @@ curl -s https://api.buffer.com -H "Authorization: Bearer $BUFFER_API_KEY" \
 The implementation is deliberately shape-agnostic (stores whatever metric names arrive),
 so a floor-only result needs no code change — just update the dashboard's `METRIC_LABELS`
 map (`web/src/app/dashboard/page.tsx`) if a hoped-for name never shows up and its row
-should be dropped instead of falling through `humanizeLabel`.
+should be dropped instead of falling through `humanizeLabel`. Also record the live
+`sentAt` format Buffer returns — the stored `posted_at` should parse as
+`%Y-%m-%dT%H:%M:%SZ`; if Buffer emits another form, normalize it in `apply_buffer_status`.
 
 Licensing note: Buffer post metrics are licensed for "personal workflows and automations
 only" (the personal API key Eclypte uses). That's fine for the current single-operator
