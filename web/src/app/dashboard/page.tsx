@@ -66,7 +66,16 @@ export default function HomePage() {
     const assetsResource = useAssets(api, { includeArchived: true })
     const assets = useMemo(() => assetsResource.data ?? [], [assetsResource.data])
 
-    const readyPosts = useMemo(() => posts.filter((post) => post.status === "ready" || post.status === "draft"), [posts])
+    const readyPosts = useMemo(
+        () =>
+            posts
+                .filter((post) => post.status === "ready" || post.status === "draft")
+                // Chronological (oldest first): review reels in the order they were
+                // made, and keep cards from shuffling when a caption edit bumps
+                // updated_at (the API's default sort).
+                .sort((a, b) => a.created_at.localeCompare(b.created_at)),
+        [posts],
+    )
     const postedPosts = useMemo(() => {
         const relevant = posts.filter(
             (post) => post.status === "published" || post.status === "queued" || post.status === "scheduled",
