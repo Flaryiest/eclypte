@@ -465,7 +465,7 @@ export default function HomePage() {
                                                 {relativeChip(post.performance_score) ? ` · ${relativeChip(post.performance_score)}` : ""}
                                             </p>
                                         ) : (
-                                            <p className={styles.postedMeta}>numbers arrive about a day after posting</p>
+                                            <p className={styles.postedMeta}>{METRICS_FRESHNESS_COPY}</p>
                                         )
                                     )}
                                 </button>
@@ -538,6 +538,8 @@ const METRIC_LABELS: Record<string, string> = {
     saves: "saves",
     reach: "reached",
 }
+
+const METRICS_FRESHNESS_COPY = "Numbers arrive about a day after posting."
 
 // A short "1,234 views · 56 likes" summary for the posted-strip card. A
 // metric key absent from post.metrics was never reported — it is skipped,
@@ -881,7 +883,7 @@ function ReviewSheet({
                             {Object.keys(post.metrics).length > 0 ? (
                                 <MetaList items={metricsMetaItems(post)} />
                             ) : (
-                                <p className={styles.smallText}>Numbers arrive about a day after posting.</p>
+                                <p className={styles.smallText}>{METRICS_FRESHNESS_COPY}</p>
                             )}
                             {post.metrics_history.length > 0 && (
                                 <ul
@@ -911,12 +913,15 @@ function ReviewSheet({
 }
 
 // Every reported metric, one row each, in creator words. A metric absent
-// from post.metrics is simply not in this list — never shown as 0.
+// from post.metrics is simply not in this list — never shown as 0. impressions
+// is suppressed once real views exist so the same number never shows twice.
 function metricsMetaItems(post: PublishingPost) {
-    return Object.entries(post.metrics).map(([key, value]) => ({
-        label: METRIC_LABELS[key] ?? humanizeLabel(key),
-        value: Math.round(value).toLocaleString(),
-    }))
+    return Object.entries(post.metrics)
+        .filter(([key]) => !(key === "impressions" && post.metrics?.views !== undefined))
+        .map(([key, value]) => ({
+            label: METRIC_LABELS[key] ?? humanizeLabel(key),
+            value: Math.round(value).toLocaleString(),
+        }))
 }
 
 // One line per history snapshot: date + its views (falling back to
