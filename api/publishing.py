@@ -233,7 +233,6 @@ def build_buffer_channel_payload(*, channel_id: str) -> dict[str, Any]:
 
 def generate_caption_draft(
     *,
-    render_name: str,
     collection_slug: str = "",
     source_name: str = "",
     song_name: str = "",
@@ -241,7 +240,6 @@ def generate_caption_draft(
     model: str | None = None,
 ) -> CaptionDraft:
     fallback = _fallback_caption_draft(
-        render_name=render_name,
         collection_slug=collection_slug,
         source_name=source_name,
         song_name=song_name,
@@ -252,7 +250,6 @@ def generate_caption_draft(
             return fallback
         payload = _openai_caption_draft(
             client=client,
-            render_name=render_name,
             collection_slug=collection_slug,
             source_name=source_name,
             song_name=song_name,
@@ -273,7 +270,6 @@ def generate_caption_draft(
 
 def _fallback_caption_draft(
     *,
-    render_name: str,
     collection_slug: str = "",
     source_name: str = "",
     song_name: str = "",
@@ -302,7 +298,6 @@ def _fallback_caption_draft(
 def _openai_caption_draft(
     *,
     client: Any,
-    render_name: str,
     collection_slug: str,
     source_name: str,
     song_name: str,
@@ -472,7 +467,6 @@ def create_publish_post_for_render(
         except KeyError:
             pass
     draft = generate_caption_draft(
-        render_name=manifest.display_name or meta.original_filename,
         collection_slug=resolved_collection,
         source_name=source_name,
         song_name=song_name,

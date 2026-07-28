@@ -29,7 +29,7 @@ PublishingPostStatus = Literal[
     "canceled",
 ]
 AutopilotItemStatus = Literal[
-    "pending", "importing", "analyzing", "editing", "packaged", "failed"
+    "pending", "analyzing", "editing", "packaged", "failed"
 ]
 
 
@@ -39,6 +39,8 @@ class DerivedFrom(BaseModel):
     run_id: str | None = None
     step_id: str
     input_file_version_ids: list[str] = Field(default_factory=list)
+    # Reserved slot, always None today: every stored FileVersionMeta already
+    # serializes it, and extra="forbid" means removal would break loading them.
     params_hash: str | None = None
 
 
@@ -193,10 +195,8 @@ class AutopilotItem(BaseModel):
     source_video_version_id: str
     song_file_id: str | None = None
     song_version_id: str | None = None
-    song_youtube_url: str | None = None
     creative_brief: str = ""
     status: AutopilotItemStatus = "pending"
-    import_run_id: str | None = None
     analysis_run_id: str | None = None
     edit_run_id: str | None = None
     post_id: str | None = None

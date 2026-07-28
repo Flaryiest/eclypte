@@ -48,7 +48,6 @@ _NARROW_GLYPHS = set(" .,'!:;|il")
 class LineLayout:
     """Placement + palette for one lyric line (consumed by lyrics_kinetic)."""
 
-    line_index: int
     style: str        # "sweep" | "pop" | "build"
     band: int         # 0 upper / 1 middle / 2 lower
     alignment: int    # ASS numpad: 8 top-center / 5 middle-center / 2 bottom-center
@@ -229,7 +228,10 @@ def _glyph_weights(text: str, all_caps: bool) -> float:
 def estimate_line_width(
     text: str, font_size: float, width_factor: float, all_caps: bool = False
 ) -> float:
-    """Rough rendered width in px: per-glyph weights × the font's width factor."""
+    """Rough rendered width in px: per-glyph weights × the font's width factor.
+
+    Deliberate test seam: production sizing goes through _glyph_weights
+    directly, but the width-model tests assert against this public wrapper."""
     return font_size * width_factor * _glyph_weights(text, all_caps)
 
 
@@ -375,7 +377,7 @@ def plan_line_layouts(
     prev_band: int | None = None
     prev_dark: bool | None = None
     prev_palette: tuple[str, str, str] | None = None
-    for i, line in enumerate(lines):
+    for line in lines:
         start = float(line["start_sec"])
         end = float(line["end_sec"])
         style = style_for_time(start, base_style, section_styles)
@@ -409,7 +411,6 @@ def plan_line_layouts(
         )
         layouts.append(
             LineLayout(
-                line_index=i,
                 style=style,
                 band=band,
                 alignment=_BAND_ALIGNMENT[band],

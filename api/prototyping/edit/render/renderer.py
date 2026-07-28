@@ -1,11 +1,13 @@
 """
-moviepy-based renderer.
+Timeline renderer: validates a Timeline, then dispatches between two paths.
 
-Consumes a validated Timeline and writes an MP4. Phase 1 supports:
-  - hard cuts only (no crossfades/whips/flashes)
-  - letterbox or center-crop to the output size
-  - audio attached once at composite level with audio.start_sec offset
-  - per-shot effects are no-ops (see effects.py)
+`render_timeline` prefers the single native ffmpeg filtergraph
+(`can_render_with_ffmpeg`): cuts/crossfade/whip/flash transitions,
+freeze/punch_in/speed_ramp effects, and every overlay skill with an ffmpeg
+port render without pixels ever leaving ffmpeg. Timelines using anything
+unported fall back to the legacy MoviePy v2 path in this file, which also
+implements flash/crossfade and freeze/punch_in/speed_ramp (only whip→hard cut
+and hold are no-ops).
 
 moviepy v2 API conventions used: `subclipped`, `with_duration`, `with_start`,
 `resized`, `with_audio`, `without_audio`.
@@ -126,8 +128,8 @@ def render_timeline(
     target_size, target_fps = _resolve_output(timeline.output, preview=preview)
 
     # Fast path: a single native ffmpeg filtergraph (no per-frame Python pump).
-    # Covers cuts/crossfade/whip/flash, freeze/punch_in, and every overlay
-    # skill with an ffmpeg port; anything else falls through to MoviePy below.
+    # Covers cuts/crossfade/whip/flash, freeze/punch_in/speed_ramp, and every
+    # overlay skill with an ffmpeg port; anything else falls through to MoviePy.
     if can_render_with_ffmpeg(timeline):
         font_path = None
         fonts_dir = None

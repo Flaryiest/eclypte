@@ -73,7 +73,7 @@ export default function HomePage() {
         [posts],
     )
     const workingItems = useMemo(
-        () => (autopilot?.items ?? []).filter((item) => ["importing", "analyzing", "editing"].includes(item.status)),
+        () => (autopilot?.items ?? []).filter((item) => ["analyzing", "editing"].includes(item.status)),
         [autopilot],
     )
     const pendingItems = useMemo(() => (autopilot?.items ?? []).filter((item) => item.status === "pending"), [autopilot])
@@ -484,15 +484,14 @@ function itemTitle(item: AutopilotItem, assetById: Map<string, AssetSummary>) {
 }
 
 // One row per in-flight autopilot item. Editing items have a real edit run —
-// show its live percent + ETA; importing/analyzing show the stage sentence.
+// show its live percent + ETA; analyzing shows the stage sentence.
 function WorkingRow({ item, jobs, assets }: { item: AutopilotItem; jobs: EditJobStatus[]; assets: Map<string, AssetSummary> }) {
     const job = item.edit_run_id ? jobs.find((candidate) => candidate.run_id === item.edit_run_id) ?? null : null
     const title = itemTitle(item, assets)
     if (item.status === "editing" && job) {
         return <EditingRow title={title} job={job} item={item} />
     }
-    const stageText = item.status === "importing" ? "Getting the song…" : "Listening to the song…"
-    return <ProgressRow title={title} stageText={stageText} percent={null} />
+    return <ProgressRow title={title} stageText="Listening to the song…" percent={null} />
 }
 
 function EditingRow({ title, job, item }: { title: string; job: EditJobStatus; item: AutopilotItem }) {

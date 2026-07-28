@@ -205,29 +205,49 @@ def test_tick_uses_trim_window_from_music_analysis():
     assert item.audio_start_sec == options["audio_start_sec"]
 
 
-def test_tick_fails_legacy_importing_item_without_counting_toward_halt():
-    repo = build_repo()
-    starts = RecordingStarts()
-    # Items stuck in "importing" predate the YouTube-import removal; nothing can
-    # advance them anymore, so the tick fails them without tripping the halt.
-    item = make_item(
-        song_file_id=None,
-        song_version_id=None,
-        song_youtube_url="https://youtu.be/abc123",
-        status="importing",
-        import_run_id="run_import_legacy",
+def test_legacy_importing_state_scrubbed_on_load():
+    # State persisted before the YouTube-import removal carries "importing"
+    # items with song_youtube_url/import_run_id; get_autopilot_state migrates
+    # them to failed and strips the removed fields so extra="forbid" loading
+    # and the tick keep working.
+    from api.storage.keys import autopilot_state_key
+
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    store.put_json(
+        autopilot_state_key(user_id=USER),
+        {
+            "owner_user_id": USER,
+            "enabled": True,
+            "burn_lyrics": True,
+            "updated_at": "2026-06-09T11:00:00Z",
+            "items": [
+                {
+                    "item_id": "ap_legacy",
+                    "source_video_file_id": "file_video",
+                    "source_video_version_id": "v_video",
+                    "song_youtube_url": "https://youtu.be/abc123",
+                    "status": "importing",
+                    "import_run_id": "run_import_legacy",
+                    "created_at": "2026-06-09T11:00:00Z",
+                    "updated_at": "2026-06-09T11:00:00Z",
+                }
+            ],
+        },
     )
-    save_state(repo, items=[item])
 
-    state = tick(repo, starts)
+    state = repo.get_autopilot_state(user_id=USER)
+    legacy = state.items[0]
+    assert legacy.status == "failed"
+    assert "YouTube import was removed" in (legacy.last_error or "")
 
+    # A tick over the migrated state starts nothing and never trips the halt.
+    starts = RecordingStarts()
+    ticked = tick(repo, starts)
     assert starts.edit_calls == []
     assert starts.analysis_calls == []
-    updated = state.items[0]
-    assert updated.status == "failed"
-    assert "YouTube import was removed" in (updated.last_error or "")
-    assert state.consecutive_failures == 0
-    assert state.halted_reason is None
+    assert ticked.consecutive_failures == 0
+    assert ticked.halted_reason is None
 
 
 def _complete_analysis_run(repo, *, song_version_id="v_song", analysis=None, file_id="file_analysis"):

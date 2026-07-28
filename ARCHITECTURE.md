@@ -63,7 +63,7 @@ changing bundled worker code.
                         │
                         ▼
     run_timeline_plan ─► build/reuse CLIP index  (Modal: eclypte-clip-index-r2)
-                       ─► OpenAI agent loop (gpt-5.5, Responses API):
+                       ─► OpenAI agent loop (gpt-5.6, Responses API):
                             query_clips(text) semantic search ─► finish_edit(shots, overlays,
                             grade, lyrics — the kinetic-lyrics plan: font + style, default-on
                             when word timing exists)
@@ -92,7 +92,7 @@ already-completed analyses. **Autopilot** drives this same pipeline on a schedul
 
 ### Control plane — `api/`
 - **`main.py`** — ASGI entrypoint (`app = create_app()`, uvicorn on `$PORT`).
-- **`app.py`** (~2060 lines) — `create_app()` factory: CORS, dependency injection, all routes,
+- **`app.py`** (~1980 lines) — `create_app()` factory: CORS, dependency injection, all routes,
   background scheduling.
   - **Temp auth:** `user_id()` trusts the `X-User-Id` header verbatim (falling back to
     `ECLYPTE_DEFAULT_USER_ID`). There is **no verification yet** — so no real tenant isolation; the
@@ -104,7 +104,7 @@ already-completed analyses. **Autopilot** drives this same pipeline on a schedul
     `X-Eclypte-Internal-Token`).
   - **`EDIT_STAGE_WEIGHTS`** (render .39, video .22, timeline .20, music .15, assets/result .02)
     produce a time-weighted overall progress bar.
-- **`workflows.py`** (~1570 lines) — `WorkflowRunner` protocol + `DefaultWorkflowRunner`; every
+- **`workflows.py`** (~1900 lines) — `WorkflowRunner` protocol + `DefaultWorkflowRunner`; every
   `run_*` workflow. Version-gates CLIP-index reuse via `CLIP_INDEX_BUILD_STEP`; caps usable source
   at `credits.content_end_sec`; fails a run if the timeline is >0.75s shorter than the trimmed song.
 - **`autopilot.py`** (~500 lines) — `run_autopilot_tick` state machine
@@ -164,7 +164,7 @@ already-completed analyses. **Autopilot** drives this same pipeline on a schedul
   Real credit trimming happens only on the R2 app.
 
 ### Edit — synthesis / skills — `api/prototyping/edit/`
-- **`synthesis/agent.py`** — OpenAI Responses API loop (`gpt-5.5`, `reasoning_effort="high"`).
+- **`synthesis/agent.py`** — OpenAI Responses API loop (`gpt-5.6`, `reasoning_effort="high"`).
   Tools: `query_clips` and `finish_edit`. The system prompt is sent **once**; state is carried by
   `previous_response_id`.
 - **`synthesis/system_prompt.py`** — the **single source of truth** for the baseline prompt (also
@@ -224,7 +224,7 @@ superseded by the runtime loop.)
 - **Data layer** — `web/src/stores/` is a zustand **stale-while-revalidate** cache (30s TTL, keys
   scoped by user id, mutations patch in place). Signed media URLs are **never cached** except the
   deliberate `posterUrls.ts` `stableMediaUrl` pin.
-- **`services/eclypteApi.ts`** (~1130 lines) is the typed client and the source of all domain types
+- **`services/eclypteApi.ts`** (~1030 lines) is the typed client and the source of all domain types
   (all `/v1` endpoints, `X-User-Id` auth, NDJSON stream readers, chunked SHA256 upload).
 - **`useRunStream.ts`** subscribes to `/v1/runs/stream` with a watchdog + polling fallback;
   `editEta.ts` `EDIT_STAGE_WEIGHTS` mirrors `api/app.py`.

@@ -31,7 +31,7 @@ MAX_CONSECUTIVE_FAILURES = 3
 MAX_FINISHED_ITEMS = 50
 PACKAGED_COUNT_RETENTION_DAYS = 14
 
-ACTIVE_ITEM_STATUSES = {"importing", "analyzing", "editing"}
+ACTIVE_ITEM_STATUSES = {"analyzing", "editing"}
 
 # Serializes state read-modify-write between the tick loop and API routes in
 # this single-replica deployment; R2 has no conditional writes to lean on.
@@ -321,15 +321,7 @@ def _run_tick_locked(
 
     # Advance in-flight items first so completed work frees capacity this tick.
     for index, item in enumerate(items):
-        if item.status == "importing":
-            # Legacy items from before YouTube import was removed; nothing can
-            # advance them anymore, so fail them without counting toward a halt.
-            items[index] = fail_item(
-                item,
-                "YouTube import was removed; re-add this item with an uploaded song",
-                count_failure=False,
-            )
-        elif item.status == "analyzing" and item.analysis_run_id:
+        if item.status == "analyzing" and item.analysis_run_id:
             run = _load_run(repo, user_id=user_id, run_id=item.analysis_run_id)
             if run is None or run.status in {"failed", "canceled"}:
                 error = (run.last_error if run else None) or "music analysis did not complete"

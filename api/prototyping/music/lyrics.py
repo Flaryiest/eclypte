@@ -16,10 +16,6 @@ def _clean_query(q: str) -> str:
     return re.sub(r'\s+', ' ', q).strip()
 
 
-def _lyrics_path() -> Path:
-    return Path("./content/lyrics.txt")
-
-
 # A real synced LRC has at least one [mm:ss] timestamp; plain lyrics don't.
 _LRC_TIMESTAMP_RE = re.compile(r"\[\d{1,3}:\d{2}")
 
@@ -60,17 +56,3 @@ def _local_syncedlyrics_cache():
             os.environ.pop("LOCALAPPDATA", None)
         else:
             os.environ["LOCALAPPDATA"] = previous_localappdata
-
-
-def main(query="Dominic Fike Babydoll Official Audio"):
-    with _local_syncedlyrics_cache():
-        lrc = syncedlyrics.search(_clean_query(query))
-
-    lyrics_path = _lyrics_path()
-    lyrics_path.parent.mkdir(parents=True, exist_ok=True)
-    with lyrics_path.open("w", encoding="utf-8") as f:
-        f.write(lrc or "")
-    return lrc
-
-if __name__ == "__main__":
-    main()

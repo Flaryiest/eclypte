@@ -816,7 +816,7 @@ def create_app(
             last_tick_at=state.last_tick_at,
             packaged_today=state.packaged_counts.get(today, 0),
             in_flight=sum(
-                1 for item in state.items if item.status in {"importing", "analyzing", "editing"}
+                1 for item in state.items if item.status in {"analyzing", "editing"}
             ),
             pending=sum(1 for item in state.items if item.status == "pending"),
             items=sorted(state.items, key=lambda item: item.created_at, reverse=True),
@@ -1222,7 +1222,6 @@ def create_app(
     ) -> PublishingPostView:
         post = publishing_post_or_404(repo, uid, post_id)
         draft = generate_caption_draft(
-            render_name=post.render_display_name,
             collection_slug=post.collection_slug,
             source_name=post.source_name,
             song_name=post.song_name,
@@ -1471,7 +1470,7 @@ def create_app(
             target = next((item for item in state.items if item.item_id == item_id), None)
             if target is None:
                 raise HTTPException(status_code=404, detail="autopilot item not found")
-            if target.status in {"importing", "editing"}:
+            if target.status == "editing":
                 raise HTTPException(
                     status_code=400,
                     detail="item is in flight; cancel its run from the edit jobs list instead",
@@ -1532,6 +1531,7 @@ def create_app(
         repo: StorageRepository = Depends(repository),
         uid: str = Depends(user_id),
     ) -> RunManifest:
+        load_version(repo, uid, request.audio, "song_audio")
         run = create_workflow_run(
             repo,
             uid,

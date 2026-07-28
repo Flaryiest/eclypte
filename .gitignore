@@ -4,17 +4,9 @@
 .claude/
 .superpowers/
 .worktrees/
-.wrangler/
 .pytest_cache/
 .pytest-tmp*/
-.pytest-basetemp*/
 pytest-tmp*/
-pytest-temp-root*/
-.pytest
 pytest-cache-files-*/
 content/
-youtube-worker-tmp/
-.youtube-worker-tmp/
-api/youtube-worker-tmp/
-workers/*/.dev.vars
 __pycache__/

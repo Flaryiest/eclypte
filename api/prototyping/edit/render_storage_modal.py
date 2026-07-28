@@ -16,8 +16,9 @@ RENDER_PROFILES = {
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    # fonts-dejavu-core gives moviepy TextClip a guaranteed font for text overlays
-    # (renderer._resolve_font_path finds /usr/share/fonts/truetype/dejavu/...).
+    # fonts-dejavu-core backs text overlays on both render paths — ffmpeg
+    # drawtext (renderer._resolve_font_path finds /usr/share/fonts/truetype/
+    # dejavu/... and passes it to build_command) and MoviePy TextClip fallback.
     .apt_install("ffmpeg", "fonts-dejavu-core", "wget")
     .pip_install("moviepy>=2", "pydantic>=2", "numpy", "imageio-ffmpeg", "boto3")
     .run_commands(

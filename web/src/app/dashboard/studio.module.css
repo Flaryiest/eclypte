@@ -231,12 +231,11 @@
 }
 
 .analyzing .badgeDot, .running .badgeDot, .queued .badgeDot, .scheduled .badgeDot { background: var(--accent); }
-.ready .badgeDot, .completed .badgeDot, .available .badgeDot, .approved .badgeDot,
-.imported .badgeDot, .published .badgeDot { background: var(--ok); }
-.failed .badgeDot, .rejected .badgeDot { background: var(--danger); }
+.ready .badgeDot, .completed .badgeDot, .published .badgeDot { background: var(--ok); }
+.failed .badgeDot { background: var(--danger); }
 .canceled .badgeDot, .archived .badgeDot { background: var(--text-faint); }
 .uploaded .badgeDot { background: var(--attention); }
-.discovered .badgeDot, .created .badgeDot, .blocked .badgeDot {
+.created .badgeDot, .blocked .badgeDot {
 	background: transparent;
 	border: 1.5px solid var(--text-faint);
 }

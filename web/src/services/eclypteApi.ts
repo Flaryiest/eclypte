@@ -91,8 +91,6 @@ export type AssetSummary = {
     archived_reason: string | null
 }
 
-export type RunSummary = RunManifest
-
 export type PublishingPostStatus =
     | "draft"
     | "ready"
@@ -141,29 +139,8 @@ export type PublishingPost = {
     updated_at: string
 }
 
-export type PublishingBufferChannel = {
-    id: string
-    name: string | null
-    service: string | null
-    display_name: string | null
-    is_disconnected: boolean | null
-    is_locked: boolean | null
-    external_link: string | null
-    last_error: string | null
-}
-
-export type PublishingConfig = {
-    buffer_api_key_configured: boolean
-    buffer_channel_id_configured: boolean
-    public_media_base_url_configured: boolean
-    openai_api_key_configured: boolean
-    caption_model: string
-    buffer_channel: PublishingBufferChannel | null
-}
-
 export type AutopilotItemStatus =
     | "pending"
-    | "importing"
     | "analyzing"
     | "editing"
     | "packaged"
@@ -177,7 +154,6 @@ export type AutopilotItem = {
     song_version_id: string | null
     creative_brief: string
     status: AutopilotItemStatus
-    import_run_id: string | null
     analysis_run_id: string | null
     edit_run_id: string | null
     post_id: string | null
@@ -349,21 +325,6 @@ export class EclypteApiClient {
         return this.request<AssetSummary[]>(`/v1/assets${query}`, { signal })
     }
 
-    async listRuns(
-        filters: { workflowType?: string; status?: RunStatus } = {},
-        signal?: AbortSignal,
-    ) {
-        const params = new URLSearchParams()
-        if (filters.workflowType) {
-            params.set("workflow_type", filters.workflowType)
-        }
-        if (filters.status) {
-            params.set("status", filters.status)
-        }
-        const query = params.size ? `?${params.toString()}` : ""
-        return this.request<RunSummary[]>(`/v1/runs${query}`, { signal })
-    }
-
     async listPublishingPosts(
         filters: { status?: PublishingPostStatus | "queued_scheduled" | "all" } = {},
         signal?: AbortSignal,
@@ -378,10 +339,6 @@ export class EclypteApiClient {
             return posts.filter((post) => post.status === "queued" || post.status === "scheduled")
         }
         return posts
-    }
-
-    async getPublishingConfig(signal?: AbortSignal) {
-        return this.request<PublishingConfig>("/v1/publishing/config", { signal })
     }
 
     async createPublishingPost(
@@ -584,10 +541,6 @@ export class EclypteApiClient {
 
     async listEditJobs(signal?: AbortSignal) {
         return this.request<EditJobStatus[]>("/v1/edits", { signal })
-    }
-
-    async getEditJob(runId: string, signal?: AbortSignal) {
-        return this.request<EditJobStatus>(`/v1/edits/${runId}`, { signal })
     }
 
     async cancelEditJob(runId: string, signal?: AbortSignal) {

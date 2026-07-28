@@ -2,7 +2,7 @@
 
 Every command below is shown twice: once in **PowerShell** (what the project uses on Windows) and once in **bash / zsh**. Paths use forward slashes throughout — both shells accept them.
 
-Unless noted, run from the **repo root** (`c:\Users\ericm\Documents\GitHub\eclypte`). A few Modal commands must run from `api/prototyping/` — those are called out.
+Unless noted, run from the **repo root**. A few Modal commands must run from `api/prototyping/` — those are called out.
 
 ---
 
@@ -13,19 +13,19 @@ Activate the venv every session:
 ```powershell
 # PowerShell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
-. api/.venv/Scripts/Activate.ps1
+. .venv/Scripts/Activate.ps1
 ```
 
 ```bash
-# bash / git-bash
-source api/.venv/Scripts/activate
+# bash / zsh
+source .venv/bin/activate
 ```
 
-First-time-only:
+First-time-only (the venv lives at the repo root):
 
 ```powershell
-python -m venv api/.venv
-. api/.venv/Scripts/Activate.ps1
+python -m venv .venv
+. .venv/Scripts/Activate.ps1
 pip install -r api/requirements.txt
 modal token new       # browser-based Modal auth, writes ~/.modal.toml
 ```
@@ -206,7 +206,9 @@ Local kinetic-lyrics rendering needs the same fonts once (gitignored
 
 ```powershell
 python -m api.prototyping.edit.skills.fetch_fonts
-``` Redeploy
+```
+
+Redeploy
 `eclypte-video-r2` (`modal deploy video/storage_modal.py`, `PYTHONUTF8=1` on
 Windows per above) whenever `video/analysis_cuda.py`, `video/credits.py`, or
 `video/poster.py` change (its image bundles `tesseract-ocr` + `pytesseract`
@@ -343,5 +345,5 @@ explicit opt-in env vars.
 
 ```powershell
 modal app list                                # see deployed + running apps
-modal volume ls eclypte-video-input           # list files on a volume
+modal volume ls allin1-cache                  # list files on a volume
 ```

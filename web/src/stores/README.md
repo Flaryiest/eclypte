@@ -12,7 +12,7 @@ pattern had:
 With the cache, the **second** visit to a page paints instantly from cache and revalidates in the
 background, and pages that request the same data share a single fetch.
 
-> This cache holds **structural records only** (`AssetSummary`, `RunSummary`, `PublishingPost`, …).
+> This cache holds **structural records only** (`AssetSummary`, `RunManifest`, `PublishingPost`, …).
 > It must **never** cache signed download/preview URLs — those come from separate `getDownloadUrl`
 > calls and expire.
 

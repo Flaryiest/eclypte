@@ -409,18 +409,6 @@ class StorageRepository:
         if manifest.current_version_id is None:
             self.delete_file_tree(file_ref)
 
-    def load_upload_reservation(
-        self,
-        user_id: str,
-        upload_id: str,
-    ) -> UploadReservation:
-        reservation = UploadReservation.model_validate(
-            self._store.get_json(upload_reservation_key(upload_id=upload_id))
-        )
-        if reservation.owner_user_id != user_id:
-            raise PermissionError("upload reservation does not belong to user")
-        return reservation
-
     def complete_upload_reservation(
         self,
         *,
@@ -794,10 +782,23 @@ class StorageRepository:
             data = self._store.get_json(autopilot_state_key(user_id=user_id))
         except KeyError:
             return AutopilotState(owner_user_id=user_id, updated_at=_utc_now())
-        # Drop the removed `burn_lyrics` field so state persisted before the
-        # lyric-overlay feature was removed still loads under extra="forbid".
+        # Migrate state persisted before feature removals so it still loads
+        # under extra="forbid": drop the removed `burn_lyrics` field, strip the
+        # removed YouTube-import item fields, and fail legacy "importing" items
+        # (nothing can advance them since the import feature was removed).
         if isinstance(data, dict):
             data.pop("burn_lyrics", None)
+            for item in data.get("items") or []:
+                if not isinstance(item, dict):
+                    continue
+                item.pop("song_youtube_url", None)
+                item.pop("import_run_id", None)
+                if item.get("status") == "importing":
+                    item["status"] = "failed"
+                    item["last_error"] = (
+                        "YouTube import was removed; re-add this item with an "
+                        "uploaded song"
+                    )
         return AutopilotState.model_validate(data)
 
     def save_autopilot_state(self, state: AutopilotState) -> AutopilotState:

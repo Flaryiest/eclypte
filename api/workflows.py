@@ -1533,8 +1533,8 @@ def _publish_lyrics_timing(
     """Force-align lyric text against the audio and publish a `lyrics_timing`
     asset (word-level start/end times).
 
-    Only the LRC's TEXT is used — provider timestamps are offset from
-    YouTube-sourced audio, so timing always comes from the audio itself. With no
+    Only the LRC's TEXT is used — provider timestamps can be offset from the
+    user's uploaded audio, so timing always comes from the audio itself. With no
     text the worker transcribes instead. A conclusive no-words result
     (instrumental, unusable transcription) publishes nothing and returns
     `{"lyrics_timing_status": "none"}` so callers can negative-cache it. Errors

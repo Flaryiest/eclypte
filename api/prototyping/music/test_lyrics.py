@@ -8,7 +8,7 @@ import pytest
     os.name != "nt",
     reason="patches os.name to 'nt'; POSIX pathlib cannot instantiate WindowsPath",
 )
-def test_main_redirects_syncedlyrics_cache_to_local_content_on_windows(
+def test_search_redirects_syncedlyrics_cache_to_local_content_on_windows(
     tmp_path, monkeypatch
 ):
     from api.prototyping.music import lyrics as lyrics_module
@@ -29,17 +29,16 @@ def test_main_redirects_syncedlyrics_cache_to_local_content_on_windows(
         )
         token_path.parent.mkdir(parents=True, exist_ok=True)
         token_path.write_text("{}", encoding="utf-8")
-        return "line one"
+        return "[00:01.00] line one"
 
     monkeypatch.setattr(lyrics_module.syncedlyrics, "search", fake_search)
 
-    result = lyrics_module.main("Test Song (Official Audio)")
+    result = lyrics_module.search_synced_lyrics("Test Song (Official Audio)")
 
-    assert result == "line one"
+    assert result == "[00:01.00] line one"
     assert seen["query"] == "Test Song"
     assert Path(seen["localappdata"]).resolve() == (content_dir / ".cache").resolve()
     assert (
         content_dir / ".cache" / "syncedlyrics" / "musixmatch_token.json"
     ).exists()
-    assert (content_dir / "lyrics.txt").read_text(encoding="utf-8") == "line one"
     assert os.environ["LOCALAPPDATA"] == r"C:\denied-cache"

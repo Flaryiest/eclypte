@@ -1,6 +1,7 @@
 import pytest
 
-from api.storage.keys import file_version_blob_key
+from api.storage.keys import file_version_blob_key, upload_reservation_key
+from api.storage.models import UploadReservation
 from api.storage.refs import FileRef, RunRef
 from api.storage.test_fakes import InMemoryObjectStore
 
@@ -36,7 +37,9 @@ def test_repository_creates_and_completes_direct_upload_reservation():
 
     manifest = repo.load_file_manifest(file_ref)
     meta = repo.load_file_version_meta(version_ref)
-    completed = repo.load_upload_reservation("user_123", reservation.upload_id)
+    completed = UploadReservation.model_validate(
+        store.get_json(upload_reservation_key(upload_id=reservation.upload_id))
+    )
 
     assert manifest.current_version_id == reservation.version_id
     assert meta.size_bytes == 4
@@ -62,7 +65,7 @@ def test_repository_deletes_incomplete_upload_reservation_and_staged_blob():
     repo.delete_upload_reservation(upload_id=reservation.upload_id, user_id="user_123")
 
     with pytest.raises(KeyError):
-        repo.load_upload_reservation("user_123", reservation.upload_id)
+        store.get_json(upload_reservation_key(upload_id=reservation.upload_id))
     assert reservation.blob_key not in store.objects
 
 

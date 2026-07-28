@@ -16,7 +16,7 @@ Core invariants:
 
 ## Top-Level Layout
 
-- `web/`: Next.js 16.2.3, React 19.2, TypeScript, App Router. `web/AGENTS.md` has frontend-specific warnings.
+- `web/`: Next.js 16.2.x, React 19.2, TypeScript, App Router. `web/AGENTS.md` has frontend-specific warnings.
 - `api/`: FastAPI app, workflow orchestration, storage substrate, and prototype media pipelines.
 - `api/publishing.py`: review-gated Buffer publishing for Instagram Reels — Gen-Z-voiced OpenAI/fallback caption generation (the model is fed the source movie/anime + song names — resolved from the render's run lineage by `resolve_edit_source_names` and persisted on the post as `source_name`/`song_name` — and produces context-relevant AI hashtags), public R2 media copies, Buffer GraphQL payloads (declares the Instagram `reel` post type; the send modes are `queue`=`addToQueue`, `schedule`/`now`=`customScheduled` — `now` posts immediately via a server-computed near-future `dueAt` from `immediate_due_at`, since Buffer has no instant-publish mode and rejects past `dueAt`), channel diagnostics, and post-status refresh (`apply_buffer_status`) that marks a post `published` as soon as Buffer reports it sent (`sentAt`/sent status) and independently back-fills the permalink from `externalLink` when it appears.
 - `api/storage/`: R2 object access, file manifests, file versions, upload reservations, run manifests/events/progress, prompt versions, references, publishing posts, Postgres run store, Redis broadcaster, and tests.
@@ -211,7 +211,7 @@ Subsystems:
 Agent planning defaults:
 
 - Timeline planning is always the OpenAI/CLIP agent (there is no other mode).
-- `synthesis/agent.py` currently uses `MODEL = "gpt-5.5"`, `reasoning_effort="high"`, and `verbosity="low"`.
+- `synthesis/agent.py` currently uses `MODEL = "gpt-5.6"`, `reasoning_effort="high"`, and `verbosity="low"`.
 - The baseline system prompt has ONE source of truth: `synthesis/system_prompt.py` (`SYSTEM_PROMPT`). `agent.py` imports it as its fallback; `workflows.py`/`app.py` import it as `DEFAULT_SYNTHESIS_PROMPT` (the default prompt-version text and the consolidation base). Edit the prompt only there — do not re-inline it.
 - Responses API state is carried through `previous_response_id`; do not re-upload full message history each loop.
 - Tools are `query_clips(query, top_k)` and `finish_edit(timeline)`; timeline items optionally carry `transition_in` (`cut`/`flash`/`crossfade`) and `effect` (`freeze`/`punch_in`). `finish_edit` also takes optional top-level `overlays`, `grade`, and `lyrics` ({enabled, font, style, section_styles?, accent_color?} — the kinetic-lyrics plan; the overlays skill_id enum excludes `grade`/`lyrics` kinds so lyrics can't be double-placed).

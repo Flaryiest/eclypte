@@ -3,8 +3,8 @@
 `produce_lyrics_timing` force-aligns known lyric text against the actual audio
 (stable-ts + Whisper, demucs vocal isolation) and falls back to transcription
 when no text exists or the alignment fits poorly. Online lyric timestamps are
-never trusted — audio sourced from YouTube is offset from provider timings, so
-`lrc_plain_text` strips LRC down to text only.
+never trusted — the user's uploaded audio can be offset from provider timings,
+so `lrc_plain_text` strips LRC down to text only.
 
 The module stays importable on the control plane: torch/whisper/stable_whisper
 imports live inside the `_load_model`/`_audio_duration`/`_detect_language`/

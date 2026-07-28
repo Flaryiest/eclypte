@@ -917,12 +917,21 @@ def test_redo_edit_job_preserves_export_options():
 
 
 def test_audio_conversion_endpoint_creates_run_and_schedules_background_task():
-    client, _, runner = build_client()
+    client, store, runner = build_client()
+    repo = StorageRepository(store)
+    audio = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_raw_audio",
+        kind="song_audio",
+        filename="raw song.mp3",
+        content_type="audio/mpeg",
+    )
 
     response = client.post(
         "/v1/music/conversions",
         headers={"X-User-Id": "user_123"},
-        json={"audio": {"file_id": "file_raw_audio", "version_id": "ver_raw"}},
+        json={"audio": audio},
     )
 
     assert response.status_code == 202
@@ -930,7 +939,35 @@ def test_audio_conversion_endpoint_creates_run_and_schedules_background_task():
     assert response.json()["inputs"]["audio_file_id"] == "file_raw_audio"
     assert [call[0] for call in runner.calls] == ["audio_conversion"]
     assert runner.calls[0][1]["source_file_id"] == "file_raw_audio"
-    assert runner.calls[0][1]["source_version_id"] == "ver_raw"
+    assert runner.calls[0][1]["source_version_id"] == audio["version_id"]
+
+
+def test_audio_conversion_endpoint_validates_input_like_other_workflows():
+    client, store, runner = build_client()
+    repo = StorageRepository(store)
+    video = publish_artifact(
+        repo,
+        user_id="user_123",
+        file_id="file_video",
+        kind="source_video",
+        filename="film.mp4",
+        content_type="video/mp4",
+    )
+
+    missing = client.post(
+        "/v1/music/conversions",
+        headers={"X-User-Id": "user_123"},
+        json={"audio": {"file_id": "file_ghost", "version_id": "ver_ghost"}},
+    )
+    wrong_kind = client.post(
+        "/v1/music/conversions",
+        headers={"X-User-Id": "user_123"},
+        json={"audio": video},
+    )
+
+    assert missing.status_code == 404
+    assert wrong_kind.status_code == 400
+    assert runner.calls == []
 
 
 def test_assets_list_marks_youtube_imported_song_ready_with_analysis():

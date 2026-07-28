@@ -142,7 +142,6 @@ class NoopWorkflowRunner:
 def test_caption_input_includes_source_and_song(monkeypatch):
     client = FakeOpenAIClient()
     generate_caption_draft(
-        render_name="run_1.mp4",
         collection_slug="ghibli",
         source_name="Spirited Away",
         song_name="Unravel",
@@ -157,7 +156,6 @@ def test_caption_input_includes_source_and_song(monkeypatch):
 def test_fallback_hashtags_are_derived_from_names(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     draft = generate_caption_draft(
-        render_name="run_1.mp4",
         source_name="Spirited Away",
         song_name="Unravel",
     )
@@ -172,7 +170,6 @@ def test_caption_draft_is_punchy_and_collection_aware(monkeypatch):
     # not sensitive to OPENAI_API_KEY being present in the environment.
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     draft = generate_caption_draft(
-        render_name="run_auto_123.mp4",
         collection_slug="mario",
     )
 
@@ -188,7 +185,6 @@ def test_openai_caption_generation_uses_responses_api_and_records_provenance():
     client = FakeOpenAIClient()
 
     draft = generate_caption_draft(
-        render_name="final-battle.mp4",
         collection_slug="mario",
         openai_client=client,
         model="gpt-test",
@@ -213,7 +209,6 @@ def test_caption_generation_falls_back_when_openai_fails():
         responses = Responses()
 
     draft = generate_caption_draft(
-        render_name="run_auto_123.mp4",
         collection_slug="mario",
         openai_client=BrokenOpenAIClient(),
         model="gpt-test",

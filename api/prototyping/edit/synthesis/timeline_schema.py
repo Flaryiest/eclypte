@@ -55,14 +55,12 @@ class ShotSource(BaseModel):
 class Effect(BaseModel):
     model_config = ConfigDict(extra="allow")
     type: EffectType
-    pattern_ref: str | None = None
 
 
 class Transition(BaseModel):
     model_config = ConfigDict(extra="allow")
     type: TransitionType = "cut"
     duration_sec: float = 0.0
-    pattern_ref: str | None = None
 
 
 class Shot(BaseModel):
@@ -73,7 +71,6 @@ class Shot(BaseModel):
     speed: float = 1.0
     effects: list[Effect] = Field(default_factory=list)
     transition_in: Transition = Field(default_factory=Transition)
-    pattern_refs: list[str] = Field(default_factory=list)
 
     @property
     def duration_sec(self) -> float:

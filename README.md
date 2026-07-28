@@ -48,8 +48,9 @@ By default, the frontend expects the API to be running at http://127.0.0.1:8000
 The backend can be run from the repo root, or from the api folder. A virtual environment is strongly recommended.
 
 ```powershell
-python -m venv api/.venv
-. api/.venv/Scripts/Activate.ps1
+# PowerShell (macOS/Linux: python -m venv .venv && source .venv/bin/activate)
+python -m venv .venv
+. .venv/Scripts/Activate.ps1
 pip install -r api/requirements.txt
 ```
 

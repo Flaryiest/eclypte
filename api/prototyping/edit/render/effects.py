@@ -52,8 +52,7 @@ def _apply_one(clip, effect: Effect):
         return _punch_in(clip)
     if effect.type == "speed_ramp":
         return clip  # applied earlier by _build_shot_clips (needs the raw source length)
-    print(f"[render] effect '{effect.type}' not implemented — skipping "
-          f"(pattern_ref={effect.pattern_ref})")
+    print(f"[render] effect '{effect.type}' not implemented — skipping")
     return clip
 
 
