@@ -110,6 +110,8 @@ class BufferClient:
             raise BufferClientError("Buffer did not return a deletePost result")
         if result.get("message"):
             raise BufferClientError(str(result["message"]))
+        if result.get("success") is False:
+            raise BufferClientError("Buffer reported the post could not be deleted")
 
     def get_channel(self, *, channel_id: str) -> BufferChannelStatus:
         response = self._graphql(build_buffer_channel_payload(channel_id=channel_id))

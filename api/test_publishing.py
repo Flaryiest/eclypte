@@ -889,6 +889,10 @@ def test_delete_post_payload_and_parsing():
     with pytest.raises(BufferClientError):
         client.delete_post(post_id="buf_1")
 
+    client._graphql = lambda p: {"data": {"deletePost": {"success": False}}}
+    with pytest.raises(BufferClientError):
+        client.delete_post(post_id="buf_1")
+
 
 def test_cancel_queued_post_deletes_from_buffer():
     # API-level: a queued post with a buffer_post_id is deleted in Buffer, then
