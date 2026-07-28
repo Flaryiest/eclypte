@@ -925,3 +925,49 @@ def test_metrics_fetch_failure_stamps_check_but_not_last_error():
     assert stored.metrics_checked_at is not None  # won't hammer next tick
     assert stored.last_error is None
     assert stored.metrics == {}
+
+
+def test_metrics_pass_saves_onto_fresh_record_not_stale_snapshot():
+    repo = build_repo()
+
+    class MutatingFetch:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, user_id, *, buffer_post_id):
+            self.calls.append(buffer_post_id)
+            # Simulate a concurrent permalink backfill landing mid-fetch.
+            stored = next(p for p in repo.list_publishing_posts(USER) if p.post_id == "p_pub")
+            repo.save_publishing_post(stored.model_copy(update={"post_url": "https://instagram.com/p/live"}))
+            return {"views": 500.0}, "2026-06-09T06:00:00Z"
+
+    fetch = MutatingFetch()
+    save_post(repo, post_id="p_pub", status="published",
+              buffer_post_id="buf_1", posted_at="2026-06-08T12:00:00Z")
+    save_state(repo)
+
+    tick(repo, RecordingStarts(), fetch=fetch)
+
+    stored = next(p for p in repo.list_publishing_posts(USER) if p.post_id == "p_pub")
+    assert stored.post_url == "https://instagram.com/p/live"  # concurrent save survives
+    assert stored.metrics == {"views": 500.0}                 # metrics applied too
+
+
+def test_metrics_pass_skips_when_lock_held():
+    from api.autopilot import METRICS_LOCK
+
+    repo = build_repo()
+    fetch = RecordingFetch()
+    save_post(repo, post_id="p_pub", status="published",
+              buffer_post_id="buf_1", posted_at="2026-06-08T12:00:00Z")
+    save_state(repo)
+
+    assert METRICS_LOCK.acquire(blocking=False)
+    try:
+        tick(repo, RecordingStarts(), fetch=fetch)
+    finally:
+        METRICS_LOCK.release()
+    assert fetch.calls == []
+
+    tick(repo, RecordingStarts(), fetch=fetch)
+    assert fetch.calls == ["buf_1"]  # next tick retries normally

@@ -54,6 +54,10 @@ STATE_LOCK = threading.Lock()
 # so slow Buffer/R2 I/O never blocks state reads/writes.
 SEND_LOCK = threading.Lock()
 
+# Serializes metrics passes the same way SEND_LOCK serializes sends; a
+# concurrent pass just skips (the 12h cadence retries next tick).
+METRICS_LOCK = threading.Lock()
+
 
 class StartMusicAnalysis(Protocol):
     def __call__(self, user_id: str, *, audio: dict[str, str]) -> str: ...
@@ -637,36 +641,50 @@ def _refresh_post_metrics(
     touch last_error (it drives the auto-send backoff) or the halt."""
     if fetch_post_metrics is None:
         return
-    now_iso = utc_now_iso(now)
-    refreshed = 0
-    for post in repo.list_publishing_posts(user_id, status="published"):
-        if refreshed >= METRICS_MAX_PER_PASS:
-            break
-        if not post.buffer_post_id:
-            continue
-        if post.metrics_checked_at and not _older_than(
-            post.metrics_checked_at, now, METRICS_REFRESH_INTERVAL_SEC
-        ):
-            continue
-        if post.posted_at and _older_than(
-            post.posted_at, now, METRICS_RETENTION_DAYS * 86400
-        ):
-            continue
-        refreshed += 1
-        try:
-            metrics, updated_at = fetch_post_metrics(
-                user_id, buffer_post_id=post.buffer_post_id
+    if not METRICS_LOCK.acquire(blocking=False):
+        return
+    try:
+        now_iso = utc_now_iso(now)
+        refreshed = 0
+        for post in repo.list_publishing_posts(user_id, status="published"):
+            if refreshed >= METRICS_MAX_PER_PASS:
+                break
+            if not post.buffer_post_id:
+                continue
+            if post.metrics_checked_at and not _older_than(
+                post.metrics_checked_at, now, METRICS_REFRESH_INTERVAL_SEC
+            ):
+                continue
+            if post.posted_at and _older_than(
+                post.posted_at, now, METRICS_RETENTION_DAYS * 86400
+            ):
+                continue
+            refreshed += 1
+            try:
+                metrics, updated_at = fetch_post_metrics(
+                    user_id, buffer_post_id=post.buffer_post_id
+                )
+            except Exception:  # noqa: BLE001 — metrics must never break the tick
+                logger.warning(
+                    "metrics fetch failed for post %s", post.post_id, exc_info=True
+                )
+                metrics, updated_at = {}, None
+            # Save onto a freshly loaded record, not the pre-fetch snapshot: a
+            # concurrent save (permalink backfill, mark-posted, cancel) landing
+            # during the fetch must not be silently reverted by this write.
+            try:
+                fresh = repo.load_publishing_post(user_id=user_id, post_id=post.post_id)
+            except KeyError:
+                continue
+            if fresh.status != "published":
+                continue  # canceled/changed mid-fetch; don't resurrect old state
+            repo.save_publishing_post(
+                apply_post_metrics(
+                    fresh, metrics=metrics, metrics_updated_at=updated_at, now=now_iso
+                )
             )
-        except Exception:  # noqa: BLE001 — metrics must never break the tick
-            logger.warning(
-                "metrics fetch failed for post %s", post.post_id, exc_info=True
-            )
-            metrics, updated_at = {}, None
-        repo.save_publishing_post(
-            apply_post_metrics(
-                post, metrics=metrics, metrics_updated_at=updated_at, now=now_iso
-            )
-        )
+    finally:
+        METRICS_LOCK.release()
 
 
 def _older_than(stamp: str, now_dt: datetime, seconds: float) -> bool:
