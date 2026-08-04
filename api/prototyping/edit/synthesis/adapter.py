@@ -18,7 +18,7 @@ from .timeline_schema import (
     SourceRef,
     Timeline,
     Transition,
-    tail_fade_for,
+    tail_fades_for,
 )
 from .validators import validate_timeline
 
@@ -279,7 +279,7 @@ def adapt(
         + _resolve_overlays(raw_overlays, round(last_end, 3))
     )
 
-    fade = tail_fade_for(round(last_end, 3))
+    audio_fade, video_fade = tail_fades_for(round(last_end, 3))
     timeline = Timeline(
         source=SourceRef(video=source_video_path, audio=audio_path),
         output=OutputSpec(
@@ -289,9 +289,9 @@ def adapt(
             duration_sec=round(last_end, 3),
             crop=output_crop,
             crop_focus_x=crop_focus_x,
-            fade_out_sec=fade,
+            fade_out_sec=video_fade,
         ),
-        audio=AudioSpec(path=audio_path, start_sec=round(audio_start_sec, 3), fade_out_sec=fade),
+        audio=AudioSpec(path=audio_path, start_sec=round(audio_start_sec, 3), fade_out_sec=audio_fade),
         shots=shots,
         markers=Markers(beats_used_sec=beats_used, sections=sections),
         overlays=resolved_overlays,

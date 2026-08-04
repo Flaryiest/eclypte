@@ -615,19 +615,31 @@ def test_adapt_report_sink_always_has_sync_report():
     assert report["pacing_splits"] == []
 
 
-def test_tail_fade_for_clamps_to_a_third_of_short_reels():
-    from api.prototyping.edit.synthesis.timeline_schema import TAIL_FADE_SEC, tail_fade_for
+def test_tail_fades_split_short_reels_from_long_form():
+    from api.prototyping.edit.synthesis.timeline_schema import (
+        SHORT_REEL_AUDIO_FADE_SEC,
+        TAIL_FADE_SEC,
+        tail_fades_for,
+    )
 
-    assert tail_fade_for(30.0) == TAIL_FADE_SEC      # long reel -> full fade
-    assert tail_fade_for(6.0) == 2.0                 # short reel -> clamped to dur/3
-    assert tail_fade_for(0.0) == 0.0
+    # Short reels (<=40s): tiny audio-only fade, NO fade-to-black — a visible
+    # fade tells the viewer "it's over" and kills the loop/replay signal.
+    assert tail_fades_for(25.0) == (SHORT_REEL_AUDIO_FADE_SEC, 0.0)
+    assert tail_fades_for(40.0) == (SHORT_REEL_AUDIO_FADE_SEC, 0.0)
+    # Long form keeps the classic tail fade on both tracks.
+    assert tail_fades_for(120.0) == (TAIL_FADE_SEC, TAIL_FADE_SEC)
+    assert tail_fades_for(41.0) == (TAIL_FADE_SEC, TAIL_FADE_SEC)
+    assert tail_fades_for(0.0) == (0.0, 0.0)
 
 
-def test_adapt_sets_tail_fade_on_audio_and_output():
+def test_adapt_sets_loop_friendly_tail_fade_on_short_reels():
+    from api.prototyping.edit.synthesis.timeline_schema import SHORT_REEL_AUDIO_FADE_SEC
+
     tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH)
-    # _three_shots_contiguous totals 6.0s -> clamped fade of 2.0s on both streams.
-    assert tl.output.fade_out_sec == 2.0
-    assert tl.audio.fade_out_sec == 2.0
+    # _three_shots_contiguous totals 6.0s -> short reel: audio-only micro fade,
+    # hard video ending so the reel loops back into its opening.
+    assert tl.output.fade_out_sec == 0.0
+    assert tl.audio.fade_out_sec == SHORT_REEL_AUDIO_FADE_SEC
 
 
 # --- kinetic lyrics resolution ------------------------------------------------
