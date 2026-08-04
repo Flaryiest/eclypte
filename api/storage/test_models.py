@@ -190,3 +190,34 @@ def test_autopilot_state_used_windows_defaults_and_round_trips():
     stamped = state.model_copy(update={"used_windows": {"f1::s1": [[10.0, 35.0]]}})
     reloaded = AutopilotState.model_validate(stamped.model_dump(mode="json"))
     assert reloaded.used_windows == {"f1::s1": [[10.0, 35.0]]}
+
+
+def test_publishing_post_graph_fields_default_and_round_trip():
+    legacy = PublishingPostRecord.model_validate(
+        {
+            "post_id": "pub_1",
+            "owner_user_id": "u1",
+            "status": "ready",
+            "render_file_id": "rf",
+            "render_version_id": "rv",
+            "render_display_name": "reel.mp4",
+            "created_at": "2026-08-04T00:00:00Z",
+            "updated_at": "2026-08-04T00:00:00Z",
+        }
+    )
+    assert legacy.provider == "buffer"
+    assert legacy.ig_container_id is None
+    assert legacy.ig_media_id is None
+    assert legacy.copyright_status is None
+
+    stamped = legacy.model_copy(
+        update={
+            "provider": "graph",
+            "ig_container_id": "c1",
+            "ig_media_id": "m1",
+            "copyright_status": "clean",
+        }
+    )
+    reloaded = PublishingPostRecord.model_validate(stamped.model_dump(mode="json"))
+    assert reloaded.provider == "graph"
+    assert reloaded.ig_media_id == "m1"

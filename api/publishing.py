@@ -662,6 +662,119 @@ def resolve_public_media_base_url_env() -> str:
     return base_url
 
 
+def resolve_publish_provider_env() -> str:
+    """Which publish path sends approved posts: "buffer" (default) or "graph"."""
+    value = (os.environ.get("ECLYPTE_PUBLISH_PROVIDER") or "buffer").strip().lower()
+    if value not in {"buffer", "graph"}:
+        raise ValueError(
+            f"ECLYPTE_PUBLISH_PROVIDER must be 'buffer' or 'graph', got {value!r}"
+        )
+    return value
+
+
+class SendToGraphError(Exception):
+    """Graph publish failed; carries the record as prepared so far."""
+
+    def __init__(self, record: PublishingPostRecord, cause: Exception):
+        super().__init__(str(cause))
+        self.record = record
+        self.cause = cause
+
+
+def send_post_via_graph(
+    repo: StorageRepository,
+    *,
+    store: ObjectStore,
+    post: PublishingPostRecord,
+    publisher: Any | None = None,
+) -> PublishingPostRecord:
+    """Direct Instagram Graph API publish (ECLYPTE_PUBLISH_PROVIDER=graph).
+
+    Publishing is immediate — the Graph API has no queue, so send modes and
+    scheduling do not apply; posting cadence lives in the autopilot slot
+    spacing. The container's copyright check is a hard veto: matches leave the
+    post `ready` with `copyright_status="matches_found"` for a human call.
+    """
+    from api.instagram_graph import (
+        CopyrightBlockedError,
+        GraphApiError,
+        GraphPublisher,
+        copyright_matches_found,
+    )
+
+    public_base_url = resolve_public_media_base_url_env()
+    fresh = repo.load_publishing_post(user_id=post.owner_user_id, post_id=post.post_id)
+    if fresh.status in {"queued", "scheduled", "published"}:
+        raise PostAlreadySentError(f"post already {fresh.status}")
+    prepared = prepare_public_media_copy(
+        repo, store=store, post=fresh, public_base_url=public_base_url
+    )
+    cover_url: str | None = None
+    try:
+        cover_url = prepare_public_poster_copy(
+            repo, store=store, post=prepared, public_base_url=public_base_url
+        )
+    except Exception:
+        cover_url = None  # the cover is decoration — never blocks a send
+
+    graph = publisher if publisher is not None else GraphPublisher.from_env()
+    try:
+        container_id = graph.create_reel_container(
+            video_url=prepared.public_media_url or "",
+            caption=format_post_text(prepared.caption, prepared.hashtags),
+            cover_url=cover_url,
+        )
+        prepared = repo.save_publishing_post(
+            prepared.model_copy(
+                update={
+                    "provider": "graph",
+                    "ig_container_id": container_id,
+                    "updated_at": _utc_now(),
+                }
+            )
+        )
+        status = graph.wait_for_container(container_id)
+        if copyright_matches_found(status.get("copyright_check_status")):
+            repo.save_publishing_post(
+                prepared.model_copy(
+                    update={
+                        "copyright_status": "matches_found",
+                        "updated_at": _utc_now(),
+                    }
+                )
+            )
+            raise CopyrightBlockedError(
+                "copyright matches found on the reel container; send vetoed"
+            )
+        media_id = graph.publish_container(container_id)
+    except CopyrightBlockedError:
+        raise
+    except GraphApiError as exc:
+        raise SendToGraphError(prepared, exc) from exc
+
+    permalink: str | None = None
+    try:
+        media = graph.get_media(media_id, fields="permalink")
+        permalink = optional_str(media.get("permalink"))
+    except GraphApiError:
+        permalink = None  # backfills on the next status refresh
+    now = _utc_now()
+    return repo.save_publishing_post(
+        prepared.model_copy(
+            update={
+                "status": "published",
+                "provider": "graph",
+                "ig_media_id": media_id,
+                "copyright_status": prepared.copyright_status or "clean",
+                "posted_at": now,
+                "post_url": permalink or prepared.post_url,
+                "last_error": None,
+                "updated_at": now,
+            }
+        )
+    )
+
+
 def send_post_to_buffer(
     repo: StorageRepository,
     *,

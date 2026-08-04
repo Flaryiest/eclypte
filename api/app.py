@@ -28,6 +28,11 @@ from api.storage.factory import (
 from api.prototyping.edit.synthesis.system_prompt import (
     SYSTEM_PROMPT as DEFAULT_SYNTHESIS_PROMPT,
 )
+from api.instagram_graph import (
+    CopyrightBlockedError,
+    GraphConfigError,
+    GraphPublisher,
+)
 from api.publishing import (
     BufferClient,
     BufferClientError,
@@ -36,6 +41,7 @@ from api.publishing import (
     BufferConfigError,
     PostAlreadySentError,
     SendToBufferError,
+    SendToGraphError,
     apply_buffer_status,
     apply_post_metrics,
     create_publish_post_for_render,
@@ -43,7 +49,9 @@ from api.publishing import (
     optional_bool,
     optional_str,
     performance_score,
+    resolve_publish_provider_env,
     send_post_to_buffer,
+    send_post_via_graph,
 )
 from api.storage.models import (
     ArtifactKind,
@@ -225,6 +233,10 @@ class PublishingConfigResponse(BaseModel):
     openai_api_key_configured: bool
     caption_model: str
     buffer_channel: PublishingBufferChannelStatus | None = None
+    # Which path sends approved posts ("buffer" | "graph") and whether the
+    # graph provider's env is complete.
+    publish_provider: str = "buffer"
+    graph_configured: bool = False
 
 
 class EditJobStage(BaseModel):
@@ -346,6 +358,7 @@ def create_app(
     run_broadcaster: RunUpdateBroadcaster | None = None,
     workflow_runner: WorkflowRunner | None = None,
     buffer_client: BufferClient | None = None,
+    graph_publisher: GraphPublisher | None = None,
     cors_origins: list[str] | None = None,
 ) -> FastAPI:
     @asynccontextmanager
@@ -408,6 +421,26 @@ def create_app(
             return BufferClient.from_env()
         except BufferClientError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    def resolve_graph_publisher() -> GraphPublisher:
+        if graph_publisher is not None:
+            return graph_publisher
+        try:
+            return GraphPublisher.from_env()
+        except GraphConfigError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    def active_publish_provider() -> str:
+        try:
+            return resolve_publish_provider_env()
+        except ValueError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    def graph_publishing_configured() -> bool:
+        return bool(
+            os.environ.get("ECLYPTE_IG_USER_ID")
+            and os.environ.get("ECLYPTE_IG_ACCESS_TOKEN")
+        )
 
     def channel_status_response(
         channel: object,
@@ -811,6 +844,36 @@ def create_app(
 
         def send_ready_post(uid: str, *, post: PublishingPostRecord) -> PublishingPostRecord:
             try:
+                if resolve_publish_provider_env() == "graph":
+                    try:
+                        return send_post_via_graph(
+                            repo,
+                            store=store,
+                            post=post,
+                            publisher=graph_publisher or GraphPublisher.from_env(),
+                        )
+                    except CopyrightBlockedError as exc:
+                        # Stamp last_error so auto-send backs off instead of
+                        # re-vetoing the same post every pass; copyright_status
+                        # is already on the record for the review card.
+                        logger.warning(
+                            "autopilot graph send vetoed for post %s: %s", post.post_id, exc
+                        )
+                        fresh = repo.load_publishing_post(user_id=uid, post_id=post.post_id)
+                        return repo.save_publishing_post(
+                            fresh.model_copy(
+                                update={"last_error": str(exc), "updated_at": utc_now()}
+                            )
+                        )
+                    except SendToGraphError as exc:
+                        logger.warning(
+                            "autopilot graph send failed for post %s: %s", post.post_id, exc
+                        )
+                        return repo.save_publishing_post(
+                            exc.record.model_copy(
+                                update={"last_error": str(exc), "updated_at": utc_now()}
+                            )
+                        )
                 return send_post_to_buffer(repo, store=store, post=post, mode="queue")
             except PostAlreadySentError:
                 # Another sender won the race; the stored record is already
@@ -926,6 +989,7 @@ def create_app(
                 and os.environ.get("ECLYPTE_INTERNAL_PROGRESS_TOKEN")
             ),
             "autopilot_loop_configured": autopilot_loop_configured(),
+            "graph_publishing_configured": graph_publishing_configured(),
         }
 
     @app.post("/internal/progress")
@@ -1154,6 +1218,8 @@ def create_app(
             openai_api_key_configured=bool(os.environ.get("OPENAI_API_KEY")),
             caption_model=os.environ.get("ECLYPTE_CAPTION_MODEL", "gpt-5.4-mini"),
             buffer_channel=channel,
+            publish_provider=active_publish_provider(),
+            graph_configured=graph_publishing_configured(),
         )
 
     def publishing_post_view(
@@ -1337,6 +1403,35 @@ def create_app(
         post = publishing_post_or_404(repo, uid, post_id)
         if post.status == "canceled":
             raise HTTPException(status_code=400, detail="publishing post is canceled")
+        if active_publish_provider() == "graph":
+            # Graph publish is immediate: mode/scheduling do not apply.
+            try:
+                saved = send_post_via_graph(
+                    repo,
+                    store=resolved_store,
+                    post=post,
+                    publisher=resolve_graph_publisher(),
+                )
+            except (BufferConfigError, GraphConfigError) as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+            except PostAlreadySentError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except CopyrightBlockedError as exc:
+                # The human veto: the post stays ready with copyright_status
+                # stamped so the review card can surface it.
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except SendToGraphError as exc:
+                repo.save_publishing_post(
+                    exc.record.model_copy(
+                        update={
+                            "status": "failed",
+                            "last_error": str(exc),
+                            "updated_at": utc_now(),
+                        }
+                    )
+                )
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            return publishing_post_view(saved, uid, resolved_store)
         try:
             saved = send_post_to_buffer(
                 repo,

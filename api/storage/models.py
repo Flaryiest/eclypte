@@ -172,7 +172,15 @@ class PublishingPostRecord(BaseModel):
     song_name: str = ""
     collection_slug: str = ""
     platform: str = "instagram"
+    # Which publish path sent (or will send) the post: "buffer" (default) or
+    # "graph" (direct Instagram Graph API, stamped at graph-send time).
     provider: str = "buffer"
+    # Direct Graph API publishing (reach-recovery Phase B); all additive.
+    ig_container_id: str | None = None
+    ig_media_id: str | None = None
+    # Copyright canary summary from the reel container's check:
+    # "clean" | "matches_found"; None = never checked (Buffer sends).
+    copyright_status: str | None = None
     generated_caption: str = ""
     caption: str = ""
     hashtags: list[str] = Field(default_factory=list)

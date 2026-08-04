@@ -719,6 +719,8 @@ def test_publishing_config_reports_non_secret_setup_and_buffer_channel(monkeypat
             "external_link": "https://instagram.com/eclypte",
             "last_error": None,
         },
+        "publish_provider": "buffer",
+        "graph_configured": False,
     }
     assert buffer.channel_calls == ["channel_instagram"]
 
@@ -1381,3 +1383,204 @@ def test_public_poster_copy_returns_public_url_or_none():
     key = f"public/publishing/user_123/{post.post_id}/{version.version_id}.jpg"
     assert url == f"https://media.example.com/{key}"
     assert store.get_bytes(key) == b"jpeg-bytes"
+
+
+def test_resolve_publish_provider_env(monkeypatch):
+    from api.publishing import resolve_publish_provider_env
+
+    monkeypatch.delenv("ECLYPTE_PUBLISH_PROVIDER", raising=False)
+    assert resolve_publish_provider_env() == "buffer"
+    monkeypatch.setenv("ECLYPTE_PUBLISH_PROVIDER", "graph")
+    assert resolve_publish_provider_env() == "graph"
+    monkeypatch.setenv("ECLYPTE_PUBLISH_PROVIDER", "carrier-pigeon")
+    with pytest.raises(ValueError):
+        resolve_publish_provider_env()
+
+
+class FakeGraphPublisher:
+    """Scripted GraphPublisher stand-in for send_post_via_graph tests."""
+
+    def __init__(self, *, matches_found=False, permalink="https://instagram.com/reel/g1"):
+        self.container_calls = []
+        self.publish_calls = []
+        self.media_calls = []
+        self._matches_found = matches_found
+        self._permalink = permalink
+
+    def create_reel_container(self, **kwargs):
+        self.container_calls.append(kwargs)
+        return "container_1"
+
+    def wait_for_container(self, container_id, **_kwargs):
+        return {
+            "status_code": "FINISHED",
+            "copyright_check_status": {
+                "status": "completed",
+                "matches_found": self._matches_found,
+            },
+        }
+
+    def publish_container(self, container_id):
+        self.publish_calls.append(container_id)
+        return "media_1"
+
+    def get_media(self, media_id, *, fields):
+        self.media_calls.append((media_id, fields))
+        return {"id": media_id, "permalink": self._permalink}
+
+
+def _make_graph_ready_post(monkeypatch, *, with_poster=False):
+    from api.publishing import prepare_public_poster_copy  # noqa: F401 (import check)
+
+    monkeypatch.setenv("ECLYPTE_R2_PUBLIC_BASE_URL", "https://media.example.com")
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    render = _publish_render(repo, body=b"render-video")
+    post = create_publish_post_for_render(
+        repo,
+        user_id="user_123",
+        render_output=render,
+        collection_slug="mario",
+        auto_created=True,
+    )
+    if with_poster:
+        poster_ref = FileRef(user_id="user_123", file_id="file_poster")
+        repo.create_file_manifest(
+            file_ref=poster_ref, kind="render_poster", display_name="poster.jpg"
+        )
+        version = repo.publish_bytes(
+            file_ref=poster_ref,
+            body=b"jpeg-bytes",
+            content_type="image/jpeg",
+            original_filename="poster.jpg",
+            created_by_step="test",
+            derived_from_step="test",
+            input_file_version_ids=[],
+        )
+        post = repo.save_publishing_post(
+            post.model_copy(
+                update={
+                    "render_poster_file_id": poster_ref.file_id,
+                    "render_poster_version_id": version.version_id,
+                }
+            )
+        )
+    return repo, store, post
+
+
+def test_send_post_via_graph_publishes_immediately_with_cover(monkeypatch):
+    from api.publishing import send_post_via_graph
+
+    repo, store, post = _make_graph_ready_post(monkeypatch, with_poster=True)
+    publisher = FakeGraphPublisher()
+
+    saved = send_post_via_graph(repo, store=store, post=post, publisher=publisher)
+
+    assert saved.status == "published"
+    assert saved.provider == "graph"
+    assert saved.ig_container_id == "container_1"
+    assert saved.ig_media_id == "media_1"
+    assert saved.copyright_status == "clean"
+    assert saved.posted_at is not None
+    assert saved.post_url == "https://instagram.com/reel/g1"
+    assert saved.last_error is None
+    container = publisher.container_calls[0]
+    assert container["video_url"].startswith("https://media.example.com/public/publishing/")
+    assert container["cover_url"].endswith(".jpg")
+    # Caption text carries caption + hashtags, same formatting as Buffer sends.
+    assert "#" in container["caption"]
+
+
+def test_send_post_via_graph_vetoes_on_copyright_matches(monkeypatch):
+    from api.instagram_graph import CopyrightBlockedError
+    from api.publishing import send_post_via_graph
+
+    repo, store, post = _make_graph_ready_post(monkeypatch)
+    publisher = FakeGraphPublisher(matches_found=True)
+
+    with pytest.raises(CopyrightBlockedError):
+        send_post_via_graph(repo, store=store, post=post, publisher=publisher)
+
+    fresh = repo.load_publishing_post(user_id="user_123", post_id=post.post_id)
+    assert fresh.status == "ready"  # the human veto stays visible, nothing published
+    assert fresh.copyright_status == "matches_found"
+    assert publisher.publish_calls == []
+
+
+def test_send_post_via_graph_respects_already_sent(monkeypatch):
+    from api.publishing import PostAlreadySentError, send_post_via_graph
+
+    repo, store, post = _make_graph_ready_post(monkeypatch)
+    repo.save_publishing_post(post.model_copy(update={"status": "published"}))
+
+    with pytest.raises(PostAlreadySentError):
+        send_post_via_graph(repo, store=store, post=post, publisher=FakeGraphPublisher())
+
+
+def test_send_route_dispatches_to_graph_provider(monkeypatch):
+    monkeypatch.setenv("ECLYPTE_PUBLISH_PROVIDER", "graph")
+    monkeypatch.setenv("ECLYPTE_R2_PUBLIC_BASE_URL", "https://media.example.com")
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    render = _publish_render(repo, body=b"render-video")
+    publisher = FakeGraphPublisher()
+    client = TestClient(
+        create_app(
+            store=store,
+            workflow_runner=NoopWorkflowRunner(),
+            graph_publisher=publisher,
+        )
+    )
+
+    prepared = client.post(
+        "/v1/publishing/posts",
+        headers={"X-User-Id": "user_123"},
+        json={"render_output": render},
+    )
+    post_id = prepared.json()["post_id"]
+    sent = client.post(
+        f"/v1/publishing/posts/{post_id}/send-buffer",
+        headers={"X-User-Id": "user_123"},
+        json={"mode": "queue"},
+    )
+
+    assert sent.status_code == 200
+    body = sent.json()
+    assert body["status"] == "published"
+    assert body["provider"] == "graph"
+    assert body["ig_media_id"] == "media_1"
+    assert body["post_url"] == "https://instagram.com/reel/g1"
+    assert publisher.publish_calls == ["container_1"]
+
+
+def test_send_route_graph_copyright_veto_returns_409(monkeypatch):
+    monkeypatch.setenv("ECLYPTE_PUBLISH_PROVIDER", "graph")
+    monkeypatch.setenv("ECLYPTE_R2_PUBLIC_BASE_URL", "https://media.example.com")
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    render = _publish_render(repo, body=b"render-video")
+    client = TestClient(
+        create_app(
+            store=store,
+            workflow_runner=NoopWorkflowRunner(),
+            graph_publisher=FakeGraphPublisher(matches_found=True),
+        )
+    )
+
+    prepared = client.post(
+        "/v1/publishing/posts",
+        headers={"X-User-Id": "user_123"},
+        json={"render_output": render},
+    )
+    post_id = prepared.json()["post_id"]
+    sent = client.post(
+        f"/v1/publishing/posts/{post_id}/send-buffer",
+        headers={"X-User-Id": "user_123"},
+        json={"mode": "queue"},
+    )
+
+    assert sent.status_code == 409
+    fresh = client.get(
+        f"/v1/publishing/posts?status=ready", headers={"X-User-Id": "user_123"}
+    ).json()
+    assert fresh[0]["copyright_status"] == "matches_found"
