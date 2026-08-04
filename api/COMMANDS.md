@@ -198,9 +198,10 @@ schedules a package.
 
 Autopilot (review-gated content loop): set `ECLYPTE_AUTOPILOT=1` on the API to
 run the background tick loop (`ECLYPTE_AUTOPILOT_INTERVAL_SEC`, default 300).
-Current per-edit defaults: `reels_cinematic` format (native 1080x1920 with the
-widescreen picture letterboxed in), energy-ranked ~20–30s trim window (≈25s target), agent
-planning, daily target 2 (per-user, adjustable 1–10; keep it matched to the Buffer
+Current per-edit defaults: `reels_9_16` format (native 1080x1920 fill-frame —
+letterbox is officially demoted by Instagram; `reels_cinematic` remains for manual
+composes), `edit_focus="moment"` single-scene plans, energy-ranked ~20–30s trim
+window (≈25s target, 1.5s chorus lead-in), agent planning, daily target 2 (per-user, adjustable 1–10; keep it matched to the Buffer
 channel's posting slots/day). A song without a music
 analysis is analyzed first (`analyzing` state) so the window is always
 energy-ranked, never the full song.
