@@ -728,6 +728,41 @@ def send_post_to_buffer(
     )
 
 
+def _copy_version_to_public(
+    repo: StorageRepository,
+    *,
+    store: ObjectStore,
+    post: PublishingPostRecord,
+    file_id: str,
+    version_id: str,
+    default_extension: str,
+    default_content_type: str,
+    public_base_url: str,
+) -> tuple[str, str]:
+    """Copy a stored file version to the public publishing prefix.
+
+    Returns (key, public_url)."""
+    source_ref = FileVersionRef(
+        user_id=post.owner_user_id, file_id=file_id, version_id=version_id
+    )
+    meta = repo.load_file_version_meta(source_ref)
+    extension = _extension(meta.original_filename) or default_extension
+    key = (
+        f"public/publishing/{post.owner_user_id}/"
+        f"{post.post_id}/{version_id}.{extension}"
+    )
+    store.put_bytes(
+        key,
+        repo.read_version_bytes(source_ref),
+        content_type=meta.content_type or default_content_type,
+        metadata={
+            "eclypte-post-id": post.post_id,
+            "eclypte-render-version-id": version_id,
+        },
+    )
+    return key, f"{public_base_url.rstrip('/')}/{key}"
+
+
 def prepare_public_media_copy(
     repo: StorageRepository,
     *,
@@ -735,36 +770,52 @@ def prepare_public_media_copy(
     post: PublishingPostRecord,
     public_base_url: str,
 ) -> PublishingPostRecord:
-    source_ref = FileVersionRef(
-        user_id=post.owner_user_id,
+    key, url = _copy_version_to_public(
+        repo,
+        store=store,
+        post=post,
         file_id=post.render_file_id,
         version_id=post.render_version_id,
-    )
-    meta = repo.load_file_version_meta(source_ref)
-    extension = _extension(meta.original_filename) or "mp4"
-    key = (
-        f"public/publishing/{post.owner_user_id}/"
-        f"{post.post_id}/{post.render_version_id}.{extension}"
-    )
-    store.put_bytes(
-        key,
-        repo.read_version_bytes(source_ref),
-        content_type=meta.content_type or "video/mp4",
-        metadata={
-            "eclypte-post-id": post.post_id,
-            "eclypte-render-version-id": post.render_version_id,
-        },
+        default_extension="mp4",
+        default_content_type="video/mp4",
+        public_base_url=public_base_url,
     )
     return repo.save_publishing_post(
         post.model_copy(
             update={
                 "public_media_key": key,
-                "public_media_url": f"{public_base_url.rstrip('/')}/{key}",
+                "public_media_url": url,
                 "updated_at": _utc_now(),
                 "last_error": None,
             }
         )
     )
+
+
+def prepare_public_poster_copy(
+    repo: StorageRepository,
+    *,
+    store: ObjectStore,
+    post: PublishingPostRecord,
+    public_base_url: str,
+) -> str | None:
+    """Public copy of the post's poster frame, for the reel's `cover_url`.
+
+    Best-effort: a post without poster refs returns None (Instagram picks its
+    own cover, exactly as today)."""
+    if not post.render_poster_file_id or not post.render_poster_version_id:
+        return None
+    _, url = _copy_version_to_public(
+        repo,
+        store=store,
+        post=post,
+        file_id=post.render_poster_file_id,
+        version_id=post.render_poster_version_id,
+        default_extension="jpg",
+        default_content_type="image/jpeg",
+        public_base_url=public_base_url,
+    )
+    return url
 
 
 def format_post_text(caption: str, hashtags: list[str]) -> str:

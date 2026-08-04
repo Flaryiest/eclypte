@@ -1329,3 +1329,55 @@ def test_get_post_distinguishes_not_found_from_errors():
     with pytest.raises(BufferClientError) as excinfo:
         client.get_post(post_id="buf_1")
     assert not isinstance(excinfo.value, BufferPostNotFoundError)
+
+
+def test_public_poster_copy_returns_public_url_or_none():
+    from api.publishing import prepare_public_poster_copy
+
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    render = _publish_render(repo, body=b"render-video")
+    post = create_publish_post_for_render(
+        repo,
+        user_id="user_123",
+        render_output=render,
+        collection_slug="mario",
+        auto_created=True,
+    )
+
+    # No poster refs -> no copy, no URL.
+    assert (
+        prepare_public_poster_copy(
+            repo, store=store, post=post, public_base_url="https://media.example.com"
+        )
+        is None
+    )
+
+    poster_ref = FileRef(user_id="user_123", file_id="file_poster")
+    repo.create_file_manifest(
+        file_ref=poster_ref, kind="render_poster", display_name="poster.jpg"
+    )
+    version = repo.publish_bytes(
+        file_ref=poster_ref,
+        body=b"jpeg-bytes",
+        content_type="image/jpeg",
+        original_filename="poster.jpg",
+        created_by_step="test",
+        derived_from_step="test",
+        input_file_version_ids=[],
+    )
+    post = repo.save_publishing_post(
+        post.model_copy(
+            update={
+                "render_poster_file_id": poster_ref.file_id,
+                "render_poster_version_id": version.version_id,
+            }
+        )
+    )
+
+    url = prepare_public_poster_copy(
+        repo, store=store, post=post, public_base_url="https://media.example.com"
+    )
+    key = f"public/publishing/user_123/{post.post_id}/{version.version_id}.jpg"
+    assert url == f"https://media.example.com/{key}"
+    assert store.get_bytes(key) == b"jpeg-bytes"
