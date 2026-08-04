@@ -280,6 +280,7 @@ def test_agent_timeline_reuses_existing_clip_index_and_active_prompt(monkeypatch
         source_video=source_video,
         music_analysis=music_analysis,
         video_analysis=video_analysis,        creative_brief="Make it cinematic.",
+        edit_focus="moment",
     )
 
     completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=run.run_id))
@@ -290,6 +291,7 @@ def test_agent_timeline_reuses_existing_clip_index_and_active_prompt(monkeypatch
     assert completed.outputs["timeline_file_id"] == f"file_timeline_{run.run_id}"
     assert captured["system_prompt"] == "CUSTOM SYSTEM PROMPT"
     assert captured["instructions"] == "Make it cinematic."
+    assert captured["edit_focus"] == "moment"
 
 
 def test_enrich_clip_results_attaches_scene_metadata():
@@ -688,11 +690,17 @@ def test_edit_pipeline_reuses_existing_analyses_and_publishes_render(monkeypatch
         audio=audio,
         source_video=source_video,        creative_brief="",
         title="Reuse edit",
+        edit_focus="moment",
     )
 
     completed = repo.load_run_manifest(RunRef(user_id="user_123", run_id=parent.run_id))
     events = repo.list_run_events(RunRef(user_id="user_123", run_id=parent.run_id))
     assert completed.status == "completed"
+    # The focus choice must reach the timeline child run's inputs.
+    timeline_child = repo.load_run_manifest(
+        RunRef(user_id="user_123", run_id=completed.outputs["timeline_run_id"])
+    )
+    assert timeline_child.inputs["edit_focus"] == "moment"
     assert completed.outputs["music_analysis_version_id"] == music_analysis["version_id"]
     assert completed.outputs["video_analysis_version_id"] == video_analysis["version_id"]
     assert completed.outputs["timeline_run_id"].startswith("run_")

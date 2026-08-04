@@ -141,6 +141,7 @@ class DefaultWorkflowRunner:
         source_video = kwargs["source_video"]
         creative_brief = kwargs.get("creative_brief", "")
         export_options = kwargs.get("export_options")
+        edit_focus = str(kwargs.get("edit_focus") or "full_source")
         parent_ref = RunRef(user_id=user_id, run_id=run_id)
         current_stage = "assets"
 
@@ -183,6 +184,7 @@ class DefaultWorkflowRunner:
                 video_analysis=video_analysis,
                 creative_brief=creative_brief,
                 export_options=export_options,
+                edit_focus=edit_focus,
             )
 
             current_stage = "render"
@@ -518,6 +520,7 @@ class DefaultWorkflowRunner:
         video_analysis: dict,
         creative_brief: str,
         export_options: dict | None,
+        edit_focus: str = "full_source",
     ) -> dict[str, str]:
         resolved_export = resolve_export_options(export_options, max_duration_sec=None)
 
@@ -530,6 +533,7 @@ class DefaultWorkflowRunner:
                 "source_video_version_id": source_video["version_id"],
                 "music_analysis_version_id": music_analysis["version_id"],
                 "video_analysis_version_id": video_analysis["version_id"],
+                "edit_focus": edit_focus,
                 **resolved_export.as_run_inputs(),
             },
             steps=["ensure_clip_index", "agent_plan_timeline", "publish_timeline"],
@@ -552,6 +556,7 @@ class DefaultWorkflowRunner:
             creative_brief=creative_brief,
             max_duration_sec=None,
             export_options=resolved_export.as_payload(),
+            edit_focus=edit_focus,
             progress_context=self._progress_context(
                 user_id=user_id,
                 run_id=parent_ref.run_id,
@@ -1076,6 +1081,7 @@ class DefaultWorkflowRunner:
             logger.info("[timeline] style profile from references: %s", style_profile)
 
         creative_brief = str(kwargs.get("creative_brief") or "").strip() or DEFAULT_CREATIVE_BRIEF
+        edit_focus = str(kwargs.get("edit_focus") or "full_source")
         self._append_progress_context(repo, progress_context, 55, "Running agent timeline planner")
         agent_output = _run_agent_synthesis(
             video_filename=source_meta.original_filename,
@@ -1086,6 +1092,7 @@ class DefaultWorkflowRunner:
             source_duration_sec=content_end_sec,
             style_profile=style_profile or None,
             lyrics=lyrics,
+            edit_focus=edit_focus,
         )
         self._append_progress_context(repo, progress_context, 70, "Adapting agent timeline")
         rhythm_report: dict = {}
@@ -1772,6 +1779,7 @@ def _run_agent_synthesis(
     source_duration_sec: float | None = None,
     style_profile: dict | None = None,
     lyrics: dict | None = None,
+    edit_focus: str = "full_source",
 ) -> dict:
     from api.prototyping.edit.synthesis.agent import run_synthesis_loop
 
@@ -1784,6 +1792,7 @@ def _run_agent_synthesis(
         source_duration_sec=source_duration_sec,
         style_profile=style_profile,
         lyrics=lyrics,
+        edit_focus=edit_focus,
     )
 
 

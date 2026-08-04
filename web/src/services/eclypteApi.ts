@@ -270,12 +270,17 @@ export type EditJobStatus = {
     updated_at: string
 }
 
+export type EditFocus = "full_source" | "moment"
+
 export type EditJobRequest = {
     audio: FileVersionInput
     sourceVideo: FileVersionInput
     creativeBrief?: string
     title?: string
     exportOptions?: ExportOptions
+    /** "moment" briefs the agent to edit one scene instead of spanning the
+     * whole film (autopilot's default); omitted means full-source. */
+    editFocus?: EditFocus
 }
 
 export type DownloadUrlResponse = {
@@ -560,6 +565,7 @@ export class EclypteApiClient {
                 creative_brief: input.creativeBrief,
                 title: input.title,
                 export_options: serializeExportOptions(input.exportOptions),
+                edit_focus: input.editFocus,
             }),
             signal,
         })

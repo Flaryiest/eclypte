@@ -158,6 +158,7 @@ class TimelineRequest(BaseModel):
     creative_brief: str = ""
     max_duration_sec: float | None = Field(default=None, gt=0)
     export_options: ExportOptionsInput | None = None
+    edit_focus: Literal["full_source", "moment"] = "full_source"
 
 
 class RenderRequest(BaseModel):
@@ -172,6 +173,9 @@ class EditJobRequest(BaseModel):
     creative_brief: str = ""
     title: str | None = None
     export_options: ExportOptionsInput | None = None
+    # "moment" swaps the agent's span-the-full-source guidance for a
+    # single-scene brief (autopilot's default); manual composes span.
+    edit_focus: Literal["full_source", "moment"] = "full_source"
 
 
 class InternalProgressRequest(BaseModel):
@@ -727,6 +731,7 @@ def create_app(
                 "source_video_file_id": request.source_video.file_id,
                 "source_video_version_id": request.source_video.version_id,
                 "creative_brief": request.creative_brief,
+                "edit_focus": request.edit_focus,
                 **export_options.as_run_inputs(),
             },
             EDIT_STAGE_ORDER,
@@ -740,6 +745,7 @@ def create_app(
             creative_brief=request.creative_brief,
             title=title,
             export_options=export_options.as_payload(),
+            edit_focus=request.edit_focus,
         )
         return edit_status_from_run(repo, uid, run)
 
@@ -788,6 +794,7 @@ def create_app(
             creative_brief: str,
             title: str,
             export_options: dict[str, object] | None,
+            edit_focus: str = "full_source",
         ) -> str:
             request = EditJobRequest(
                 audio=FileVersionInput(**audio),
@@ -797,6 +804,7 @@ def create_app(
                 export_options=(
                     ExportOptionsInput(**export_options) if export_options else None
                 ),
+                edit_focus="moment" if edit_focus == "moment" else "full_source",
             )
             job = start_edit_job(request=request, schedule=schedule, repo=repo, uid=uid)
             return job.run_id
@@ -1681,6 +1689,7 @@ def create_app(
                 "source_video_version_id": request.source_video.version_id,
                 "music_analysis_version_id": request.music_analysis.version_id,
                 "video_analysis_version_id": request.video_analysis.version_id,
+                "edit_focus": request.edit_focus,
                 **export_options.as_run_inputs(),
             },
             ["ensure_clip_index", "agent_plan_timeline", "publish_timeline"],
@@ -1696,6 +1705,7 @@ def create_app(
             creative_brief=request.creative_brief,
             max_duration_sec=request.max_duration_sec,
             export_options=export_options.as_payload(),
+            edit_focus=request.edit_focus,
         )
         return run
 
@@ -1849,6 +1859,9 @@ def create_app(
                 creative_brief=run.inputs.get("creative_brief", ""),
                 title=run.inputs.get("title"),
                 export_options=ExportOptionsInput(**export_options) if export_options else None,
+                edit_focus=(
+                    "moment" if run.inputs.get("edit_focus") == "moment" else "full_source"
+                ),
             ),
             schedule=background_tasks.add_task,
             repo=repo,

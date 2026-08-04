@@ -289,6 +289,7 @@ def test_tick_advances_completed_analysis_to_edit():
     _, kwargs = starts.edit_calls[0]
     options = kwargs["export_options"]
     assert options["format"] == "reels_9_16"
+    assert kwargs["edit_focus"] == "moment"
     assert 20.0 <= options["audio_end_sec"] - options["audio_start_sec"] <= 30.0
     updated = state.items[0]
     assert updated.status == "editing"

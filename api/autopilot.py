@@ -89,6 +89,7 @@ class StartEdit(Protocol):
         creative_brief: str,
         title: str,
         export_options: dict[str, object] | None,
+        edit_focus: str = "full_source",
     ) -> str: ...
 
 
@@ -476,6 +477,9 @@ def _run_tick_locked(
                 creative_brief=item.creative_brief,
                 title=title,
                 export_options=export_options,
+                # Autopilot reels edit one scene: single-moment edits are the
+                # niche's winning format and far more sendable than a montage.
+                edit_focus="moment",
             )
         except Exception as exc:
             return fail_item(item, f"failed to start edit: {exc}")
