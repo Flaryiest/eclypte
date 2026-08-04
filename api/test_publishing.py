@@ -173,6 +173,18 @@ class NoopWorkflowRunner:
     def run_synthesis_consolidation(self, **kwargs): ...
 
 
+def test_media_names_lose_scene_release_junk():
+    from api.publishing import _clean_media_name
+
+    assert _clean_media_name("Your.Name.2016.1080p.BluRay.x265-GROUP") == "Your Name 2016"
+    assert _clean_media_name("Attack_on_Titan_S4_[Dual-Audio]_HEVC") == "Attack on Titan S4"
+    assert _clean_media_name("Believer (Official Audio) 320kbps") == "Believer"
+    assert _clean_media_name("plain name") == "plain name"
+    # A title containing an ambiguous English word must never be truncated.
+    assert _clean_media_name("The Web of Lies") == "The Web of Lies"
+    assert _clean_media_name("1080p.x265") == "1080p.x265"  # all-junk falls back to input
+
+
 def test_caption_input_includes_source_and_song(monkeypatch):
     client = FakeOpenAIClient()
     generate_caption_draft(

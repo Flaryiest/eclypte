@@ -498,7 +498,45 @@ def _display_name_for_file(repo: StorageRepository, user_id: str, file_id: str |
         manifest = repo.load_file_manifest(FileRef(user_id=user_id, file_id=file_id))
     except Exception:
         return ""
-    return _strip_media_extension(manifest.display_name)
+    return _clean_media_name(_strip_media_extension(manifest.display_name))
+
+
+# Unambiguous scene-release markers only: a false positive truncates a title,
+# so ambiguous English words (web, audio, official, ...) stay OUT of this set —
+# bracketed segments already catch most of those.
+_MEDIA_NAME_JUNK = {
+    "480p", "576p", "720p", "1080p", "2160p", "4k", "8k",
+    "x264", "x265", "h264", "h265", "hevc", "avc", "av1", "10bit", "8bit",
+    "hdr", "hdr10", "hdr10plus", "sdr", "dolbyvision",
+    "bluray", "blu-ray", "bdrip", "brrip", "webrip", "webdl", "web-dl",
+    "hdtv", "dvdrip", "dvdscr", "remux", "camrip", "hdcam", "amzn",
+    "aac", "aac2", "ac3", "eac3", "dts", "dts-hd", "truehd", "atmos", "flac",
+    "320kbps", "256kbps", "192kbps", "128kbps",
+    "proper", "repack", "internal", "extended-cut",
+}
+
+
+def _is_junk_token(token: str) -> bool:
+    t = token.lower().strip("-")
+    if t in _MEDIA_NAME_JUNK:
+        return True
+    # Release groups ride the last junk token ("x265-GROUP").
+    return t.split("-", 1)[0] in _MEDIA_NAME_JUNK
+
+
+def _clean_media_name(name: str) -> str:
+    """Upload filenames leak scene-release junk (1080p, x265, [group]) into
+    captions and hashtags. Scene junk always trails the title, so cut at the
+    first junk token; fall back to the input when stripping leaves nothing."""
+    base = re.sub(r"[\[\(][^\]\)]*[\]\)]", " ", name)
+    base = re.sub(r"[._]+", " ", base)
+    kept: list[str] = []
+    for token in base.split():
+        if _is_junk_token(token):
+            break
+        kept.append(token)
+    cleaned = " ".join(kept).strip(" -")
+    return cleaned or name.strip()
 
 
 def _strip_media_extension(name: str) -> str:
