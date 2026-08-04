@@ -23,6 +23,7 @@ from api.publishing import (
     apply_buffer_status,
     apply_post_metrics,
     create_publish_post_for_render,
+    resolve_publish_provider_env,
 )
 from api.storage.models import AutopilotItem, AutopilotState, PublishingPostRecord, RunManifest
 from api.storage.refs import FileVersionRef, RunRef
@@ -751,9 +752,44 @@ def _auto_send_ready_posts(
         or state.halted_reason is not None
     ):
         return
+    try:
+        provider = resolve_publish_provider_env()
+    except ValueError as exc:
+        logger.warning("auto-send skipped: %s", exc)
+        return
     if not SEND_LOCK.acquire(blocking=False):
         return
     try:
+        if provider == "graph":
+            # Graph publishes are immediate — there is no Buffer queue to
+            # absorb pacing, so this pass IS the scheduler: at most one
+            # publish per open slot (86400/daily_target spacing).
+            published = repo.list_publishing_posts(user_id, status="published")
+            if not graph_slot_due(
+                published, daily_target=state.daily_target, now=now
+            ):
+                return
+            attempts = 0
+            for post in repo.list_publishing_posts(user_id, status="ready"):
+                if attempts >= state.daily_target:
+                    # A systemic outage over a big ready backlog must not burn
+                    # a media copy + Graph call per ready post per pass.
+                    break
+                if not post.auto_created:
+                    continue
+                if post.last_error and _within_backoff(post.updated_at, now):
+                    continue
+                attempts += 1
+                try:
+                    result = send_ready_post(user_id, post=post)
+                except Exception:  # noqa: BLE001 — sends must never break the tick
+                    logger.warning(
+                        "graph auto-send crashed for post %s", post.post_id, exc_info=True
+                    )
+                    continue
+                if result is not None and result.status == "published":
+                    break  # the slot is filled; the next opens after the spacing
+            return
         # Budget both ceilings on every send, not once per pass: Buffer's
         # queue must never exceed 2x the daily target, and a single pass must
         # never queue more than daily_target reels — a first pass over an
@@ -794,6 +830,37 @@ def _auto_send_ready_posts(
                 failed_this_pass += 1
     finally:
         SEND_LOCK.release()
+
+
+# Graph publishing has no remote queue: the auto-send pass IS the scheduler,
+# spacing publishes evenly across the day.
+GRAPH_SLOT_SECONDS_PER_DAY = 86400.0
+
+
+def graph_slot_due(
+    published_posts: list[PublishingPostRecord],
+    *,
+    daily_target: int,
+    now: datetime,
+) -> bool:
+    """True when enough time has passed since the newest published post to
+    open the next posting slot (86400/daily_target spacing). No published
+    posts (or an unparsable stamp) means the first slot is open."""
+    latest = ""
+    for post in published_posts:
+        stamp = post.posted_at or ""
+        if stamp > latest:
+            latest = stamp
+    if not latest:
+        return True
+    try:
+        stamped = datetime.strptime(latest, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc
+        )
+    except ValueError:
+        return True
+    spacing = GRAPH_SLOT_SECONDS_PER_DAY / max(1, daily_target)
+    return (now - stamped).total_seconds() >= spacing
 
 
 def _within_backoff(updated_at: str, now_dt: datetime) -> bool:

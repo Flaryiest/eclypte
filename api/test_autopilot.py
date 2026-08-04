@@ -1194,3 +1194,88 @@ def test_tick_rejects_window_overlapping_a_used_one():
     windows = state.used_windows[pair_key("file_video", "file_song")]
     assert [70.0, 95.0] in windows
     assert [55.0, 80.0] in windows
+
+
+def _published_record(posted_at):
+    return PublishingPostRecord(
+        post_id=f"p_{posted_at}",
+        owner_user_id=USER,
+        render_file_id="rf",
+        render_version_id="rv",
+        render_display_name="r",
+        status="published",
+        posted_at=posted_at,
+        created_at="2026-06-09T00:00:00Z",
+        updated_at="2026-06-09T00:00:00Z",
+    )
+
+
+def test_graph_slot_due_spacing():
+    from api.autopilot import graph_slot_due
+
+    # No published posts yet: the first slot is always open.
+    assert graph_slot_due([], daily_target=2, now=NOW) is True
+    # daily_target=2 -> 12h spacing. Published 10h ago: slot still closed.
+    assert (
+        graph_slot_due([_published_record("2026-06-09T02:00:00Z")], daily_target=2, now=NOW)
+        is False
+    )
+    # Published 14h ago: the next slot is open.
+    assert (
+        graph_slot_due([_published_record("2026-06-08T22:00:00Z")], daily_target=2, now=NOW)
+        is True
+    )
+
+
+class GraphRecordingSend(RecordingSend):
+    """Graph sends publish immediately - the returned record is published."""
+
+    def __call__(self, user_id, *, post):
+        self.calls.append(post.post_id)
+        if self.fail:
+            raise RuntimeError("send exploded")
+        return post.model_copy(
+            update={"status": "published", "posted_at": "2026-06-09T12:00:00Z"}
+        )
+
+
+def test_graph_auto_publish_waits_for_slot(monkeypatch):
+    monkeypatch.setenv("ECLYPTE_PUBLISH_PROVIDER", "graph")
+    repo = build_repo()
+    send = GraphRecordingSend()
+    save_post(repo, post_id="p_auto")
+    # A post published 10h ago blocks the 12h slot (daily_target=2).
+    save_post(
+        repo, post_id="p_prev", status="published", posted_at="2026-06-09T02:00:00Z"
+    )
+    save_state(repo, auto_publish=True)
+
+    tick(repo, RecordingStarts(), send=send)
+    assert send.calls == []
+
+
+def test_graph_auto_publish_sends_one_when_slot_open(monkeypatch):
+    monkeypatch.setenv("ECLYPTE_PUBLISH_PROVIDER", "graph")
+    repo = build_repo()
+    send = GraphRecordingSend()
+    save_post(repo, post_id="p_auto")
+    save_post(repo, post_id="p_auto2")
+    save_post(
+        repo, post_id="p_prev", status="published", posted_at="2026-06-08T22:00:00Z"
+    )
+    save_state(repo, auto_publish=True)
+
+    tick(repo, RecordingStarts(), send=send)
+    # One slot per pass: exactly one send; the second package stays ready.
+    assert send.calls == ["p_auto"]
+
+
+def test_buffer_auto_publish_unchanged_by_provider_default(monkeypatch):
+    monkeypatch.delenv("ECLYPTE_PUBLISH_PROVIDER", raising=False)
+    repo = build_repo()
+    send = RecordingSend()
+    save_post(repo, post_id="p_auto")
+    save_state(repo, auto_publish=True)
+
+    tick(repo, RecordingStarts(), send=send)
+    assert send.calls == ["p_auto"]
