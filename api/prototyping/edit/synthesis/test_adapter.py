@@ -845,3 +845,31 @@ def test_anchor_guard_leaves_interior_anchors_alone():
                query_anchors=[50.0, 150.0])
     assert tl.shots[0].source.start_sec == pytest.approx(120.0)
     assert tl.shots[1].source.start_sec == pytest.approx(200.0)
+
+
+# --- first-shot hook telemetry ------------------------------------------------
+
+
+def test_sync_report_records_first_shot_hook():
+    report: dict = {}
+    # First shot pulls source 10.0-12.0; an impact frame inside that window
+    # marks the opener as impact-backed.
+    video = {
+        "source": {"duration_sec": SOURCE_DURATION},
+        "scenes": [
+            {"impacts": {"impact_frames": [{"timestamp_sec": 10.8, "intensity": 0.9}]}}
+        ],
+    }
+    adapt(_three_shots_contiguous(), SONG, video, SRC_PATH, AUDIO_PATH, report_sink=report)
+
+    first = report["first_shot"]
+    assert first["source_start_sec"] == 10.0
+    assert first["duration_sec"] > 0
+    assert first["impact_backed"] is True
+
+
+def test_sync_report_first_shot_without_impacts_is_not_backed():
+    report: dict = {}
+    adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH, report_sink=report)
+
+    assert report["first_shot"]["impact_backed"] is False

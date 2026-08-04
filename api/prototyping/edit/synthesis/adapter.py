@@ -1,4 +1,5 @@
 from .rhythm import (
+    _impact_frames,
     auto_accent_overlays,
     pacing_bands_for,
     pick_snap_beat,
@@ -306,6 +307,18 @@ def adapt(
         report_sink["anchor_relocations"] = anchor_relocations
         if lyrics_report is not None:
             report_sink["lyrics"] = lyrics_report
+        if shots:
+            first = shots[0]
+            # A weak opener is the #1 retention failure; QA reads this instead
+            # of scrubbing the render.
+            report_sink["first_shot"] = {
+                "source_start_sec": round(first.source.start_sec, 3),
+                "duration_sec": round(first.duration_sec, 3),
+                "impact_backed": any(
+                    first.source.start_sec <= ts <= first.source.end_sec
+                    for ts, _ in _impact_frames(video)
+                ),
+            }
 
     return timeline
 
