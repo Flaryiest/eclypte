@@ -248,6 +248,10 @@ class AutopilotState(BaseModel):
     backlog_paused: bool = False
     items: list[AutopilotItem] = Field(default_factory=list)
     used_combos: list[str] = Field(default_factory=list)
+    # pair_key -> [start_sec, end_sec] windows already rendered for that pair.
+    # Complements used_combos (exact 5s-bucket identity): a candidate window
+    # overlapping any listed window by >40% is treated as already used.
+    used_windows: dict[str, list[list[float]]] = Field(default_factory=dict)
     consecutive_failures: int = 0
     halted_reason: str | None = None
     packaged_counts: dict[str, int] = Field(default_factory=dict)

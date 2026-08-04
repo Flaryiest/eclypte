@@ -123,6 +123,21 @@ def pair_key(video_file_id: str, song_file_id: str) -> str:
     return f"{video_file_id}::{song_file_id}"
 
 
+# A candidate trim window overlapping a used window of the same pair by more
+# than this fraction (of the shorter window) is a near-duplicate reel: same
+# song section, ~same footage. Near-dupes are an enforcement risk, not just
+# waste.
+MAX_WINDOW_OVERLAP_FRAC = 0.4
+
+
+def window_overlap_frac(a: tuple[float, float], b: tuple[float, float]) -> float:
+    overlap = min(a[1], b[1]) - max(a[0], b[0])
+    shorter = min(a[1] - a[0], b[1] - b[0])
+    if overlap <= 0 or shorter <= 0:
+        return 0.0
+    return overlap / shorter
+
+
 @dataclass(frozen=True)
 class PairSelection:
     video: dict[str, str]
@@ -355,6 +370,7 @@ def _run_tick_locked(
 
     items = list(state.items)
     used_combos = list(state.used_combos)
+    used_windows = {key: [list(w) for w in ws] for key, ws in state.used_windows.items()}
     packaged_counts = dict(state.packaged_counts)
     consecutive_failures = state.consecutive_failures
     exhausted_pairs = list(state.exhausted_pairs)
@@ -412,12 +428,20 @@ def _run_tick_locked(
         windows = select_trim_windows(analysis)
         if not windows:
             return fail_item(item, "music analysis produced no usable trim window")
+        pair = pair_key(item.source_video_file_id, item.song_file_id or "")
+        pair_windows = [
+            (float(w[0]), float(w[1])) for w in used_windows.get(pair, [])
+        ]
         window = next(
             (
                 candidate
                 for candidate in windows
                 if combo_key(item.source_video_file_id, item.song_file_id, candidate)
                 not in used_combos
+                and all(
+                    window_overlap_frac(candidate, used) <= MAX_WINDOW_OVERLAP_FRAC
+                    for used in pair_windows
+                )
             ),
             None,
         )
@@ -458,6 +482,7 @@ def _run_tick_locked(
         used_combos.append(
             combo_key(item.source_video_file_id, item.song_file_id, window)
         )
+        used_windows.setdefault(pair, []).append([window[0], window[1]])
         return item.model_copy(
             update={
                 "status": "editing",
@@ -566,6 +591,7 @@ def _run_tick_locked(
                     used_combos = [c for c in used_combos if not c.startswith(prefix)]
                     key = pair_key(pick.video["file_id"], pick.song["file_id"])
                     exhausted_pairs = [k for k in exhausted_pairs if k != key]
+                    used_windows.pop(key, None)
                 last_paired_at[pick.video["file_id"]] = now_iso
                 last_paired_at[pick.song["file_id"]] = now_iso
                 items.append(
@@ -610,6 +636,7 @@ def _run_tick_locked(
         update={
             "items": _prune_items(items),
             "used_combos": used_combos,
+            "used_windows": used_windows,
             "packaged_counts": _prune_counts(packaged_counts, today),
             "consecutive_failures": consecutive_failures,
             "halted_reason": halted_reason,

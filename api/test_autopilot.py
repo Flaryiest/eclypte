@@ -1163,3 +1163,33 @@ def test_metrics_pass_skips_when_lock_held():
 
     tick(repo, RecordingStarts(), fetch=fetch)
     assert fetch.calls == ["buf_1"]  # next tick retries normally
+
+
+def test_window_overlap_frac_measures_against_shorter_window():
+    from api.autopilot import window_overlap_frac
+
+    assert abs(window_overlap_frac((10.0, 35.0), (15.0, 40.0)) - 0.8) < 1e-9
+    assert window_overlap_frac((10.0, 35.0), (40.0, 65.0)) == 0.0
+    assert abs(window_overlap_frac((10.0, 35.0), (30.0, 70.0)) - 0.2) < 1e-9
+
+
+def test_tick_rejects_window_overlapping_a_used_one():
+    repo = build_repo()
+    starts = RecordingStarts()
+    publish_song_with_analysis(repo)
+    # The pair already rendered (55, 80); the top-ranked candidates (58.5, 60,
+    # 65) all overlap it by >40% and must be skipped in favor of (70, 95).
+    save_state(
+        repo,
+        items=[make_item()],
+        used_windows={pair_key("file_video", "file_song"): [[55.0, 80.0]]},
+    )
+
+    state = tick(repo, starts)
+
+    _, kwargs = starts.edit_calls[0]
+    options = kwargs["export_options"]
+    assert options["audio_start_sec"] == 70.0
+    windows = state.used_windows[pair_key("file_video", "file_song")]
+    assert [70.0, 95.0] in windows
+    assert [55.0, 80.0] in windows

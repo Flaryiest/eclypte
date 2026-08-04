@@ -182,3 +182,11 @@ def test_publishing_post_metrics_fields_default_empty_and_round_trip():
     assert reloaded.metrics == {"views": 1200.0, "likes": 88.0}
     assert reloaded.metrics_history[0].metrics == {"views": 400.0}
     assert reloaded.song_file_id == "file_song"
+
+
+def test_autopilot_state_used_windows_defaults_and_round_trips():
+    state = AutopilotState(owner_user_id="u1")
+    assert state.used_windows == {}
+    stamped = state.model_copy(update={"used_windows": {"f1::s1": [[10.0, 35.0]]}})
+    reloaded = AutopilotState.model_validate(stamped.model_dump(mode="json"))
+    assert reloaded.used_windows == {"f1::s1": [[10.0, 35.0]]}
