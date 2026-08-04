@@ -197,6 +197,23 @@ def test_fallback_hashtags_are_derived_from_names(monkeypatch):
     assert "#spirited_away" in draft.hashtags
     assert "#unravel" in draft.hashtags
     assert "#amv" in draft.hashtags
+    assert "#fyp" not in draft.hashtags
+    assert len(draft.hashtags) <= 5
+
+
+def test_fallback_caption_uses_credit_line_and_capped_fandom_hashtags(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    draft = generate_caption_draft(
+        collection_slug="shonen", source_name="Attack on Titan", song_name="Believer"
+    )
+    lines = draft.caption.splitlines()
+    assert lines[0] == "Attack on Titan edit"
+    assert lines[1] == "anime: attack on titan · song: believer"
+    assert len(draft.hashtags) <= 5
+    assert "#fyp" not in draft.hashtags
+    assert "#edit" not in draft.hashtags
+    assert "#attack_on_titan" in draft.hashtags
+    assert "#animeedit" in draft.hashtags
 
 
 def test_caption_draft_is_punchy_and_collection_aware(monkeypatch):
@@ -210,9 +227,37 @@ def test_caption_draft_is_punchy_and_collection_aware(monkeypatch):
     assert "mario" in draft.caption.lower()
     assert len(draft.caption) <= 2200
     assert "#amv" in draft.hashtags
-    assert "#edit" in draft.hashtags
     assert "#mario" in draft.hashtags
-    assert len(draft.hashtags) <= 30
+    # Generic discovery tags are banned outright.
+    assert "#edit" not in draft.hashtags
+    assert "#fyp" not in draft.hashtags
+    assert len(draft.hashtags) <= 5
+
+
+def test_openai_caption_prompt_bans_generic_tags_and_caps_hashtags():
+    class FakeTagSpamResponse:
+        output_text = (
+            '{"caption":"ok this one ate",'
+            '"hashtags":["#gojo","#JJK","#fyp","#animeedit","#viral","#jujutsukaisen","#amv"],'
+            '"notes":""}'
+        )
+
+    class FakeTagSpamClient(FakeOpenAIClient):
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            return FakeTagSpamResponse()
+
+    client = FakeTagSpamClient()
+    draft = generate_caption_draft(
+        source_name="Jujutsu Kaisen", song_name="Tek It", openai_client=client
+    )
+    instructions = client.calls[0]["instructions"]
+    assert "#fyp" in instructions  # named in the ban list
+    assert "at most 5" in instructions
+    assert len(draft.hashtags) <= 5
+    assert "#fyp" not in draft.hashtags
+    assert "#viral" not in draft.hashtags
+    assert "#gojo" in draft.hashtags
 
 
 def test_openai_caption_generation_uses_responses_api_and_records_provenance():

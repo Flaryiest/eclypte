@@ -355,14 +355,17 @@ def _fallback_caption_draft(
     song_name: str = "",
 ) -> CaptionDraft:
     label = source_name or _humanize(collection_slug)
-    caption = f"{label} edit fr 🔥" if label else "this one goes crazy fr 🔥"
-    hashtags = _dedupe_hashtags(
+    hook = f"{label} edit" if label else "new edit"
+    credit_parts = []
+    if source_name:
+        credit_parts.append(f"anime: {source_name.lower()}")
+    if song_name:
+        credit_parts.append(f"song: {song_name.lower()}")
+    caption = hook if not credit_parts else f"{hook}\n{' · '.join(credit_parts)}"
+    hashtags = _finalize_hashtags(
         [
-            "#amv",
-            "#edit",
-            "#anime",
             "#animeedit",
-            "#fyp",
+            "#amv",
             _hashtag(source_name) if source_name else "",
             _hashtag(song_name) if song_name else "",
             _hashtag(collection_slug) if collection_slug else "",
@@ -370,7 +373,7 @@ def _fallback_caption_draft(
     )
     return CaptionDraft(
         caption=caption[:2200],
-        hashtags=hashtags[:30],
+        hashtags=hashtags,
         caption_source="fallback",
     )
 
@@ -387,25 +390,30 @@ def _openai_caption_draft(
     response = client.responses.create(
         model=model,
         instructions=(
-            "You write Instagram Reels captions for anime edits (AMVs) the way a real "
-            "Gen-Z creator posts them — NOT like a brand, marketer, or AI. "
+            "You write Instagram Reels captions for anime/movie edits (AMVs) the way a "
+            "real Gen-Z creator posts them — NOT like a brand, marketer, or AI. "
             "Return only valid JSON with keys caption, hashtags, and notes.\n"
-            "VOICE: short and casual, internet-native. Usually one line (a few words is "
-            "fine), mostly lowercase, at most 1-2 emojis. Slang is good. The caption does "
-            "NOT need to describe the video — a relatable, funny, or trending/nonsense "
-            "one-liner works great.\n"
-            "HARD BANS (these scream AI, never do them): listing pacing/transitions/energy; "
-            "the phrases 'hits different', 'quick thoughts', 'if you're into', 'worth the "
-            "watch', 'drop a rating', 'the vibe', 'let that sink in'; em dashes; any "
-            "corporate/marketing tone; claiming rights or official status.\n"
-            "Vary it every time. Vibe examples (DO NOT copy, just match the energy): "
-            "'ok this one ate'; 'no bc why did this go so hard'; 'pov: you cant stop "
-            "rewatching'; 'they really said cinema'; 'this is my roman empire fr'; "
-            "'lowkey cooked'; 'hi yes one ticket to this please'.\n"
-            "Caption under 2200 characters (keep it short). "
-            "hashtags = 8-12 lowercase hashtag strings: include one for the "
-            "anime/source and one for the song/artist when they are known, plus a "
-            "few broad discovery tags (#amv #anime #edit #fyp). No spaces or "
+            "STRUCTURE — up to three short lines, in this order:\n"
+            "1. Hook: one casual, mostly-lowercase line, at most 1-2 emojis, a real "
+            "reaction to THIS edit. When it reads naturally, work the source or song "
+            "name into it — people find reels by searching those exact words.\n"
+            "2. Credit line, exactly this shape: 'anime: <source> · song: <song>' "
+            "(lowercase; use 'film:' for live-action; drop a part if unknown).\n"
+            "3. OPTIONAL: either ONE genuine fandom question about the source, or a "
+            "natural nudge to send this to a friend who loves it. Never both; skip "
+            "when forced. NEVER formulaic bait: no 'comment YES', 'like if', "
+            "'tag 3 friends', 'follow for more'.\n"
+            "HARD BANS (these scream AI, never do them): listing pacing/transitions/"
+            "energy; the phrases 'hits different', 'quick thoughts', 'if you're into', "
+            "'worth the watch', 'drop a rating', 'the vibe', 'let that sink in'; em "
+            "dashes; any corporate/marketing tone; claiming rights or official status.\n"
+            "Vary the hook every time. Vibe examples (DO NOT copy, just match the "
+            "energy): 'ok this one ate'; 'no bc why did this go so hard'; 'they really "
+            "said cinema'; 'this is my roman empire fr'; 'lowkey cooked'.\n"
+            "hashtags = 3-5 lowercase tags, at most 5, ALL specific to this reel: the "
+            "source (e.g. #jujutsukaisen), the song or artist, a main character or the "
+            "fandom's own tag, plus #animeedit or #amv. NEVER generic discovery tags — "
+            "no #fyp, #foryou, #viral, #trending, #edit, or #anime alone. No spaces or "
             "punctuation. notes = a brief internal note for the editor."
         ),
         input=(
@@ -428,7 +436,7 @@ def _openai_caption_draft(
                         "hashtags": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "maxItems": 12,
+                            "maxItems": 5,
                         },
                         "notes": {"type": "string"},
                     },
@@ -448,7 +456,7 @@ def _openai_caption_draft(
         raise ValueError("caption model returned invalid hashtags")
     return CaptionDraft(
         caption=caption[:2200],
-        hashtags=_dedupe_hashtags([str(item) for item in raw_hashtags])[:30],
+        hashtags=_finalize_hashtags([str(item) for item in raw_hashtags]),
         notes=str(data.get("notes") or "").strip(),
         caption_source="openai",
     )
@@ -869,6 +877,27 @@ def optional_bool(value: Any) -> bool | None:
 
 def _collection_from_tags(tags: list[str]) -> str:
     return next((tag.removeprefix("collection:") for tag in tags if tag.startswith("collection:")), "")
+
+
+# Instagram officially capped hashtags at 5 (Dec 2025) and generic discovery
+# tags carry no reach — only fandom-specific tags earn their place.
+MAX_HASHTAGS = 5
+GENERIC_HASHTAG_BANS = {
+    "#fyp",
+    "#foryou",
+    "#foryoupage",
+    "#viral",
+    "#trending",
+    "#edit",
+    "#anime",
+    "#explore",
+    "#explorepage",
+}
+
+
+def _finalize_hashtags(values: list[str]) -> list[str]:
+    cleaned = [tag for tag in _dedupe_hashtags(values) if tag not in GENERIC_HASHTAG_BANS]
+    return cleaned[:MAX_HASHTAGS]
 
 
 def _dedupe_hashtags(values: list[str]) -> list[str]:
