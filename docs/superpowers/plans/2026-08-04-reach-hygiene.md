@@ -28,7 +28,7 @@
 - Modify: `api/autopilot.py:434-438` (the `export_options` dict in `start_trimmed_edit`)
 - Test: `api/test_autopilot.py:290`, `api/test_autopilot.py:518`
 
-- [ ] **Step 1: Update the two existing assertions to expect the new format**
+- [x] **Step 1: Update the two existing assertions to expect the new format**
 
 In `api/test_autopilot.py` line 290 change `assert options["format"] == "reels_cinematic"` to:
 
@@ -42,12 +42,12 @@ Line 518 change `assert runs[0]["inputs"]["export_format"] == "reels_cinematic"`
     assert runs[0]["inputs"]["export_format"] == "reels_9_16"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/python -m pytest api/test_autopilot.py -v -k "trim_window or export"`
 Expected: the two touched tests FAIL (still receiving `reels_cinematic`)
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `api/autopilot.py` `start_trimmed_edit`, change the export options dict:
 
@@ -61,12 +61,12 @@ In `api/autopilot.py` `start_trimmed_edit`, change the export options dict:
         }
 ```
 
-- [ ] **Step 4: Run the autopilot suite**
+- [x] **Step 4: Run the autopilot suite**
 
 Run: `.venv/bin/python -m pytest api/test_autopilot.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add api/autopilot.py api/test_autopilot.py
@@ -81,7 +81,7 @@ git commit -m "feat(autopilot): render auto reels fill-frame (reels_9_16), not l
 - Modify: `api/autopilot.py:37-39` (`CHORUS_LEAD_IN_SEC` + comment)
 - Test: `api/test_autopilot.py:140-151` (`test_select_trim_windows_prefers_high_energy_chorus`)
 
-- [ ] **Step 1: Update the window test**
+- [x] **Step 1: Update the window test**
 
 The existing test (line 140) asserts a window starting ~5s before the chorus (see its comment on line 145). Update the expected start to 1.5s before the chorus section start and the comment to match, e.g. if the chorus starts at 60.0 the expectation becomes `54.999 <= start` → `58.5`:
 
@@ -93,12 +93,12 @@ The existing test (line 140) asserts a window starting ~5s before the chorus (se
 
 (Adjust the literal to the fixture's actual chorus start minus 1.5 — read the fixture in the test body.)
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `.venv/bin/python -m pytest api/test_autopilot.py -v -k chorus`
 Expected: FAIL (window still starts 5s early)
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```python
 # Begin a section-anchored window this many seconds before the section starts.
@@ -107,12 +107,12 @@ Expected: FAIL (window still starts 5s early)
 CHORUS_LEAD_IN_SEC = 1.5
 ```
 
-- [ ] **Step 4: Run the suite**
+- [x] **Step 4: Run the suite**
 
 Run: `.venv/bin/python -m pytest api/test_autopilot.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add api/autopilot.py api/test_autopilot.py
@@ -130,7 +130,7 @@ git commit -m "feat(autopilot): open trim windows 1.5s before the section, not 5
 
 **Interfaces:** `tail_fades_for(duration_sec: float) -> tuple[float, float]` returning `(audio_fade_sec, video_fade_sec)`. `tail_fade_for` is replaced (adapter + tests are its only consumers — verify with `git grep -n tail_fade_for`).
 
-- [ ] **Step 1: Rewrite the fade tests**
+- [x] **Step 1: Rewrite the fade tests**
 
 Replace `test_tail_fade_for_clamps_to_a_third_of_short_reels` (test_adapter.py:618) with:
 
@@ -154,12 +154,12 @@ def test_tail_fades_split_short_reels_from_long_form():
 
 The adjacent adapter-level test (lines ~625-630) asserting `tl.output.fade_out_sec == 2.0` / `tl.audio.fade_out_sec == 2.0` must now assert the split values for whatever duration its fixture produces (a ≤40s fixture ⇒ `output.fade_out_sec == 0.0`, `audio.fade_out_sec == SHORT_REEL_AUDIO_FADE_SEC`).
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `.venv/bin/python -m pytest api/prototyping/edit/synthesis/test_adapter.py -v -k fade`
 Expected: FAIL with `ImportError: cannot import name 'tail_fades_for'`
 
-- [ ] **Step 3: Implement the helper**
+- [x] **Step 3: Implement the helper**
 
 In `timeline_schema.py`, replacing `tail_fade_for`:
 
@@ -195,12 +195,12 @@ In `adapter.py` (line 282), replace the single-fade wiring:
 
 and use `fade_out_sec=video_fade` in `OutputSpec`, `fade_out_sec=audio_fade` in `AudioSpec`. Update the `tail_fade_for` import (adapter.py:21) to `tail_fades_for`.
 
-- [ ] **Step 4: Run adapter + render suites**
+- [x] **Step 4: Run adapter + render suites**
 
 Run: `.venv/bin/python -m pytest api/prototyping/edit/synthesis -v && .venv/bin/python -m pytest api/prototyping/edit/render -v`
 Expected: PASS (both renderers already skip `fade <= 0`: `ffmpeg_filtergraph.py:284-301` guards, `fades.py` returns the clip unchanged)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add api/prototyping/edit/synthesis/timeline_schema.py api/prototyping/edit/synthesis/adapter.py api/prototyping/edit/synthesis/test_adapter.py
@@ -215,7 +215,7 @@ git commit -m "feat(edit): short reels hard-end for loops - audio-only 0.3s tail
 - Modify: `api/publishing.py:351-375` (`_fallback_caption_draft`), `api/publishing.py:378-454` (`_openai_caption_draft`)
 - Test: `api/test_publishing.py:176-260` (caption tests)
 
-- [ ] **Step 1: Write/adjust the failing tests**
+- [x] **Step 1: Write/adjust the failing tests**
 
 Update `test_fallback_hashtags_are_derived_from_names` (test_publishing.py:190) and add two tests:
 
@@ -251,12 +251,12 @@ def test_openai_caption_prompt_bans_generic_tags_and_caps_hashtags():
 
 (Reuse the module's existing fake-OpenAI pattern from `test_openai_caption_generation_uses_responses_api_and_records_provenance` — the fake must expose `captured_kwargs`; extend it if it doesn't.)
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `.venv/bin/python -m pytest api/test_publishing.py -v -k caption`
 Expected: new tests FAIL (old template `"... edit fr 🔥"`, `#fyp` present, >5 tags)
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add a module-level banned-tag set + filter next to `_dedupe_hashtags`:
 
@@ -332,12 +332,12 @@ Rewrite `_openai_caption_draft`'s `instructions` (keep the Responses-API mechani
         ),
 ```
 
-- [ ] **Step 4: Run the publishing suite**
+- [x] **Step 4: Run the publishing suite**
 
 Run: `.venv/bin/python -m pytest api/test_publishing.py -v`
 Expected: PASS (fix any other test asserting the old template/tags)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add api/publishing.py api/test_publishing.py
@@ -352,7 +352,7 @@ git commit -m "feat(publishing): niche-register captions with credit line, cap h
 - Modify: `api/publishing.py:486-503` (`_display_name_for_file` + new `_clean_media_name`)
 - Test: `api/test_publishing.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 def test_media_names_lose_scene_release_junk():
@@ -363,12 +363,12 @@ def test_media_names_lose_scene_release_junk():
     assert _clean_media_name("1080p.x265") == "1080p.x265"  # all-junk falls back to input
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `.venv/bin/python -m pytest api/test_publishing.py -v -k junk`
 Expected: FAIL with `NameError`/import error
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```python
 _MEDIA_NAME_JUNK = {
@@ -399,12 +399,12 @@ def _clean_media_name(name: str) -> str:
     return _clean_media_name(_strip_media_extension(manifest.display_name))
 ```
 
-- [ ] **Step 4: Run the suite**
+- [x] **Step 4: Run the suite**
 
 Run: `.venv/bin/python -m pytest api/test_publishing.py -v`
 Expected: PASS (`test_caption_input_includes_source_and_song` and `test_regenerate_caption_passes_persisted_names` must still pass — their fixtures use clean names)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add api/publishing.py api/test_publishing.py
@@ -421,7 +421,7 @@ git commit -m "fix(publishing): strip scene-release junk from source/song displa
 
 **Interfaces:** `AutopilotState.used_windows: dict[str, list[list[float]]]` (pair_key → `[start, end]` list); pure `window_overlap_frac(a, b) -> float`; `MAX_WINDOW_OVERLAP_FRAC = 0.4`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `api/storage/test_models.py`:
 
@@ -453,12 +453,12 @@ def test_tick_rejects_window_overlapping_a_used_one():
 
 (Build the second test on `test_tick_skips_already_used_combo_without_counting_failure` (line 389) — same fakes, but pre-populate `used_windows` instead of `used_combos` and assert both the chosen `audio_start_sec` and the new `used_windows` entry.)
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `.venv/bin/python -m pytest api/storage/test_models.py -k used_windows -v && .venv/bin/python -m pytest api/test_autopilot.py -k overlap -v`
 Expected: FAIL (missing field / missing function)
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `api/storage/models.py`, on `AutopilotState` after `used_combos`:
 
@@ -521,12 +521,12 @@ In the recycle branch (autopilot.py:562-566), clear the pair's windows too:
 
 (the `key = pair_key(...)` local already exists there).
 
-- [ ] **Step 4: Run the suites**
+- [x] **Step 4: Run the suites**
 
 Run: `.venv/bin/python -m pytest api/test_autopilot.py api/storage/test_models.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add api/storage/models.py api/autopilot.py api/test_autopilot.py api/storage/test_models.py
@@ -546,7 +546,7 @@ git commit -m "feat(autopilot): reject trim windows overlapping used ones >40% -
 - Modify: `web/src/services/eclypteApi.ts` (`EditJobRequest` type)
 - Test: `api/prototyping/edit/synthesis/test_agent.py`, `api/test_autopilot.py`, `api/test_workflows.py`
 
-- [ ] **Step 1: Write the failing agent test**
+- [x] **Step 1: Write the failing agent test**
 
 In `test_agent.py` (follow its existing pattern of asserting on the assembled user content via a fake client/loop — mirror how the span-guidance/source-context tests are written):
 
@@ -565,12 +565,12 @@ def test_default_focus_keeps_span_guidance():
     assert "Span the FULL content" in content
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `.venv/bin/python -m pytest api/prototyping/edit/synthesis/test_agent.py -v -k focus`
 Expected: FAIL (`run_synthesis_loop` has no `edit_focus` param)
 
-- [ ] **Step 3: Implement the agent side**
+- [x] **Step 3: Implement the agent side**
 
 `agent.py` — add below `_format_source_context`:
 
@@ -615,7 +615,7 @@ def _format_moment_context(source_duration_sec: float) -> str:
 - Span the full source from beginning to end regardless of song length (unless the run context declares a FOCUSED MOMENT EDIT — then concentrate on that one scene instead): ...
 ```
 
-- [ ] **Step 4: Thread it through workflows, app, autopilot**
+- [x] **Step 4: Thread it through workflows, app, autopilot**
 
 - `_run_agent_synthesis` (workflows.py:1765): add `edit_focus: str = "full_source"` and pass to `run_synthesis_loop`.
 - `_run_agent_timeline_plan` (~1078): `edit_focus = str(kwargs.get("edit_focus") or "full_source")`, pass into `_run_agent_synthesis`.
@@ -624,18 +624,18 @@ def _format_moment_context(source_duration_sec: float) -> str:
 - Autopilot `StartEdit` protocol (autopilot.py:81-91) gains `edit_focus: str`; the app.py closure (~783) accepts and forwards it into `EditJobRequest`; `start_trimmed_edit` passes `edit_focus="moment"`.
 - `web/src/services/eclypteApi.ts`: add `edit_focus?: "full_source" | "moment"` to the `EditJobRequest` type (~line 273) and pass it through in the client method that posts `/v1/edits`.
 
-- [ ] **Step 5: Extend the autopilot + workflows tests**
+- [x] **Step 5: Extend the autopilot + workflows tests**
 
 In `api/test_autopilot.py`, the fake `start_edit` in the trim-window test captures kwargs — assert `captured["edit_focus"] == "moment"`. In `api/test_workflows.py`, extend an edit-pipeline test to send `edit_focus="moment"` and assert the child timeline run's inputs carry it.
 
-- [ ] **Step 6: Run everything backend + frontend**
+- [x] **Step 6: Run everything backend + frontend**
 
 Run: `.venv/bin/python -m pytest api/prototyping/edit/synthesis api/test_autopilot.py api/test_workflows.py api/test_api_v1.py -v`
 Expected: PASS
 Run: `cd web && npm run lint && npm run build`
 Expected: clean
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add api/prototyping/edit/synthesis/agent.py api/prototyping/edit/synthesis/system_prompt.py api/workflows.py api/app.py api/autopilot.py web/src/services/eclypteApi.ts api/prototyping/edit/synthesis/test_agent.py api/test_autopilot.py api/test_workflows.py
@@ -650,7 +650,7 @@ git commit -m "feat(edit): edit_focus=moment - autopilot reels edit one scene, n
 - Modify: `api/prototyping/edit/synthesis/adapter.py` (report_sink block ~304)
 - Test: `api/prototyping/edit/synthesis/test_adapter.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Using the existing `adapt(..., report_sink=...)` test pattern:
 
@@ -666,12 +666,12 @@ def test_sync_report_records_first_shot_hook():
     assert isinstance(first["impact_backed"], bool)
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `.venv/bin/python -m pytest api/prototyping/edit/synthesis/test_adapter.py -v -k first_shot`
 Expected: FAIL with `KeyError: 'first_shot'`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `adapter.py` where `report_sink` is populated (~304), add (importing `_impact_frames` from `.rhythm`):
 
@@ -691,12 +691,12 @@ In `adapter.py` where `report_sink` is populated (~304), add (importing `_impact
             }
 ```
 
-- [ ] **Step 4: Run the suite**
+- [x] **Step 4: Run the suite**
 
 Run: `.venv/bin/python -m pytest api/prototyping/edit/synthesis -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add api/prototyping/edit/synthesis/adapter.py api/prototyping/edit/synthesis/test_adapter.py
@@ -710,25 +710,25 @@ git commit -m "feat(edit): record first-shot hook telemetry in timeline_sync_rep
 **Files:**
 - Modify: `CLAUDE.md`, `AGENTS.md`, `ARCHITECTURE.md`, `api/COMMANDS.md`
 
-- [ ] **Step 1: Reconcile docs**
+- [x] **Step 1: Reconcile docs**
 
 Update every mention of: autopilot's default format (`reels_cinematic` → `reels_9_16`; `reels_cinematic` remains available for manual composes), the ≈5s chorus lead-in (now 1.5s), the audio+video tail fade (short reels: 0.3s audio-only, hard video end for loops), caption/hashtag behavior (≤5 fandom tags, credit line, no `#fyp`), the new `edit_focus` field and autopilot's moment default, `used_windows` dedupe, and the `first_shot` sync-report entry. Record the Phase 0 operator-diagnosis results here if available.
 
-- [ ] **Step 2: Full verification**
+- [x] **Step 2: Full verification**
 
 Run: `.venv/bin/python -m pytest api -v`
 Expected: PASS
 Run: `cd web && npm run lint && npm run build`
 Expected: clean
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add CLAUDE.md AGENTS.md ARCHITECTURE.md api/COMMANDS.md
 git commit -m "docs: reconcile reach-hygiene changes (fill format, loop ending, captions, edit_focus)"
 ```
 
-- [ ] **Step 4: Deploy checklist (operator)**
+- [x] **Step 4: Deploy checklist (operator)**
 
 - Redeploy `eclypte-render-r2` — policy: `timeline_schema.py` (a bundled file) changed. Behavior rides existing `fade_out_sec` fields, so the old image renders new timelines correctly, but keep image and repo in lockstep.
 - No reindex, no other Modal app changes.
