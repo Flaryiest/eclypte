@@ -3,6 +3,8 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
 > **PROBE-GATED:** Task 0 is a live-API probe with a decision checkpoint. Tasks 3b/5b depend on its findings; do not start them before Task 0's outcomes are recorded in this file.
+>
+> **STATUS (2026-08-04):** Tasks 1-6 implemented and merged (no Meta credentials in the dev environment, so shapes are probe-tolerant). Task 0 probes + the veto drill are the operator's next step; Tasks 3b/5b remain unbuilt pending the audio-offset answer.
 
 **Goal:** Publish reels straight through the Instagram Graph API (Buffer stays the default provider) to unlock attached licensed audio, custom covers, a pre-publish copyright canary, and first-party insights metrics — the four reach surfaces Buffer structurally cannot reach.
 
@@ -62,7 +64,7 @@ No commit (findings live in this plan + COMMANDS.md; commit those doc edits).
 
 **Interfaces:** `GraphConfig.from_env()`; `build_reel_container_params(...) -> dict`; `GraphPublisher` with `create_reel_container`, `get_container_status`, `publish_container`, `get_media`, `get_insights`, `search_audio`; typed errors `GraphConfigError`, `GraphApiError`, `CopyrightBlockedError`.
 
-- [ ] **Step 1: Write the failing builder tests**
+- [x] **Step 1: Write the failing builder tests**
 
 ```python
 from api.instagram_graph import build_reel_container_params
@@ -99,12 +101,12 @@ def test_graph_config_requires_env(monkeypatch):
         GraphConfig.from_env()
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `.venv/bin/python -m pytest api/test_instagram_graph.py -v`
 Expected: FAIL with `ModuleNotFoundError`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Module skeleton (urllib request/response mechanics copied from `BufferClient._graphql`, form-encoded POSTs, `access_token` always a param; every non-2xx or `{"error": ...}` body raises `GraphApiError` with the API's message; builders pure, JSON-encode `audio_configuration`, omit absent optionals; adjust field names to Task 0 findings):
 
@@ -132,12 +134,12 @@ class GraphPublisher:
 
 `get_insights` parses the insights list tolerantly (skip malformed entries, never invent zeros — same discipline as `get_post_metrics`).
 
-- [ ] **Step 4: Run**
+- [x] **Step 4: Run**
 
 Run: `.venv/bin/python -m pytest api/test_instagram_graph.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add api/instagram_graph.py api/test_instagram_graph.py
@@ -152,15 +154,15 @@ git commit -m "feat(publishing): Instagram Graph API client - containers, canary
 - Modify: `api/publishing.py` (`prepare_public_media_copy` area, ~685-721)
 - Test: `api/test_publishing.py`
 
-- [ ] **Step 1: Failing test** — a `prepare_public_poster_copy(repo, user_id, post)` that copies the post's `render_poster_file_id/version_id` blob to `public/publishing/{user}/{post}/{version}.jpg` and returns the public URL (same base-URL resolution as the MP4 copy); returns `None` when the post has no poster refs.
+- [x] **Step 1: Failing test** — a `prepare_public_poster_copy(repo, user_id, post)` that copies the post's `render_poster_file_id/version_id` blob to `public/publishing/{user}/{post}/{version}.jpg` and returns the public URL (same base-URL resolution as the MP4 copy); returns `None` when the post has no poster refs.
 
-- [ ] **Step 2: Run to verify failure** — `.venv/bin/python -m pytest api/test_publishing.py -v -k poster_copy` → FAIL
+- [x] **Step 2: Run to verify failure** — `.venv/bin/python -m pytest api/test_publishing.py -v -k poster_copy` → FAIL
 
-- [ ] **Step 3: Implement** by extracting the shared copy-to-public logic from `prepare_public_media_copy` (DRY: one helper, two extensions).
+- [x] **Step 3: Implement** by extracting the shared copy-to-public logic from `prepare_public_media_copy` (DRY: one helper, two extensions).
 
-- [ ] **Step 4: Run** — `.venv/bin/python -m pytest api/test_publishing.py -v` → PASS
+- [x] **Step 4: Run** — `.venv/bin/python -m pytest api/test_publishing.py -v` → PASS
 
-- [ ] **Step 5: Commit** — `feat(publishing): public poster copies for reel cover frames`
+- [x] **Step 5: Commit** — `feat(publishing): public poster copies for reel cover frames`
 
 ---
 
@@ -172,15 +174,15 @@ git commit -m "feat(publishing): Instagram Graph API client - containers, canary
 
 **Interfaces:** `PublishingPostRecord.publish_provider: str | None`, `.ig_container_id: str | None`, `.ig_media_id: str | None`, `.copyright_status: str | None`; `resolve_publish_provider_env() -> str` (`"buffer"` default, `"graph"` allowed, anything else raises); `send_ready_post_for_provider(repo, user_id, post, ...)` dispatching to `send_post_to_buffer` or `send_post_via_graph`.
 
-- [ ] **Step 1: Failing tests** — model round-trip for the new fields; provider resolution default/invalid; `send_post_via_graph` happy path with a fake `GraphPublisher` (public copies prepared, container created with caption+hashtags via `format_post_text` and `cover_url`, polled to `FINISHED`, published, record stamped `status="published"`, `posted_at`, `publish_provider="graph"`, `ig_media_id`, permalink from `get_media`); copyright-match path (a `matches_found` outcome with a MUTE/BLOCK action raises `CopyrightBlockedError`; the record keeps `status="ready"` and stamps `copyright_status` — the veto stays human-visible, NOT `last_error`-driven auto-retry).
+- [x] **Step 1: Failing tests** — model round-trip for the new fields; provider resolution default/invalid; `send_post_via_graph` happy path with a fake `GraphPublisher` (public copies prepared, container created with caption+hashtags via `format_post_text` and `cover_url`, polled to `FINISHED`, published, record stamped `status="published"`, `posted_at`, `publish_provider="graph"`, `ig_media_id`, permalink from `get_media`); copyright-match path (a `matches_found` outcome with a MUTE/BLOCK action raises `CopyrightBlockedError`; the record keeps `status="ready"` and stamps `copyright_status` — the veto stays human-visible, NOT `last_error`-driven auto-retry).
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement.** `send_post_via_graph` mirrors `send_post_to_buffer`'s shape (typed errors, reload-then-save). Graph has no queue: `mode` is ignored; a sent post goes straight to `published`. Dispatch in `api/app.py`'s send route and the autopilot `send_ready_post` closure via `send_ready_post_for_provider`. `/v1/publishing/config` + `/healthz` gain non-secret provider booleans.
+- [x] **Step 3: Implement.** `send_post_via_graph` mirrors `send_post_to_buffer`'s shape (typed errors, reload-then-save). Graph has no queue: `mode` is ignored; a sent post goes straight to `published`. Dispatch in `api/app.py`'s send route and the autopilot `send_ready_post` closure via `send_ready_post_for_provider`. `/v1/publishing/config` + `/healthz` gain non-secret provider booleans.
 
-- [ ] **Step 4: Run** — `.venv/bin/python -m pytest api/test_publishing.py api/test_api_v1.py api/storage -v` → PASS
+- [x] **Step 4: Run** — `.venv/bin/python -m pytest api/test_publishing.py api/test_api_v1.py api/storage -v` → PASS
 
-- [ ] **Step 5: Commit** — `feat(publishing): ECLYPTE_PUBLISH_PROVIDER=graph - direct Graph API reel publishing with cover + copyright canary`
+- [x] **Step 5: Commit** — `feat(publishing): ECLYPTE_PUBLISH_PROVIDER=graph - direct Graph API reel publishing with cover + copyright canary`
 
 ---
 
@@ -202,15 +204,15 @@ Commit: `feat(publishing): attach licensed library audio to graph-published reel
 - Modify: `api/autopilot.py` (`_auto_send_ready_posts`)
 - Test: `api/test_autopilot.py`
 
-- [ ] **Step 1: Failing tests** — with provider `graph`: a ready post sends only when `now - newest published posted_at >= 86400 / daily_target` seconds (first-ever post sends immediately); at most one graph send per pass (each pass publishes immediately — the queue-backstop check translates to "published today < daily_target"); provider `buffer` behavior byte-identical to today.
+- [x] **Step 1: Failing tests** — with provider `graph`: a ready post sends only when `now - newest published posted_at >= 86400 / daily_target` seconds (first-ever post sends immediately); at most one graph send per pass (each pass publishes immediately — the queue-backstop check translates to "published today < daily_target"); provider `buffer` behavior byte-identical to today.
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement** a pure `graph_slot_due(published_posts, daily_target, now) -> bool` + the provider branch in `_auto_send_ready_posts` (reusing `SEND_LOCK`, backoff, and budget scaffolding; Buffer branch untouched).
+- [x] **Step 3: Implement** a pure `graph_slot_due(published_posts, daily_target, now) -> bool` + the provider branch in `_auto_send_ready_posts` (reusing `SEND_LOCK`, backoff, and budget scaffolding; Buffer branch untouched).
 
-- [ ] **Step 4: Run** — `.venv/bin/python -m pytest api/test_autopilot.py -v` → PASS
+- [x] **Step 4: Run** — `.venv/bin/python -m pytest api/test_autopilot.py -v` → PASS
 
-- [ ] **Step 5: Commit** — `feat(autopilot): slot-spaced auto-publish for the graph provider`
+- [x] **Step 5: Commit** — `feat(autopilot): slot-spaced auto-publish for the graph provider`
 
 ---
 
@@ -220,15 +222,15 @@ Commit: `feat(publishing): attach licensed library audio to graph-published reel
 - Modify: `api/autopilot.py` (`_reconcile_buffer_statuses` naming/dispatch, `_refresh_post_metrics`), `api/app.py` (refresh-status route + fetch closures)
 - Test: `api/test_autopilot.py`, `api/test_publishing.py`
 
-- [ ] **Step 1: Failing tests** — a `published` graph post with `ig_media_id` refreshes metrics through `GraphPublisher.get_insights` folded by the existing `apply_post_metrics` (cadence/cap/retention constants unchanged; absent metrics stay absent); permalink backfill via `get_media`; Buffer posts keep using `get_post_metrics`; a graph post is skipped by the Buffer reconcile pass (nothing to reconcile — no queue).
+- [x] **Step 1: Failing tests** — a `published` graph post with `ig_media_id` refreshes metrics through `GraphPublisher.get_insights` folded by the existing `apply_post_metrics` (cadence/cap/retention constants unchanged; absent metrics stay absent); permalink backfill via `get_media`; Buffer posts keep using `get_post_metrics`; a graph post is skipped by the Buffer reconcile pass (nothing to reconcile — no queue).
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement** — provider dispatch inside the metrics pass keyed on `publish_provider`/`ig_media_id`; insight metric names normalized to the same lowercase keys the Buffer path stores (probe-verified list, e.g. `views, reach, likes, comments, shares, saved`) so `performance_score`'s views→impressions fallback keeps working across providers.
+- [x] **Step 3: Implement** — provider dispatch inside the metrics pass keyed on `publish_provider`/`ig_media_id`; insight metric names normalized to the same lowercase keys the Buffer path stores (probe-verified list, e.g. `views, reach, likes, comments, shares, saved`) so `performance_score`'s views→impressions fallback keeps working across providers.
 
-- [ ] **Step 4: Run** — `.venv/bin/python -m pytest api/test_autopilot.py api/test_publishing.py -v` → PASS
+- [x] **Step 4: Run** — `.venv/bin/python -m pytest api/test_autopilot.py api/test_publishing.py -v` → PASS
 
-- [ ] **Step 5: Commit** — `feat(autopilot): first-party insights metrics for graph-published posts`
+- [x] **Step 5: Commit** — `feat(autopilot): first-party insights metrics for graph-published posts`
 
 ---
 
@@ -243,15 +245,15 @@ Extend the status-refresh pass to re-check `media_audio_type` on graph posts tha
 **Files:**
 - Modify: `web/src/services/eclypteApi.ts` (PublishingPost fields + config response), `web/src/app/dashboard/page.tsx` (send-mode UI: hide queue/schedule modes when provider is graph — send is "post at next slot"), `CLAUDE.md`, `AGENTS.md`, `ARCHITECTURE.md`, `api/COMMANDS.md`
 
-- [ ] **Step 1: Frontend** — surface `publish_provider` from `/v1/publishing/config`; graph mode collapses the ReviewSheet's queue/schedule/now choice into a single "Approve — posts at the next slot" action; copy stays creator-facing (no "Graph API" in UI text). `npm run lint && npm run build` clean.
+- [x] **Step 1: Frontend** — surface `publish_provider` from `/v1/publishing/config`; graph mode collapses the ReviewSheet's queue/schedule/now choice into a single "Approve — posts at the next slot" action; copy stays creator-facing (no "Graph API" in UI text). `npm run lint && npm run build` clean.
 
-- [ ] **Step 2: Docs** — provider setup + token refresh runbook in `api/COMMANDS.md`; CLAUDE.md/AGENTS/ARCHITECTURE reconciliation (publishing section, env vars, healthz booleans, the Buffer-metrics licensing note gains "graph provider removes this constraint for graph-published posts").
+- [x] **Step 2: Docs** — provider setup + token refresh runbook in `api/COMMANDS.md`; CLAUDE.md/AGENTS/ARCHITECTURE reconciliation (publishing section, env vars, healthz booleans, the Buffer-metrics licensing note gains "graph provider removes this constraint for graph-published posts").
 
-- [ ] **Step 3: Full suite** — `.venv/bin/python -m pytest api -v` + web lint/build.
+- [x] **Step 3: Full suite** — `.venv/bin/python -m pytest api -v` + web lint/build.
 
-- [ ] **Step 4: Deploy checklist (operator)** — set the three graph env vars on Railway; flip `ECLYPTE_PUBLISH_PROVIDER=graph`; run the live veto drill (approve one post, watch the canary fields, verify it lands on the account with the right cover/caption; check Account Status stays clean); calendar the 60-day token refresh.
+- [x] **Step 4: Deploy checklist (operator)** — set the three graph env vars on Railway; flip `ECLYPTE_PUBLISH_PROVIDER=graph`; run the live veto drill (approve one post, watch the canary fields, verify it lands on the account with the right cover/caption; check Account Status stays clean); calendar the 60-day token refresh.
 
-- [ ] **Step 5: Commit** — `feat(publishing): graph provider frontend + runbook`
+- [x] **Step 5: Commit** — `feat(publishing): graph provider frontend + runbook`
 
 ---
 

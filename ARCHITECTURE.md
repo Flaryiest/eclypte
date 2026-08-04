@@ -45,7 +45,7 @@ changing bundled worker code.
 
 **Backing services:** Cloudflare **R2** (object storage, zero egress — required), **Postgres**
 (optional — run manifests/events/progress), **Redis** (optional — live run streaming), **Clerk**
-(auth), **Buffer** (Instagram publishing), **OpenAI** (agent planning + captions).
+(auth), **Buffer** (Instagram publishing; default) or the **Instagram Graph API** directly (`ECLYPTE_PUBLISH_PROVIDER=graph` — immediate slot-spaced publishes, cover frames, a copyright canary, first-party insights; `api/instagram_graph.py`), **OpenAI** (agent planning + captions).
 
 ---
 

@@ -196,6 +196,32 @@ Publishing is review-gated in the dashboard Home feed (`/dashboard`; the old
 `public/publishing/` and Buffer posts are created only when a user queues or
 schedules a package.
 
+Direct Graph API publishing (`ECLYPTE_PUBLISH_PROVIDER=graph`): replaces the
+Buffer send step with a first-party Instagram Graph API publish — immediate
+posting (autopilot slot spacing supplies the cadence: `86400/daily_target`
+seconds between publishes), a custom cover from the render poster, a
+`copyright_check_status` canary (matches veto the send and stamp
+`copyright_status="matches_found"` on the post), and first-party insights
+metrics for graph-published posts. Default stays `buffer`.
+
+One-time setup (operator):
+1. Create a Meta app; connect the Instagram professional account (Creator
+   type — Business accounts get a restricted music library) via Facebook
+   Login with `instagram_basic`, `instagram_content_publish`,
+   `instagram_manage_insights`.
+2. Exchange for a long-lived (60-day) token and calendar the refresh:
+   `GET /oauth/access_token?grant_type=fb_exchange_token&client_id=...&client_secret=...&fb_exchange_token=<short-lived>`.
+3. Set on Railway: `ECLYPTE_IG_USER_ID`, `ECLYPTE_IG_ACCESS_TOKEN`
+   (optionally `ECLYPTE_GRAPH_API_BASE`, default `https://graph.facebook.com/v23.0`),
+   then `ECLYPTE_PUBLISH_PROVIDER=graph`. `/healthz` reports
+   `graph_publishing_configured`; `/v1/publishing/config` reports
+   `publish_provider`.
+4. Run the Task 0 probes from
+   `docs/superpowers/plans/2026-08-04-graph-publishing.md` (Audio API shape,
+   container `copyright_check_status` timing, `cover_url` acceptance) and the
+   live veto drill: approve one post, watch `copyright_status`, verify the
+   reel lands with the right cover/caption.
+
 Autopilot (review-gated content loop): set `ECLYPTE_AUTOPILOT=1` on the API to
 run the background tick loop (`ECLYPTE_AUTOPILOT_INTERVAL_SEC`, default 300).
 Current per-edit defaults: `reels_9_16` format (native 1080x1920 fill-frame —
