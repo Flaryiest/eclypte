@@ -23,6 +23,7 @@ from api.publishing import (
     apply_buffer_status,
     apply_post_metrics,
     create_publish_post_for_render,
+    resolve_publish_provider_env,
 )
 from api.storage.models import AutopilotItem, AutopilotState, PublishingPostRecord, RunManifest
 from api.storage.refs import FileVersionRef, RunRef
@@ -34,9 +35,10 @@ logger = logging.getLogger("eclypte.autopilot")
 TRIM_TARGET_SEC = 25.0
 TRIM_MIN_SEC = 20.0
 TRIM_MAX_SEC = 30.0
-# Begin a section-anchored window this many seconds before the section starts, so a
-# chorus-anchored reel captures the build-in rather than cutting in on the downbeat.
-CHORUS_LEAD_IN_SEC = 5.0
+# Begin a section-anchored window this many seconds before the section starts.
+# Kept short deliberately: the first ~2s decide stay-or-scroll, so the reel
+# must not open on a long pre-chorus build.
+CHORUS_LEAD_IN_SEC = 1.5
 COMBO_WINDOW_BUCKET_SEC = 5
 MAX_CONSECUTIVE_FAILURES = 3
 MAX_FINISHED_ITEMS = 50
@@ -88,6 +90,7 @@ class StartEdit(Protocol):
         creative_brief: str,
         title: str,
         export_options: dict[str, object] | None,
+        edit_focus: str = "full_source",
     ) -> str: ...
 
 
@@ -107,6 +110,12 @@ class FetchPostStatus(Protocol):
     def __call__(self, user_id: str, *, buffer_post_id: str) -> "BufferPostResult": ...
 
 
+class FetchGraphMetrics(Protocol):
+    def __call__(
+        self, user_id: str, *, ig_media_id: str
+    ) -> tuple[dict[str, float], str | None]: ...
+
+
 def combo_key(
     video_file_id: str,
     song_file_id: str,
@@ -120,6 +129,21 @@ def combo_key(
 
 def pair_key(video_file_id: str, song_file_id: str) -> str:
     return f"{video_file_id}::{song_file_id}"
+
+
+# A candidate trim window overlapping a used window of the same pair by more
+# than this fraction (of the shorter window) is a near-duplicate reel: same
+# song section, ~same footage. Near-dupes are an enforcement risk, not just
+# waste.
+MAX_WINDOW_OVERLAP_FRAC = 0.4
+
+
+def window_overlap_frac(a: tuple[float, float], b: tuple[float, float]) -> float:
+    overlap = min(a[1], b[1]) - max(a[0], b[0])
+    shorter = min(a[1] - a[0], b[1] - b[0])
+    if overlap <= 0 or shorter <= 0:
+        return 0.0
+    return overlap / shorter
 
 
 @dataclass(frozen=True)
@@ -295,6 +319,7 @@ def run_autopilot_tick(
     send_ready_post: SendReadyPost | None = None,
     fetch_post_metrics: FetchPostMetrics | None = None,
     fetch_post_status: FetchPostStatus | None = None,
+    fetch_graph_metrics: FetchGraphMetrics | None = None,
     now: datetime | None = None,
 ) -> AutopilotState:
     with STATE_LOCK:
@@ -330,6 +355,7 @@ def run_autopilot_tick(
         repo,
         user_id=user_id,
         fetch_post_metrics=fetch_post_metrics,
+        fetch_graph_metrics=fetch_graph_metrics,
         now=now or datetime.now(timezone.utc),
     )
     return state
@@ -354,6 +380,7 @@ def _run_tick_locked(
 
     items = list(state.items)
     used_combos = list(state.used_combos)
+    used_windows = {key: [list(w) for w in ws] for key, ws in state.used_windows.items()}
     packaged_counts = dict(state.packaged_counts)
     consecutive_failures = state.consecutive_failures
     exhausted_pairs = list(state.exhausted_pairs)
@@ -411,12 +438,20 @@ def _run_tick_locked(
         windows = select_trim_windows(analysis)
         if not windows:
             return fail_item(item, "music analysis produced no usable trim window")
+        pair = pair_key(item.source_video_file_id, item.song_file_id or "")
+        pair_windows = [
+            (float(w[0]), float(w[1])) for w in used_windows.get(pair, [])
+        ]
         window = next(
             (
                 candidate
                 for candidate in windows
                 if combo_key(item.source_video_file_id, item.song_file_id, candidate)
                 not in used_combos
+                and all(
+                    window_overlap_frac(candidate, used) <= MAX_WINDOW_OVERLAP_FRAC
+                    for used in pair_windows
+                )
             ),
             None,
         )
@@ -432,7 +467,9 @@ def _run_tick_locked(
             )
 
         export_options: dict[str, object] = {
-            "format": "reels_cinematic",
+            # Fill-frame: letterboxed reels sit on Instagram's official
+            # "shown less often" list and leave ~24% picture for a 2.39:1 film.
+            "format": "reels_9_16",
             "audio_start_sec": window[0],
             "audio_end_sec": window[1],
         }
@@ -449,12 +486,16 @@ def _run_tick_locked(
                 creative_brief=item.creative_brief,
                 title=title,
                 export_options=export_options,
+                # Autopilot reels edit one scene: single-moment edits are the
+                # niche's winning format and far more sendable than a montage.
+                edit_focus="moment",
             )
         except Exception as exc:
             return fail_item(item, f"failed to start edit: {exc}")
         used_combos.append(
             combo_key(item.source_video_file_id, item.song_file_id, window)
         )
+        used_windows.setdefault(pair, []).append([window[0], window[1]])
         return item.model_copy(
             update={
                 "status": "editing",
@@ -563,6 +604,7 @@ def _run_tick_locked(
                     used_combos = [c for c in used_combos if not c.startswith(prefix)]
                     key = pair_key(pick.video["file_id"], pick.song["file_id"])
                     exhausted_pairs = [k for k in exhausted_pairs if k != key]
+                    used_windows.pop(key, None)
                 last_paired_at[pick.video["file_id"]] = now_iso
                 last_paired_at[pick.song["file_id"]] = now_iso
                 items.append(
@@ -607,6 +649,7 @@ def _run_tick_locked(
         update={
             "items": _prune_items(items),
             "used_combos": used_combos,
+            "used_windows": used_windows,
             "packaged_counts": _prune_counts(packaged_counts, today),
             "consecutive_failures": consecutive_failures,
             "halted_reason": halted_reason,
@@ -717,9 +760,44 @@ def _auto_send_ready_posts(
         or state.halted_reason is not None
     ):
         return
+    try:
+        provider = resolve_publish_provider_env()
+    except ValueError as exc:
+        logger.warning("auto-send skipped: %s", exc)
+        return
     if not SEND_LOCK.acquire(blocking=False):
         return
     try:
+        if provider == "graph":
+            # Graph publishes are immediate — there is no Buffer queue to
+            # absorb pacing, so this pass IS the scheduler: at most one
+            # publish per open slot (86400/daily_target spacing).
+            published = repo.list_publishing_posts(user_id, status="published")
+            if not graph_slot_due(
+                published, daily_target=state.daily_target, now=now
+            ):
+                return
+            attempts = 0
+            for post in repo.list_publishing_posts(user_id, status="ready"):
+                if attempts >= state.daily_target:
+                    # A systemic outage over a big ready backlog must not burn
+                    # a media copy + Graph call per ready post per pass.
+                    break
+                if not post.auto_created:
+                    continue
+                if post.last_error and _within_backoff(post.updated_at, now):
+                    continue
+                attempts += 1
+                try:
+                    result = send_ready_post(user_id, post=post)
+                except Exception:  # noqa: BLE001 — sends must never break the tick
+                    logger.warning(
+                        "graph auto-send crashed for post %s", post.post_id, exc_info=True
+                    )
+                    continue
+                if result is not None and result.status == "published":
+                    break  # the slot is filled; the next opens after the spacing
+            return
         # Budget both ceilings on every send, not once per pass: Buffer's
         # queue must never exceed 2x the daily target, and a single pass must
         # never queue more than daily_target reels — a first pass over an
@@ -762,6 +840,37 @@ def _auto_send_ready_posts(
         SEND_LOCK.release()
 
 
+# Graph publishing has no remote queue: the auto-send pass IS the scheduler,
+# spacing publishes evenly across the day.
+GRAPH_SLOT_SECONDS_PER_DAY = 86400.0
+
+
+def graph_slot_due(
+    published_posts: list[PublishingPostRecord],
+    *,
+    daily_target: int,
+    now: datetime,
+) -> bool:
+    """True when enough time has passed since the newest published post to
+    open the next posting slot (86400/daily_target spacing). No published
+    posts (or an unparsable stamp) means the first slot is open."""
+    latest = ""
+    for post in published_posts:
+        stamp = post.posted_at or ""
+        if stamp > latest:
+            latest = stamp
+    if not latest:
+        return True
+    try:
+        stamped = datetime.strptime(latest, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc
+        )
+    except ValueError:
+        return True
+    spacing = GRAPH_SLOT_SECONDS_PER_DAY / max(1, daily_target)
+    return (now - stamped).total_seconds() >= spacing
+
+
 def _within_backoff(updated_at: str, now_dt: datetime) -> bool:
     try:
         stamped = datetime.strptime(updated_at, "%Y-%m-%dT%H:%M:%SZ").replace(
@@ -777,15 +886,18 @@ def _refresh_post_metrics(
     *,
     user_id: str,
     fetch_post_metrics: FetchPostMetrics | None,
+    fetch_graph_metrics: FetchGraphMetrics | None = None,
     now: datetime,
 ) -> None:
     """Pull per-post performance for published posts on a slow cadence.
 
-    Runs outside STATE_LOCK and regardless of the autonomy flags — metrics
-    are wanted in review-gated mode too. Best-effort by contract: failures
-    log and stamp the check time (so the next tick doesn't hammer) but never
-    touch last_error (it drives the auto-send backoff) or the halt."""
-    if fetch_post_metrics is None:
+    Buffer-published posts read through Buffer's metrics; graph-published
+    posts read first-party Graph insights. Runs outside STATE_LOCK and
+    regardless of the autonomy flags — metrics are wanted in review-gated
+    mode too. Best-effort by contract: failures log and stamp the check time
+    (so the next tick doesn't hammer) but never touch last_error (it drives
+    the auto-send backoff) or the halt."""
+    if fetch_post_metrics is None and fetch_graph_metrics is None:
         return
     if not METRICS_LOCK.acquire(blocking=False):
         return
@@ -795,7 +907,11 @@ def _refresh_post_metrics(
         for post in repo.list_publishing_posts(user_id, status="published"):
             if refreshed >= METRICS_MAX_PER_PASS:
                 break
-            if not post.buffer_post_id:
+            is_graph = post.provider == "graph" and bool(post.ig_media_id)
+            if is_graph:
+                if fetch_graph_metrics is None:
+                    continue
+            elif not post.buffer_post_id or fetch_post_metrics is None:
                 continue
             if post.metrics_checked_at and not _older_than(
                 post.metrics_checked_at,
@@ -813,9 +929,14 @@ def _refresh_post_metrics(
                 continue
             refreshed += 1
             try:
-                metrics, updated_at = fetch_post_metrics(
-                    user_id, buffer_post_id=post.buffer_post_id
-                )
+                if is_graph:
+                    metrics, updated_at = fetch_graph_metrics(
+                        user_id, ig_media_id=post.ig_media_id
+                    )
+                else:
+                    metrics, updated_at = fetch_post_metrics(
+                        user_id, buffer_post_id=post.buffer_post_id
+                    )
             except Exception:  # noqa: BLE001 — metrics must never break the tick
                 logger.warning(
                     "metrics fetch failed for post %s", post.post_id, exc_info=True

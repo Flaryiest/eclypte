@@ -38,7 +38,7 @@ import {
     PublishingPost,
     RunStreamMessage,
 } from "@/services/eclypteApi"
-import { useAssets, useAutopilot, useEditJobs, usePublishingPosts } from "@/stores/dashboardResources"
+import { useAssets, useAutopilot, useEditJobs, usePublishingConfig, usePublishingPosts } from "@/stores/dashboardResources"
 
 const POLL_INTERVAL_MS = 25000
 const POSTED_STRIP_LIMIT = 10
@@ -59,6 +59,7 @@ export default function HomePage() {
     const autopilot = autopilotResource.data ?? null
     const setAutopilot = autopilotResource.set
     const postsResource = usePublishingPosts(api, { status: "all" })
+    const publishingConfig = usePublishingConfig(api)
     const posts = useMemo(() => postsResource.data ?? [], [postsResource.data])
     const setPosts = postsResource.set
     const jobsResource = useEditJobs(api)
@@ -497,6 +498,7 @@ export default function HomePage() {
                     api={api}
                     post={reviewPost}
                     posterUrl={postPosterUrl(reviewPost)}
+                    directPublish={publishingConfig.data?.publish_provider === "graph"}
                     onClose={() => setReviewPostId(null)}
                     replacePost={replacePost}
                 />
@@ -625,12 +627,16 @@ function ReviewSheet({
     api,
     post,
     posterUrl,
+    directPublish = false,
     onClose,
     replacePost,
 }: {
     api: EclypteApiClient
     post: PublishingPost
     posterUrl?: string
+    /** True when approved posts publish straight to Instagram (no queue or
+     * scheduling — the send happens immediately). */
+    directPublish?: boolean
     onClose: () => void
     replacePost: (next: PublishingPost) => void
 }) {
@@ -701,7 +707,13 @@ function ReviewSheet({
                 scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null,
             })
             replacePost(sent)
-            toast(mode === "now" ? "Posting to Instagram" : mode === "queue" ? "Added to the posting queue" : "Scheduled")
+            toast(
+                directPublish || mode === "now"
+                    ? "Posting to Instagram"
+                    : mode === "queue"
+                        ? "Added to the posting queue"
+                        : "Scheduled",
+            )
             onClose()
         })
 
@@ -726,14 +738,18 @@ function ReviewSheet({
                 canSend ? (
                     <>
                         <button className={styles.primaryButton} type="button" onClick={() => send("now")} disabled={busy !== null}>
-                            {busy === "now" ? <Spinner onInk /> : null} Post now
+                            {busy === "now" ? <Spinner onInk /> : null} {directPublish ? "Post to Instagram" : "Post now"}
                         </button>
-                        <button className={styles.secondaryButton} type="button" onClick={() => send("schedule")} disabled={busy !== null}>
-                            {busy === "schedule" ? <Spinner /> : null} Schedule
-                        </button>
-                        <button className={styles.secondaryButton} type="button" onClick={() => send("queue")} disabled={busy !== null}>
-                            {busy === "queue" ? <Spinner /> : null} Add to queue
-                        </button>
+                        {!directPublish && (
+                            <>
+                                <button className={styles.secondaryButton} type="button" onClick={() => send("schedule")} disabled={busy !== null}>
+                                    {busy === "schedule" ? <Spinner /> : null} Schedule
+                                </button>
+                                <button className={styles.secondaryButton} type="button" onClick={() => send("queue")} disabled={busy !== null}>
+                                    {busy === "queue" ? <Spinner /> : null} Add to queue
+                                </button>
+                            </>
+                        )}
                         <span className={styles.sheetActionsRight}>
                             <button
                                 className={styles.dangerButton}

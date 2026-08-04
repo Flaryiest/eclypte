@@ -5,6 +5,11 @@ from pydantic import BaseModel, ConfigDict, Field
 SCHEMA_VERSION = 1
 
 TAIL_FADE_SEC = 2.5
+# Reels at or under this length are loop-optimized: replays count as views,
+# and a visible fade-to-black breaks the loop illusion. Matches the agent's
+# SHORT_EDIT_MAX_SEC threshold.
+SHORT_REEL_MAX_SEC = 40.0
+SHORT_REEL_AUDIO_FADE_SEC = 0.3
 
 # speed_ramp contract shared by the adapter (source-window sizing) and both
 # renderers (re-timing): 1x first half, SPEED_RAMP_END x second half, so a
@@ -13,12 +18,19 @@ SPEED_RAMP_END = 1.5
 SPEED_RAMP_SOURCE_FACTOR = 0.5 + 0.5 * SPEED_RAMP_END
 
 
-def tail_fade_for(duration_sec: float) -> float:
-    """End-of-reel audio+video fade length, clamped so it never exceeds a third
-    of the reel (so very short edits still keep most of their content)."""
+def tail_fades_for(duration_sec: float) -> tuple[float, float]:
+    """(audio_fade_sec, video_fade_sec) for the end of the reel.
+
+    Short reels get a click-prevention audio fade only — the picture hard-ends
+    so the reel loops back into its opening. Long form keeps the classic
+    audio+video tail fade, clamped to a third of the piece.
+    """
     if duration_sec <= 0:
-        return 0.0
-    return round(min(TAIL_FADE_SEC, duration_sec / 3.0), 3)
+        return 0.0, 0.0
+    if duration_sec <= SHORT_REEL_MAX_SEC:
+        return SHORT_REEL_AUDIO_FADE_SEC, 0.0
+    fade = round(min(TAIL_FADE_SEC, duration_sec / 3.0), 3)
+    return fade, fade
 
 TransitionType = Literal["cut", "crossfade", "whip", "flash"]
 EffectType = Literal["freeze", "speed_ramp", "hold", "punch_in"]

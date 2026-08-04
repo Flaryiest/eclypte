@@ -407,6 +407,35 @@ def _format_source_context(source_duration_sec: float) -> str:
     )
 
 
+def _format_moment_context(source_duration_sec: float) -> str:
+    """The moment-focused replacement for `_format_source_context`.
+
+    Deliberately phrased as an override: the span-the-full-source rule lives
+    both in the baseline system prompt and in stored prompt versions, so this
+    per-run block must outrank any of them."""
+    d = float(source_duration_sec)
+    return (
+        f"Source video: {d:.0f} seconds long.\n"
+        f"FOCUSED MOMENT EDIT — this run overrides any instruction (including in "
+        f"the system prompt) to span the full source: build the entire reel around "
+        f"ONE sequence, scene, or character arc instead of covering the film. Query "
+        f"for the source's single most iconic, high-impact stretch (a fight, a "
+        f"transformation, an entrance, an emotional peak), then draw every shot "
+        f"from that stretch and its immediate surroundings, in order. Dwelling is "
+        f"the point: stay with the moment, let consecutive shots continue each "
+        f"other, and make the reel feel like the best scene in the film rather "
+        f"than a trailer.\n"
+        f"The hook still rules: open on the single hardest frame of the chosen "
+        f"stretch, first cut within ~1.5s.\n"
+        f"IMPORTANT: the source's first minutes (logos, title cards, opening "
+        f"credits) and final stretch (end credits, often over a COLORED background) "
+        f"remain OFF-LIMITS. Every source_timestamp must come from a query_clips "
+        f"result (a 1-2s nudge is fine) — never invented, and never near either "
+        f"end of the source unless the query result there is unmistakably story "
+        f"content."
+    )
+
+
 def _create(
     client: OpenAI,
     *,
@@ -439,6 +468,7 @@ def run_synthesis_loop(
     source_duration_sec: float | None = None,
     style_profile: dict | None = None,
     lyrics: dict | None = None,
+    edit_focus: str = "full_source",
 ) -> list[dict]:
     """
     Runs an LLM agent loop to construct an AMV timeline based on instructions.
@@ -476,7 +506,10 @@ def run_synthesis_loop(
         if lyrics_block:
             context_blocks.append(lyrics_block)
     if source_duration_sec is not None and float(source_duration_sec) > 0:
-        context_blocks.append(_format_source_context(source_duration_sec))
+        if edit_focus == "moment":
+            context_blocks.append(_format_moment_context(source_duration_sec))
+        else:
+            context_blocks.append(_format_source_context(source_duration_sec))
     song_duration = float((song or {}).get("source", {}).get("duration_sec", 0.0) or 0.0)
     if 0.0 < song_duration <= SHORT_EDIT_MAX_SEC:
         context_blocks.append(_format_short_edit_context(song_duration))

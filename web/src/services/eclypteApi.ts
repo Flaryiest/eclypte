@@ -115,7 +115,11 @@ export type PublishingPost = {
     render_url?: string | null
     collection_slug: string
     platform: string
+    /** Which publish path sent (or will send) the post: "buffer" | "graph". */
     provider: string
+    ig_media_id?: string | null
+    /** Copyright canary from the Graph reel container: "clean" | "matches_found". */
+    copyright_status?: string | null
     generated_caption: string
     caption: string
     hashtags: string[]
@@ -149,6 +153,28 @@ export type PublishingPost = {
     song_file_id: string | null
     created_at: string
     updated_at: string
+}
+
+export type PublishingConfig = {
+    buffer_api_key_configured: boolean
+    buffer_channel_id_configured: boolean
+    public_media_base_url_configured: boolean
+    openai_api_key_configured: boolean
+    caption_model: string
+    buffer_channel: {
+        id: string
+        name: string | null
+        service: string | null
+        display_name: string | null
+        is_disconnected: boolean | null
+        is_locked: boolean | null
+        external_link: string | null
+        last_error: string | null
+    } | null
+    /** Which path sends approved posts: "buffer" (queue/schedule modes) or
+     * "graph" (immediate publish; autopilot slots supply the cadence). */
+    publish_provider: "buffer" | "graph" | string
+    graph_configured: boolean
 }
 
 export type AutopilotItemStatus =
@@ -270,12 +296,17 @@ export type EditJobStatus = {
     updated_at: string
 }
 
+export type EditFocus = "full_source" | "moment"
+
 export type EditJobRequest = {
     audio: FileVersionInput
     sourceVideo: FileVersionInput
     creativeBrief?: string
     title?: string
     exportOptions?: ExportOptions
+    /** "moment" briefs the agent to edit one scene instead of spanning the
+     * whole film (autopilot's default); omitted means full-source. */
+    editFocus?: EditFocus
 }
 
 export type DownloadUrlResponse = {
@@ -341,6 +372,10 @@ export class EclypteApiClient {
         }
         const query = params.size ? `?${params.toString()}` : ""
         return this.request<AssetSummary[]>(`/v1/assets${query}`, { signal })
+    }
+
+    async getPublishingConfig(signal?: AbortSignal) {
+        return this.request<PublishingConfig>("/v1/publishing/config", { signal })
     }
 
     async listPublishingPosts(
@@ -560,6 +595,7 @@ export class EclypteApiClient {
                 creative_brief: input.creativeBrief,
                 title: input.title,
                 export_options: serializeExportOptions(input.exportOptions),
+                edit_focus: input.editFocus,
             }),
             signal,
         })

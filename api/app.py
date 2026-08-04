@@ -28,6 +28,13 @@ from api.storage.factory import (
 from api.prototyping.edit.synthesis.system_prompt import (
     SYSTEM_PROMPT as DEFAULT_SYNTHESIS_PROMPT,
 )
+from api.instagram_graph import (
+    GRAPH_INSIGHT_METRICS,
+    CopyrightBlockedError,
+    GraphApiError,
+    GraphConfigError,
+    GraphPublisher,
+)
 from api.publishing import (
     BufferClient,
     BufferClientError,
@@ -36,6 +43,7 @@ from api.publishing import (
     BufferConfigError,
     PostAlreadySentError,
     SendToBufferError,
+    SendToGraphError,
     apply_buffer_status,
     apply_post_metrics,
     create_publish_post_for_render,
@@ -43,7 +51,9 @@ from api.publishing import (
     optional_bool,
     optional_str,
     performance_score,
+    resolve_publish_provider_env,
     send_post_to_buffer,
+    send_post_via_graph,
 )
 from api.storage.models import (
     ArtifactKind,
@@ -158,6 +168,7 @@ class TimelineRequest(BaseModel):
     creative_brief: str = ""
     max_duration_sec: float | None = Field(default=None, gt=0)
     export_options: ExportOptionsInput | None = None
+    edit_focus: Literal["full_source", "moment"] = "full_source"
 
 
 class RenderRequest(BaseModel):
@@ -172,6 +183,9 @@ class EditJobRequest(BaseModel):
     creative_brief: str = ""
     title: str | None = None
     export_options: ExportOptionsInput | None = None
+    # "moment" swaps the agent's span-the-full-source guidance for a
+    # single-scene brief (autopilot's default); manual composes span.
+    edit_focus: Literal["full_source", "moment"] = "full_source"
 
 
 class InternalProgressRequest(BaseModel):
@@ -221,6 +235,10 @@ class PublishingConfigResponse(BaseModel):
     openai_api_key_configured: bool
     caption_model: str
     buffer_channel: PublishingBufferChannelStatus | None = None
+    # Which path sends approved posts ("buffer" | "graph") and whether the
+    # graph provider's env is complete.
+    publish_provider: str = "buffer"
+    graph_configured: bool = False
 
 
 class EditJobStage(BaseModel):
@@ -342,6 +360,7 @@ def create_app(
     run_broadcaster: RunUpdateBroadcaster | None = None,
     workflow_runner: WorkflowRunner | None = None,
     buffer_client: BufferClient | None = None,
+    graph_publisher: GraphPublisher | None = None,
     cors_origins: list[str] | None = None,
 ) -> FastAPI:
     @asynccontextmanager
@@ -404,6 +423,26 @@ def create_app(
             return BufferClient.from_env()
         except BufferClientError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    def resolve_graph_publisher() -> GraphPublisher:
+        if graph_publisher is not None:
+            return graph_publisher
+        try:
+            return GraphPublisher.from_env()
+        except GraphConfigError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    def active_publish_provider() -> str:
+        try:
+            return resolve_publish_provider_env()
+        except ValueError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    def graph_publishing_configured() -> bool:
+        return bool(
+            os.environ.get("ECLYPTE_IG_USER_ID")
+            and os.environ.get("ECLYPTE_IG_ACCESS_TOKEN")
+        )
 
     def channel_status_response(
         channel: object,
@@ -727,6 +766,7 @@ def create_app(
                 "source_video_file_id": request.source_video.file_id,
                 "source_video_version_id": request.source_video.version_id,
                 "creative_brief": request.creative_brief,
+                "edit_focus": request.edit_focus,
                 **export_options.as_run_inputs(),
             },
             EDIT_STAGE_ORDER,
@@ -740,6 +780,7 @@ def create_app(
             creative_brief=request.creative_brief,
             title=title,
             export_options=export_options.as_payload(),
+            edit_focus=request.edit_focus,
         )
         return edit_status_from_run(repo, uid, run)
 
@@ -788,6 +829,7 @@ def create_app(
             creative_brief: str,
             title: str,
             export_options: dict[str, object] | None,
+            edit_focus: str = "full_source",
         ) -> str:
             request = EditJobRequest(
                 audio=FileVersionInput(**audio),
@@ -797,12 +839,43 @@ def create_app(
                 export_options=(
                     ExportOptionsInput(**export_options) if export_options else None
                 ),
+                edit_focus="moment" if edit_focus == "moment" else "full_source",
             )
             job = start_edit_job(request=request, schedule=schedule, repo=repo, uid=uid)
             return job.run_id
 
         def send_ready_post(uid: str, *, post: PublishingPostRecord) -> PublishingPostRecord:
             try:
+                if resolve_publish_provider_env() == "graph":
+                    try:
+                        return send_post_via_graph(
+                            repo,
+                            store=store,
+                            post=post,
+                            publisher=graph_publisher or GraphPublisher.from_env(),
+                        )
+                    except CopyrightBlockedError as exc:
+                        # Stamp last_error so auto-send backs off instead of
+                        # re-vetoing the same post every pass; copyright_status
+                        # is already on the record for the review card.
+                        logger.warning(
+                            "autopilot graph send vetoed for post %s: %s", post.post_id, exc
+                        )
+                        fresh = repo.load_publishing_post(user_id=uid, post_id=post.post_id)
+                        return repo.save_publishing_post(
+                            fresh.model_copy(
+                                update={"last_error": str(exc), "updated_at": utc_now()}
+                            )
+                        )
+                    except SendToGraphError as exc:
+                        logger.warning(
+                            "autopilot graph send failed for post %s: %s", post.post_id, exc
+                        )
+                        return repo.save_publishing_post(
+                            exc.record.model_copy(
+                                update={"last_error": str(exc), "updated_at": utc_now()}
+                            )
+                        )
                 return send_post_to_buffer(repo, store=store, post=post, mode="queue")
             except PostAlreadySentError:
                 # Another sender won the race; the stored record is already
@@ -835,12 +908,20 @@ def create_app(
         def fetch_post_status(uid: str, *, buffer_post_id: str) -> BufferPostResult:
             return resolve_buffer_client().get_post(post_id=buffer_post_id)
 
+        def fetch_graph_metrics(
+            uid: str, *, ig_media_id: str
+        ) -> tuple[dict[str, float], str | None]:
+            publisher = graph_publisher or GraphPublisher.from_env()
+            # Graph insights carry no ingestion stamp — updated_at stays None.
+            return publisher.get_insights(ig_media_id, metrics=GRAPH_INSIGHT_METRICS), None
+
         return (
             start_music_analysis,
             start_edit,
             send_ready_post,
             fetch_post_metrics,
             fetch_post_status,
+            fetch_graph_metrics,
         )
 
     def autopilot_status_response(state) -> AutopilotStatusResponse:
@@ -874,7 +955,7 @@ def create_app(
         resolved_store = store or get_object_store(required=False)
         if resolved_store is None:
             return
-        start_music_analysis, start_edit, send_ready_post, fetch_post_metrics, fetch_post_status = autopilot_callables(
+        start_music_analysis, start_edit, send_ready_post, fetch_post_metrics, fetch_post_status, fetch_graph_metrics = autopilot_callables(
             repo, _spawn_workflow, resolved_store
         )
         for uid in repo.list_autopilot_user_ids():
@@ -887,6 +968,7 @@ def create_app(
                     send_ready_post=send_ready_post,
                     fetch_post_metrics=fetch_post_metrics,
                     fetch_post_status=fetch_post_status,
+                    fetch_graph_metrics=fetch_graph_metrics,
                 )
             except Exception:
                 logger.exception("autopilot tick failed for user %s", uid)
@@ -918,6 +1000,7 @@ def create_app(
                 and os.environ.get("ECLYPTE_INTERNAL_PROGRESS_TOKEN")
             ),
             "autopilot_loop_configured": autopilot_loop_configured(),
+            "graph_publishing_configured": graph_publishing_configured(),
         }
 
     @app.post("/internal/progress")
@@ -1146,6 +1229,8 @@ def create_app(
             openai_api_key_configured=bool(os.environ.get("OPENAI_API_KEY")),
             caption_model=os.environ.get("ECLYPTE_CAPTION_MODEL", "gpt-5.4-mini"),
             buffer_channel=channel,
+            publish_provider=active_publish_provider(),
+            graph_configured=graph_publishing_configured(),
         )
 
     def publishing_post_view(
@@ -1329,6 +1414,35 @@ def create_app(
         post = publishing_post_or_404(repo, uid, post_id)
         if post.status == "canceled":
             raise HTTPException(status_code=400, detail="publishing post is canceled")
+        if active_publish_provider() == "graph":
+            # Graph publish is immediate: mode/scheduling do not apply.
+            try:
+                saved = send_post_via_graph(
+                    repo,
+                    store=resolved_store,
+                    post=post,
+                    publisher=resolve_graph_publisher(),
+                )
+            except (BufferConfigError, GraphConfigError) as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+            except PostAlreadySentError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except CopyrightBlockedError as exc:
+                # The human veto: the post stays ready with copyright_status
+                # stamped so the review card can surface it.
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except SendToGraphError as exc:
+                repo.save_publishing_post(
+                    exc.record.model_copy(
+                        update={
+                            "status": "failed",
+                            "last_error": str(exc),
+                            "updated_at": utc_now(),
+                        }
+                    )
+                )
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            return publishing_post_view(saved, uid, resolved_store)
         try:
             saved = send_post_to_buffer(
                 repo,
@@ -1368,6 +1482,43 @@ def create_app(
         uid: str = Depends(user_id),
     ) -> PublishingPostView:
         post = publishing_post_or_404(repo, uid, post_id)
+        if post.provider == "graph" and post.ig_media_id:
+            publisher = resolve_graph_publisher()
+            saved = post
+            try:
+                media = publisher.get_media(post.ig_media_id, fields="permalink")
+                permalink = optional_str(media.get("permalink"))
+                if permalink and permalink != post.post_url:
+                    saved = repo.save_publishing_post(
+                        post.model_copy(
+                            update={"post_url": permalink, "updated_at": utc_now()}
+                        )
+                    )
+            except GraphApiError as exc:
+                logger.warning(
+                    "graph media lookup failed for post %s: %s", post.post_id, exc
+                )
+            if saved.status == "published":
+                try:
+                    metrics = publisher.get_insights(
+                        post.ig_media_id, metrics=GRAPH_INSIGHT_METRICS
+                    )
+                    saved = repo.save_publishing_post(
+                        apply_post_metrics(
+                            saved,
+                            metrics=metrics,
+                            metrics_updated_at=None,
+                            now=utc_now(),
+                        )
+                    )
+                except GraphApiError as exc:
+                    # Metrics are decoration here — never last_error, never a 5xx.
+                    logger.warning(
+                        "graph insights failed during refresh for post %s: %s",
+                        post.post_id,
+                        exc,
+                    )
+            return publishing_post_view(saved, uid, resolved_store)
         if not post.buffer_post_id:
             return publishing_post_view(post, uid, resolved_store)
         client = resolve_buffer_client()
@@ -1564,7 +1715,7 @@ def create_app(
         uid: str = Depends(user_id),
         resolved_store: ObjectStore = Depends(resolve_store),
     ) -> AutopilotStatusResponse:
-        start_music_analysis, start_edit, send_ready_post, fetch_post_metrics, fetch_post_status = autopilot_callables(
+        start_music_analysis, start_edit, send_ready_post, fetch_post_metrics, fetch_post_status, fetch_graph_metrics = autopilot_callables(
             repo, background_tasks.add_task, resolved_store
         )
         state = run_autopilot_tick(
@@ -1575,6 +1726,7 @@ def create_app(
             send_ready_post=send_ready_post,
             fetch_post_metrics=fetch_post_metrics,
             fetch_post_status=fetch_post_status,
+            fetch_graph_metrics=fetch_graph_metrics,
         )
         return autopilot_status_response(state)
 
@@ -1681,6 +1833,7 @@ def create_app(
                 "source_video_version_id": request.source_video.version_id,
                 "music_analysis_version_id": request.music_analysis.version_id,
                 "video_analysis_version_id": request.video_analysis.version_id,
+                "edit_focus": request.edit_focus,
                 **export_options.as_run_inputs(),
             },
             ["ensure_clip_index", "agent_plan_timeline", "publish_timeline"],
@@ -1696,6 +1849,7 @@ def create_app(
             creative_brief=request.creative_brief,
             max_duration_sec=request.max_duration_sec,
             export_options=export_options.as_payload(),
+            edit_focus=request.edit_focus,
         )
         return run
 
@@ -1849,6 +2003,9 @@ def create_app(
                 creative_brief=run.inputs.get("creative_brief", ""),
                 title=run.inputs.get("title"),
                 export_options=ExportOptionsInput(**export_options) if export_options else None,
+                edit_focus=(
+                    "moment" if run.inputs.get("edit_focus") == "moment" else "full_source"
+                ),
             ),
             schedule=background_tasks.add_task,
             repo=repo,

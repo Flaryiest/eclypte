@@ -4,6 +4,7 @@ import type {
     AutopilotStatus,
     EclypteApiClient,
     EditJobStatus,
+    PublishingConfig,
     PublishingPost,
     PublishingPostStatus,
     SynthesisPromptState,
@@ -46,6 +47,17 @@ export function usePublishingPosts(
     return useResource<PublishingPost[]>(
         key,
         (signal) => api!.listPublishingPosts({ status }, signal),
+        { enabled: api !== null },
+    )
+}
+
+export function usePublishingConfig(
+    api: EclypteApiClient | null,
+): UseResourceResult<PublishingConfig> {
+    const key = api ? `publishing-config:${api.userId}` : null
+    return useResource<PublishingConfig>(
+        key,
+        (signal) => api!.getPublishingConfig(signal),
         { enabled: api !== null },
     )
 }

@@ -477,3 +477,48 @@ def test_overlay_catalog_excludes_lyrics_kind():
 
     catalog = _format_overlay_skills()
     assert "lyrics.kinetic" not in catalog
+
+
+def test_moment_focus_swaps_source_context():
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        finish = _fake_response(
+            [_function_call(
+                "finish_edit",
+                '{"timeline": [{"start_time": 0, "end_time": 2, "source_timestamp": 5.0}]}',
+                "call_1",
+            )],
+            response_id="resp_1",
+        )
+        mock_client.responses.create = MagicMock(side_effect=[finish])
+
+        run_synthesis_loop(
+            "dummy.mp4", "make a cool video",
+            source_duration_sec=5400.0, edit_focus="moment",
+        )
+
+        first_input = mock_client.responses.create.call_args_list[0].kwargs["input"]
+        assert "FOCUSED MOMENT EDIT" in first_input
+        assert "Span the FULL content" not in first_input
+        assert "first cut within ~1.5s" in first_input
+
+
+def test_default_focus_keeps_span_guidance():
+    with patch("api.prototyping.edit.synthesis.agent.OpenAI") as mock_openai:
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        finish = _fake_response(
+            [_function_call(
+                "finish_edit",
+                '{"timeline": [{"start_time": 0, "end_time": 2, "source_timestamp": 5.0}]}',
+                "call_1",
+            )],
+            response_id="resp_1",
+        )
+        mock_client.responses.create = MagicMock(side_effect=[finish])
+
+        run_synthesis_loop("dummy.mp4", "make a cool video", source_duration_sec=5400.0)
+
+        first_input = mock_client.responses.create.call_args_list[0].kwargs["input"]
+        assert "Span the FULL content" in first_input

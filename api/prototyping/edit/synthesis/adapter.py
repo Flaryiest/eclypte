@@ -1,4 +1,5 @@
 from .rhythm import (
+    _impact_frames,
     auto_accent_overlays,
     pacing_bands_for,
     pick_snap_beat,
@@ -18,7 +19,7 @@ from .timeline_schema import (
     SourceRef,
     Timeline,
     Transition,
-    tail_fade_for,
+    tail_fades_for,
 )
 from .validators import validate_timeline
 
@@ -279,7 +280,7 @@ def adapt(
         + _resolve_overlays(raw_overlays, round(last_end, 3))
     )
 
-    fade = tail_fade_for(round(last_end, 3))
+    audio_fade, video_fade = tail_fades_for(round(last_end, 3))
     timeline = Timeline(
         source=SourceRef(video=source_video_path, audio=audio_path),
         output=OutputSpec(
@@ -289,9 +290,9 @@ def adapt(
             duration_sec=round(last_end, 3),
             crop=output_crop,
             crop_focus_x=crop_focus_x,
-            fade_out_sec=fade,
+            fade_out_sec=video_fade,
         ),
-        audio=AudioSpec(path=audio_path, start_sec=round(audio_start_sec, 3), fade_out_sec=fade),
+        audio=AudioSpec(path=audio_path, start_sec=round(audio_start_sec, 3), fade_out_sec=audio_fade),
         shots=shots,
         markers=Markers(beats_used_sec=beats_used, sections=sections),
         overlays=resolved_overlays,
@@ -306,6 +307,18 @@ def adapt(
         report_sink["anchor_relocations"] = anchor_relocations
         if lyrics_report is not None:
             report_sink["lyrics"] = lyrics_report
+        if shots:
+            first = shots[0]
+            # A weak opener is the #1 retention failure; QA reads this instead
+            # of scrubbing the render.
+            report_sink["first_shot"] = {
+                "source_start_sec": round(first.source.start_sec, 3),
+                "duration_sec": round(first.duration_sec, 3),
+                "impact_backed": any(
+                    first.source.start_sec <= ts <= first.source.end_sec
+                    for ts, _ in _impact_frames(video)
+                ),
+            }
 
     return timeline
 

@@ -355,14 +355,17 @@ def _fallback_caption_draft(
     song_name: str = "",
 ) -> CaptionDraft:
     label = source_name or _humanize(collection_slug)
-    caption = f"{label} edit fr 🔥" if label else "this one goes crazy fr 🔥"
-    hashtags = _dedupe_hashtags(
+    hook = f"{label} edit" if label else "new edit"
+    credit_parts = []
+    if source_name:
+        credit_parts.append(f"anime: {source_name.lower()}")
+    if song_name:
+        credit_parts.append(f"song: {song_name.lower()}")
+    caption = hook if not credit_parts else f"{hook}\n{' · '.join(credit_parts)}"
+    hashtags = _finalize_hashtags(
         [
-            "#amv",
-            "#edit",
-            "#anime",
             "#animeedit",
-            "#fyp",
+            "#amv",
             _hashtag(source_name) if source_name else "",
             _hashtag(song_name) if song_name else "",
             _hashtag(collection_slug) if collection_slug else "",
@@ -370,7 +373,7 @@ def _fallback_caption_draft(
     )
     return CaptionDraft(
         caption=caption[:2200],
-        hashtags=hashtags[:30],
+        hashtags=hashtags,
         caption_source="fallback",
     )
 
@@ -387,25 +390,30 @@ def _openai_caption_draft(
     response = client.responses.create(
         model=model,
         instructions=(
-            "You write Instagram Reels captions for anime edits (AMVs) the way a real "
-            "Gen-Z creator posts them — NOT like a brand, marketer, or AI. "
+            "You write Instagram Reels captions for anime/movie edits (AMVs) the way a "
+            "real Gen-Z creator posts them — NOT like a brand, marketer, or AI. "
             "Return only valid JSON with keys caption, hashtags, and notes.\n"
-            "VOICE: short and casual, internet-native. Usually one line (a few words is "
-            "fine), mostly lowercase, at most 1-2 emojis. Slang is good. The caption does "
-            "NOT need to describe the video — a relatable, funny, or trending/nonsense "
-            "one-liner works great.\n"
-            "HARD BANS (these scream AI, never do them): listing pacing/transitions/energy; "
-            "the phrases 'hits different', 'quick thoughts', 'if you're into', 'worth the "
-            "watch', 'drop a rating', 'the vibe', 'let that sink in'; em dashes; any "
-            "corporate/marketing tone; claiming rights or official status.\n"
-            "Vary it every time. Vibe examples (DO NOT copy, just match the energy): "
-            "'ok this one ate'; 'no bc why did this go so hard'; 'pov: you cant stop "
-            "rewatching'; 'they really said cinema'; 'this is my roman empire fr'; "
-            "'lowkey cooked'; 'hi yes one ticket to this please'.\n"
-            "Caption under 2200 characters (keep it short). "
-            "hashtags = 8-12 lowercase hashtag strings: include one for the "
-            "anime/source and one for the song/artist when they are known, plus a "
-            "few broad discovery tags (#amv #anime #edit #fyp). No spaces or "
+            "STRUCTURE — up to three short lines, in this order:\n"
+            "1. Hook: one casual, mostly-lowercase line, at most 1-2 emojis, a real "
+            "reaction to THIS edit. When it reads naturally, work the source or song "
+            "name into it — people find reels by searching those exact words.\n"
+            "2. Credit line, exactly this shape: 'anime: <source> · song: <song>' "
+            "(lowercase; use 'film:' for live-action; drop a part if unknown).\n"
+            "3. OPTIONAL: either ONE genuine fandom question about the source, or a "
+            "natural nudge to send this to a friend who loves it. Never both; skip "
+            "when forced. NEVER formulaic bait: no 'comment YES', 'like if', "
+            "'tag 3 friends', 'follow for more'.\n"
+            "HARD BANS (these scream AI, never do them): listing pacing/transitions/"
+            "energy; the phrases 'hits different', 'quick thoughts', 'if you're into', "
+            "'worth the watch', 'drop a rating', 'the vibe', 'let that sink in'; em "
+            "dashes; any corporate/marketing tone; claiming rights or official status.\n"
+            "Vary the hook every time. Vibe examples (DO NOT copy, just match the "
+            "energy): 'ok this one ate'; 'no bc why did this go so hard'; 'they really "
+            "said cinema'; 'this is my roman empire fr'; 'lowkey cooked'.\n"
+            "hashtags = 3-5 lowercase tags, at most 5, ALL specific to this reel: the "
+            "source (e.g. #jujutsukaisen), the song or artist, a main character or the "
+            "fandom's own tag, plus #animeedit or #amv. NEVER generic discovery tags — "
+            "no #fyp, #foryou, #viral, #trending, #edit, or #anime alone. No spaces or "
             "punctuation. notes = a brief internal note for the editor."
         ),
         input=(
@@ -428,7 +436,7 @@ def _openai_caption_draft(
                         "hashtags": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "maxItems": 12,
+                            "maxItems": 5,
                         },
                         "notes": {"type": "string"},
                     },
@@ -448,7 +456,7 @@ def _openai_caption_draft(
         raise ValueError("caption model returned invalid hashtags")
     return CaptionDraft(
         caption=caption[:2200],
-        hashtags=_dedupe_hashtags([str(item) for item in raw_hashtags])[:30],
+        hashtags=_finalize_hashtags([str(item) for item in raw_hashtags]),
         notes=str(data.get("notes") or "").strip(),
         caption_source="openai",
     )
@@ -490,7 +498,45 @@ def _display_name_for_file(repo: StorageRepository, user_id: str, file_id: str |
         manifest = repo.load_file_manifest(FileRef(user_id=user_id, file_id=file_id))
     except Exception:
         return ""
-    return _strip_media_extension(manifest.display_name)
+    return _clean_media_name(_strip_media_extension(manifest.display_name))
+
+
+# Unambiguous scene-release markers only: a false positive truncates a title,
+# so ambiguous English words (web, audio, official, ...) stay OUT of this set —
+# bracketed segments already catch most of those.
+_MEDIA_NAME_JUNK = {
+    "480p", "576p", "720p", "1080p", "2160p", "4k", "8k",
+    "x264", "x265", "h264", "h265", "hevc", "avc", "av1", "10bit", "8bit",
+    "hdr", "hdr10", "hdr10plus", "sdr", "dolbyvision",
+    "bluray", "blu-ray", "bdrip", "brrip", "webrip", "webdl", "web-dl",
+    "hdtv", "dvdrip", "dvdscr", "remux", "camrip", "hdcam", "amzn",
+    "aac", "aac2", "ac3", "eac3", "dts", "dts-hd", "truehd", "atmos", "flac",
+    "320kbps", "256kbps", "192kbps", "128kbps",
+    "proper", "repack", "internal", "extended-cut",
+}
+
+
+def _is_junk_token(token: str) -> bool:
+    t = token.lower().strip("-")
+    if t in _MEDIA_NAME_JUNK:
+        return True
+    # Release groups ride the last junk token ("x265-GROUP").
+    return t.split("-", 1)[0] in _MEDIA_NAME_JUNK
+
+
+def _clean_media_name(name: str) -> str:
+    """Upload filenames leak scene-release junk (1080p, x265, [group]) into
+    captions and hashtags. Scene junk always trails the title, so cut at the
+    first junk token; fall back to the input when stripping leaves nothing."""
+    base = re.sub(r"[\[\(][^\]\)]*[\]\)]", " ", name)
+    base = re.sub(r"[._]+", " ", base)
+    kept: list[str] = []
+    for token in base.split():
+        if _is_junk_token(token):
+            break
+        kept.append(token)
+    cleaned = " ".join(kept).strip(" -")
+    return cleaned or name.strip()
 
 
 def _strip_media_extension(name: str) -> str:
@@ -616,6 +662,119 @@ def resolve_public_media_base_url_env() -> str:
     return base_url
 
 
+def resolve_publish_provider_env() -> str:
+    """Which publish path sends approved posts: "buffer" (default) or "graph"."""
+    value = (os.environ.get("ECLYPTE_PUBLISH_PROVIDER") or "buffer").strip().lower()
+    if value not in {"buffer", "graph"}:
+        raise ValueError(
+            f"ECLYPTE_PUBLISH_PROVIDER must be 'buffer' or 'graph', got {value!r}"
+        )
+    return value
+
+
+class SendToGraphError(Exception):
+    """Graph publish failed; carries the record as prepared so far."""
+
+    def __init__(self, record: PublishingPostRecord, cause: Exception):
+        super().__init__(str(cause))
+        self.record = record
+        self.cause = cause
+
+
+def send_post_via_graph(
+    repo: StorageRepository,
+    *,
+    store: ObjectStore,
+    post: PublishingPostRecord,
+    publisher: Any | None = None,
+) -> PublishingPostRecord:
+    """Direct Instagram Graph API publish (ECLYPTE_PUBLISH_PROVIDER=graph).
+
+    Publishing is immediate — the Graph API has no queue, so send modes and
+    scheduling do not apply; posting cadence lives in the autopilot slot
+    spacing. The container's copyright check is a hard veto: matches leave the
+    post `ready` with `copyright_status="matches_found"` for a human call.
+    """
+    from api.instagram_graph import (
+        CopyrightBlockedError,
+        GraphApiError,
+        GraphPublisher,
+        copyright_matches_found,
+    )
+
+    public_base_url = resolve_public_media_base_url_env()
+    fresh = repo.load_publishing_post(user_id=post.owner_user_id, post_id=post.post_id)
+    if fresh.status in {"queued", "scheduled", "published"}:
+        raise PostAlreadySentError(f"post already {fresh.status}")
+    prepared = prepare_public_media_copy(
+        repo, store=store, post=fresh, public_base_url=public_base_url
+    )
+    cover_url: str | None = None
+    try:
+        cover_url = prepare_public_poster_copy(
+            repo, store=store, post=prepared, public_base_url=public_base_url
+        )
+    except Exception:
+        cover_url = None  # the cover is decoration — never blocks a send
+
+    graph = publisher if publisher is not None else GraphPublisher.from_env()
+    try:
+        container_id = graph.create_reel_container(
+            video_url=prepared.public_media_url or "",
+            caption=format_post_text(prepared.caption, prepared.hashtags),
+            cover_url=cover_url,
+        )
+        prepared = repo.save_publishing_post(
+            prepared.model_copy(
+                update={
+                    "provider": "graph",
+                    "ig_container_id": container_id,
+                    "updated_at": _utc_now(),
+                }
+            )
+        )
+        status = graph.wait_for_container(container_id)
+        if copyright_matches_found(status.get("copyright_check_status")):
+            repo.save_publishing_post(
+                prepared.model_copy(
+                    update={
+                        "copyright_status": "matches_found",
+                        "updated_at": _utc_now(),
+                    }
+                )
+            )
+            raise CopyrightBlockedError(
+                "copyright matches found on the reel container; send vetoed"
+            )
+        media_id = graph.publish_container(container_id)
+    except CopyrightBlockedError:
+        raise
+    except GraphApiError as exc:
+        raise SendToGraphError(prepared, exc) from exc
+
+    permalink: str | None = None
+    try:
+        media = graph.get_media(media_id, fields="permalink")
+        permalink = optional_str(media.get("permalink"))
+    except GraphApiError:
+        permalink = None  # backfills on the next status refresh
+    now = _utc_now()
+    return repo.save_publishing_post(
+        prepared.model_copy(
+            update={
+                "status": "published",
+                "provider": "graph",
+                "ig_media_id": media_id,
+                "copyright_status": prepared.copyright_status or "clean",
+                "posted_at": now,
+                "post_url": permalink or prepared.post_url,
+                "last_error": None,
+                "updated_at": now,
+            }
+        )
+    )
+
+
 def send_post_to_buffer(
     repo: StorageRepository,
     *,
@@ -682,6 +841,41 @@ def send_post_to_buffer(
     )
 
 
+def _copy_version_to_public(
+    repo: StorageRepository,
+    *,
+    store: ObjectStore,
+    post: PublishingPostRecord,
+    file_id: str,
+    version_id: str,
+    default_extension: str,
+    default_content_type: str,
+    public_base_url: str,
+) -> tuple[str, str]:
+    """Copy a stored file version to the public publishing prefix.
+
+    Returns (key, public_url)."""
+    source_ref = FileVersionRef(
+        user_id=post.owner_user_id, file_id=file_id, version_id=version_id
+    )
+    meta = repo.load_file_version_meta(source_ref)
+    extension = _extension(meta.original_filename) or default_extension
+    key = (
+        f"public/publishing/{post.owner_user_id}/"
+        f"{post.post_id}/{version_id}.{extension}"
+    )
+    store.put_bytes(
+        key,
+        repo.read_version_bytes(source_ref),
+        content_type=meta.content_type or default_content_type,
+        metadata={
+            "eclypte-post-id": post.post_id,
+            "eclypte-render-version-id": version_id,
+        },
+    )
+    return key, f"{public_base_url.rstrip('/')}/{key}"
+
+
 def prepare_public_media_copy(
     repo: StorageRepository,
     *,
@@ -689,36 +883,52 @@ def prepare_public_media_copy(
     post: PublishingPostRecord,
     public_base_url: str,
 ) -> PublishingPostRecord:
-    source_ref = FileVersionRef(
-        user_id=post.owner_user_id,
+    key, url = _copy_version_to_public(
+        repo,
+        store=store,
+        post=post,
         file_id=post.render_file_id,
         version_id=post.render_version_id,
-    )
-    meta = repo.load_file_version_meta(source_ref)
-    extension = _extension(meta.original_filename) or "mp4"
-    key = (
-        f"public/publishing/{post.owner_user_id}/"
-        f"{post.post_id}/{post.render_version_id}.{extension}"
-    )
-    store.put_bytes(
-        key,
-        repo.read_version_bytes(source_ref),
-        content_type=meta.content_type or "video/mp4",
-        metadata={
-            "eclypte-post-id": post.post_id,
-            "eclypte-render-version-id": post.render_version_id,
-        },
+        default_extension="mp4",
+        default_content_type="video/mp4",
+        public_base_url=public_base_url,
     )
     return repo.save_publishing_post(
         post.model_copy(
             update={
                 "public_media_key": key,
-                "public_media_url": f"{public_base_url.rstrip('/')}/{key}",
+                "public_media_url": url,
                 "updated_at": _utc_now(),
                 "last_error": None,
             }
         )
     )
+
+
+def prepare_public_poster_copy(
+    repo: StorageRepository,
+    *,
+    store: ObjectStore,
+    post: PublishingPostRecord,
+    public_base_url: str,
+) -> str | None:
+    """Public copy of the post's poster frame, for the reel's `cover_url`.
+
+    Best-effort: a post without poster refs returns None (Instagram picks its
+    own cover, exactly as today)."""
+    if not post.render_poster_file_id or not post.render_poster_version_id:
+        return None
+    _, url = _copy_version_to_public(
+        repo,
+        store=store,
+        post=post,
+        file_id=post.render_poster_file_id,
+        version_id=post.render_poster_version_id,
+        default_extension="jpg",
+        default_content_type="image/jpeg",
+        public_base_url=public_base_url,
+    )
+    return url
 
 
 def format_post_text(caption: str, hashtags: list[str]) -> str:
@@ -869,6 +1079,27 @@ def optional_bool(value: Any) -> bool | None:
 
 def _collection_from_tags(tags: list[str]) -> str:
     return next((tag.removeprefix("collection:") for tag in tags if tag.startswith("collection:")), "")
+
+
+# Instagram officially capped hashtags at 5 (Dec 2025) and generic discovery
+# tags carry no reach — only fandom-specific tags earn their place.
+MAX_HASHTAGS = 5
+GENERIC_HASHTAG_BANS = {
+    "#fyp",
+    "#foryou",
+    "#foryoupage",
+    "#viral",
+    "#trending",
+    "#edit",
+    "#anime",
+    "#explore",
+    "#explorepage",
+}
+
+
+def _finalize_hashtags(values: list[str]) -> list[str]:
+    cleaned = [tag for tag in _dedupe_hashtags(values) if tag not in GENERIC_HASHTAG_BANS]
+    return cleaned[:MAX_HASHTAGS]
 
 
 def _dedupe_hashtags(values: list[str]) -> list[str]:

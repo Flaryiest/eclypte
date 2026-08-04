@@ -45,7 +45,7 @@ changing bundled worker code.
 
 **Backing services:** Cloudflare **R2** (object storage, zero egress — required), **Postgres**
 (optional — run manifests/events/progress), **Redis** (optional — live run streaming), **Clerk**
-(auth), **Buffer** (Instagram publishing), **OpenAI** (agent planning + captions).
+(auth), **Buffer** (Instagram publishing; default) or the **Instagram Graph API** directly (`ECLYPTE_PUBLISH_PROVIDER=graph` — immediate slot-spaced publishes, cover frames, a copyright canary, first-party insights; `api/instagram_graph.py`), **OpenAI** (agent planning + captions).
 
 ---
 
@@ -124,7 +124,7 @@ steering yet.
 - **`autopilot.py`** (~760 lines) — `run_autopilot_tick` state machine
   (`pending → analyzing → editing → packaged`). Ranks ~20–30s (≈25s) trim windows by
   energy (chorus bonus + 5s lead-in), dedupes `(video, song, window)`, always uses
-  `reels_cinematic`, **halts after 3 consecutive failures**, and auto-creates `ready` review
+  `reels_9_16` (fill-frame, `edit_focus="moment"`), **halts after 3 consecutive failures**, and auto-creates `ready` review
   packages (`auto_created=true`) — review-gated by default. Two per-user opt-in flags extend it:
   **`auto_pair`** adds a replenish step that LRU-rotates saved films × songs (`select_next_pair`),
   skipping pairs in `exhausted_pairs` and recycling the least-recently-paired pair once everything is
@@ -152,7 +152,7 @@ steering yet.
   `log(primary)` minus `log(median primary)` across a post's ≤10 most recent published peers (primary = the post's `views` metric, falling back to `impressions`; the value must be > 0 to score), `None`
   under 5 scored posts) turn raw Buffer metrics into what the dashboard renders.
 - **`export_options.py`** — the single home for export behavior: `reels_9_16` (fill + `crop_focus_x`),
-  `reels_cinematic` (letterbox, baked bars — autopilot default), `youtube_16_9` (letterbox — backend
+  `reels_cinematic` (letterbox, baked bars — manual composes only), `youtube_16_9` (letterbox — backend
   default), and `trim_song_analysis()`.
 - **`audio_convert.py`** — ffmpeg WAV transcode helper behind `POST /v1/music/conversions`.
 

@@ -142,9 +142,10 @@ def test_select_trim_windows_prefers_high_energy_chorus():
 
     assert windows
     start, end = windows[0]
-    # Begins ~CHORUS_LEAD_IN_SEC (5s) before the chorus so the reel captures the build-in.
+    # Begins CHORUS_LEAD_IN_SEC (1.5s) before the chorus: enough for the hook
+    # shot to register before the drop, without opening on 5s of build-up.
     assert start < 60.0
-    assert 54.0 <= start <= 56.5
+    assert 58.0 <= start <= 59.0
     assert 20.0 <= end - start <= 30.0
     assert end <= 120.0
 
@@ -287,7 +288,8 @@ def test_tick_advances_completed_analysis_to_edit():
     assert len(starts.edit_calls) == 1
     _, kwargs = starts.edit_calls[0]
     options = kwargs["export_options"]
-    assert options["format"] == "reels_cinematic"
+    assert options["format"] == "reels_9_16"
+    assert kwargs["edit_focus"] == "moment"
     assert 20.0 <= options["audio_end_sec"] - options["audio_start_sec"] <= 30.0
     updated = state.items[0]
     assert updated.status == "editing"
@@ -515,7 +517,7 @@ def test_autopilot_endpoints_flow(monkeypatch):
     runs = client.get("/v1/runs", params={"workflow_type": "edit_pipeline"}).json()
     assert len(runs) == 1
     assert runs[0]["inputs"]["creative_brief"] == "go hard"
-    assert runs[0]["inputs"]["export_format"] == "reels_cinematic"
+    assert runs[0]["inputs"]["export_format"] == "reels_9_16"
 
     in_flight_delete = client.delete(f"/v1/autopilot/queue/{item_id}")
     assert in_flight_delete.status_code == 400
@@ -1162,3 +1164,196 @@ def test_metrics_pass_skips_when_lock_held():
 
     tick(repo, RecordingStarts(), fetch=fetch)
     assert fetch.calls == ["buf_1"]  # next tick retries normally
+
+
+def test_window_overlap_frac_measures_against_shorter_window():
+    from api.autopilot import window_overlap_frac
+
+    assert abs(window_overlap_frac((10.0, 35.0), (15.0, 40.0)) - 0.8) < 1e-9
+    assert window_overlap_frac((10.0, 35.0), (40.0, 65.0)) == 0.0
+    assert abs(window_overlap_frac((10.0, 35.0), (30.0, 70.0)) - 0.2) < 1e-9
+
+
+def test_tick_rejects_window_overlapping_a_used_one():
+    repo = build_repo()
+    starts = RecordingStarts()
+    publish_song_with_analysis(repo)
+    # The pair already rendered (55, 80); the top-ranked candidates (58.5, 60,
+    # 65) all overlap it by >40% and must be skipped in favor of (70, 95).
+    save_state(
+        repo,
+        items=[make_item()],
+        used_windows={pair_key("file_video", "file_song"): [[55.0, 80.0]]},
+    )
+
+    state = tick(repo, starts)
+
+    _, kwargs = starts.edit_calls[0]
+    options = kwargs["export_options"]
+    assert options["audio_start_sec"] == 70.0
+    windows = state.used_windows[pair_key("file_video", "file_song")]
+    assert [70.0, 95.0] in windows
+    assert [55.0, 80.0] in windows
+
+
+def _published_record(posted_at):
+    return PublishingPostRecord(
+        post_id=f"p_{posted_at}",
+        owner_user_id=USER,
+        render_file_id="rf",
+        render_version_id="rv",
+        render_display_name="r",
+        status="published",
+        posted_at=posted_at,
+        created_at="2026-06-09T00:00:00Z",
+        updated_at="2026-06-09T00:00:00Z",
+    )
+
+
+def test_graph_slot_due_spacing():
+    from api.autopilot import graph_slot_due
+
+    # No published posts yet: the first slot is always open.
+    assert graph_slot_due([], daily_target=2, now=NOW) is True
+    # daily_target=2 -> 12h spacing. Published 10h ago: slot still closed.
+    assert (
+        graph_slot_due([_published_record("2026-06-09T02:00:00Z")], daily_target=2, now=NOW)
+        is False
+    )
+    # Published 14h ago: the next slot is open.
+    assert (
+        graph_slot_due([_published_record("2026-06-08T22:00:00Z")], daily_target=2, now=NOW)
+        is True
+    )
+
+
+class GraphRecordingSend(RecordingSend):
+    """Graph sends publish immediately - the returned record is published."""
+
+    def __call__(self, user_id, *, post):
+        self.calls.append(post.post_id)
+        if self.fail:
+            raise RuntimeError("send exploded")
+        return post.model_copy(
+            update={"status": "published", "posted_at": "2026-06-09T12:00:00Z"}
+        )
+
+
+def test_graph_auto_publish_waits_for_slot(monkeypatch):
+    monkeypatch.setenv("ECLYPTE_PUBLISH_PROVIDER", "graph")
+    repo = build_repo()
+    send = GraphRecordingSend()
+    save_post(repo, post_id="p_auto")
+    # A post published 10h ago blocks the 12h slot (daily_target=2).
+    save_post(
+        repo, post_id="p_prev", status="published", posted_at="2026-06-09T02:00:00Z"
+    )
+    save_state(repo, auto_publish=True)
+
+    tick(repo, RecordingStarts(), send=send)
+    assert send.calls == []
+
+
+def test_graph_auto_publish_sends_one_when_slot_open(monkeypatch):
+    monkeypatch.setenv("ECLYPTE_PUBLISH_PROVIDER", "graph")
+    repo = build_repo()
+    send = GraphRecordingSend()
+    save_post(repo, post_id="p_auto")
+    save_post(repo, post_id="p_auto2")
+    save_post(
+        repo, post_id="p_prev", status="published", posted_at="2026-06-08T22:00:00Z"
+    )
+    save_state(repo, auto_publish=True)
+
+    tick(repo, RecordingStarts(), send=send)
+    # One slot per pass: exactly one send; the second package stays ready.
+    assert send.calls == ["p_auto"]
+
+
+def test_buffer_auto_publish_unchanged_by_provider_default(monkeypatch):
+    monkeypatch.delenv("ECLYPTE_PUBLISH_PROVIDER", raising=False)
+    repo = build_repo()
+    send = RecordingSend()
+    save_post(repo, post_id="p_auto")
+    save_state(repo, auto_publish=True)
+
+    tick(repo, RecordingStarts(), send=send)
+    assert send.calls == ["p_auto"]
+
+
+class RecordingGraphFetch:
+    def __init__(self, metrics=None):
+        self.calls = []
+        self.metrics = metrics if metrics is not None else {"views": 900.0, "reach": 700.0}
+
+    def __call__(self, user_id, *, ig_media_id):
+        self.calls.append(ig_media_id)
+        return self.metrics, None
+
+
+def save_graph_post(repo, *, post_id, posted_at="2026-06-09T11:00:00Z"):
+    return repo.save_publishing_post(
+        PublishingPostRecord(
+            post_id=post_id,
+            owner_user_id=USER,
+            render_file_id=f"rf_{post_id}",
+            render_version_id=f"rv_{post_id}",
+            render_display_name="Autopilot Reel",
+            status="published",
+            provider="graph",
+            ig_media_id=f"ig_{post_id}",
+            auto_created=True,
+            posted_at=posted_at,
+            created_at="2026-06-09T11:00:00Z",
+            updated_at="2026-06-09T11:00:00Z",
+        )
+    )
+
+
+def test_metrics_pass_reads_graph_posts_via_insights():
+    repo = build_repo()
+    buffer_fetch = RecordingFetch()
+    graph_fetch = RecordingGraphFetch()
+    save_graph_post(repo, post_id="p_graph")
+    save_post(
+        repo, post_id="p_buf", status="published",
+        posted_at="2026-06-09T11:00:00Z", buffer_post_id="buf_1",
+    )
+    save_state(repo)
+
+    run_autopilot_tick(
+        repo,
+        user_id=USER,
+        start_music_analysis=RecordingStarts().start_music_analysis,
+        start_edit=RecordingStarts().start_edit,
+        fetch_post_metrics=buffer_fetch,
+        fetch_graph_metrics=graph_fetch,
+        now=NOW,
+    )
+
+    # Each provider's posts read through their own fetcher.
+    assert graph_fetch.calls == ["ig_p_graph"]
+    assert buffer_fetch.calls == ["buf_1"]
+    graph_post = repo.load_publishing_post(user_id=USER, post_id="p_graph")
+    assert graph_post.metrics == {"views": 900.0, "reach": 700.0}
+    assert graph_post.metrics_checked_at is not None
+
+
+def test_metrics_pass_skips_graph_posts_without_graph_fetcher():
+    repo = build_repo()
+    buffer_fetch = RecordingFetch()
+    save_graph_post(repo, post_id="p_graph")
+    save_state(repo)
+
+    run_autopilot_tick(
+        repo,
+        user_id=USER,
+        start_music_analysis=RecordingStarts().start_music_analysis,
+        start_edit=RecordingStarts().start_edit,
+        fetch_post_metrics=buffer_fetch,
+        now=NOW,
+    )
+
+    assert buffer_fetch.calls == []  # never falls back to Buffer for a graph post
+    graph_post = repo.load_publishing_post(user_id=USER, post_id="p_graph")
+    assert graph_post.metrics == {}
