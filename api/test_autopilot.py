@@ -1279,3 +1279,81 @@ def test_buffer_auto_publish_unchanged_by_provider_default(monkeypatch):
 
     tick(repo, RecordingStarts(), send=send)
     assert send.calls == ["p_auto"]
+
+
+class RecordingGraphFetch:
+    def __init__(self, metrics=None):
+        self.calls = []
+        self.metrics = metrics if metrics is not None else {"views": 900.0, "reach": 700.0}
+
+    def __call__(self, user_id, *, ig_media_id):
+        self.calls.append(ig_media_id)
+        return self.metrics, None
+
+
+def save_graph_post(repo, *, post_id, posted_at="2026-06-09T11:00:00Z"):
+    return repo.save_publishing_post(
+        PublishingPostRecord(
+            post_id=post_id,
+            owner_user_id=USER,
+            render_file_id=f"rf_{post_id}",
+            render_version_id=f"rv_{post_id}",
+            render_display_name="Autopilot Reel",
+            status="published",
+            provider="graph",
+            ig_media_id=f"ig_{post_id}",
+            auto_created=True,
+            posted_at=posted_at,
+            created_at="2026-06-09T11:00:00Z",
+            updated_at="2026-06-09T11:00:00Z",
+        )
+    )
+
+
+def test_metrics_pass_reads_graph_posts_via_insights():
+    repo = build_repo()
+    buffer_fetch = RecordingFetch()
+    graph_fetch = RecordingGraphFetch()
+    save_graph_post(repo, post_id="p_graph")
+    save_post(
+        repo, post_id="p_buf", status="published",
+        posted_at="2026-06-09T11:00:00Z", buffer_post_id="buf_1",
+    )
+    save_state(repo)
+
+    run_autopilot_tick(
+        repo,
+        user_id=USER,
+        start_music_analysis=RecordingStarts().start_music_analysis,
+        start_edit=RecordingStarts().start_edit,
+        fetch_post_metrics=buffer_fetch,
+        fetch_graph_metrics=graph_fetch,
+        now=NOW,
+    )
+
+    # Each provider's posts read through their own fetcher.
+    assert graph_fetch.calls == ["ig_p_graph"]
+    assert buffer_fetch.calls == ["buf_1"]
+    graph_post = repo.load_publishing_post(user_id=USER, post_id="p_graph")
+    assert graph_post.metrics == {"views": 900.0, "reach": 700.0}
+    assert graph_post.metrics_checked_at is not None
+
+
+def test_metrics_pass_skips_graph_posts_without_graph_fetcher():
+    repo = build_repo()
+    buffer_fetch = RecordingFetch()
+    save_graph_post(repo, post_id="p_graph")
+    save_state(repo)
+
+    run_autopilot_tick(
+        repo,
+        user_id=USER,
+        start_music_analysis=RecordingStarts().start_music_analysis,
+        start_edit=RecordingStarts().start_edit,
+        fetch_post_metrics=buffer_fetch,
+        now=NOW,
+    )
+
+    assert buffer_fetch.calls == []  # never falls back to Buffer for a graph post
+    graph_post = repo.load_publishing_post(user_id=USER, post_id="p_graph")
+    assert graph_post.metrics == {}

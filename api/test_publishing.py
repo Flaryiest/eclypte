@@ -1584,3 +1584,53 @@ def test_send_route_graph_copyright_veto_returns_409(monkeypatch):
         f"/v1/publishing/posts?status=ready", headers={"X-User-Id": "user_123"}
     ).json()
     assert fresh[0]["copyright_status"] == "matches_found"
+
+
+def test_refresh_status_route_reads_graph_post_via_insights(monkeypatch):
+    monkeypatch.setenv("ECLYPTE_PUBLISH_PROVIDER", "graph")
+    monkeypatch.setenv("ECLYPTE_R2_PUBLIC_BASE_URL", "https://media.example.com")
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+    render = _publish_render(repo, body=b"render-video")
+
+    class InsightsGraphPublisher(FakeGraphPublisher):
+        def get_insights(self, media_id, *, metrics):
+            return {"views": 321.0, "likes": 12.0}
+
+    publisher = InsightsGraphPublisher(permalink="https://instagram.com/reel/late")
+    client = TestClient(
+        create_app(
+            store=store,
+            workflow_runner=NoopWorkflowRunner(),
+            graph_publisher=publisher,
+        )
+    )
+
+    prepared = client.post(
+        "/v1/publishing/posts",
+        headers={"X-User-Id": "user_123"},
+        json={"render_output": render},
+    )
+    post_id = prepared.json()["post_id"]
+    # Publish via graph, then wipe the permalink to simulate a late backfill.
+    client.post(
+        f"/v1/publishing/posts/{post_id}/send-buffer",
+        headers={"X-User-Id": "user_123"},
+        json={"mode": "queue"},
+    )
+    repo.save_publishing_post(
+        repo.load_publishing_post(user_id="user_123", post_id=post_id).model_copy(
+            update={"post_url": None}
+        )
+    )
+
+    refreshed = client.post(
+        f"/v1/publishing/posts/{post_id}/refresh-status",
+        headers={"X-User-Id": "user_123"},
+    )
+
+    assert refreshed.status_code == 200
+    body = refreshed.json()
+    assert body["post_url"] == "https://instagram.com/reel/late"
+    assert body["metrics"] == {"views": 321.0, "likes": 12.0}
+    assert body["metrics_checked_at"] is not None

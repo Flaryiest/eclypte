@@ -21,6 +21,12 @@ from urllib.error import HTTPError, URLError
 
 DEFAULT_GRAPH_API_BASE = "https://graph.facebook.com/v23.0"
 
+# Reel insight metrics to request on the metrics-refresh pass. Names align
+# with the lowercase keys the Buffer path stores, so performance_score's
+# views->impressions fallback works across providers. The API returns only
+# what it supports for the media — absent metrics stay absent.
+GRAPH_INSIGHT_METRICS = "views,reach,likes,comments,shares,saved,total_interactions"
+
 CONTAINER_POLL_INTERVAL_SEC = 5.0
 CONTAINER_TIMEOUT_SEC = 600.0
 

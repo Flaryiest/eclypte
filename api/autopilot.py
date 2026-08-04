@@ -110,6 +110,12 @@ class FetchPostStatus(Protocol):
     def __call__(self, user_id: str, *, buffer_post_id: str) -> "BufferPostResult": ...
 
 
+class FetchGraphMetrics(Protocol):
+    def __call__(
+        self, user_id: str, *, ig_media_id: str
+    ) -> tuple[dict[str, float], str | None]: ...
+
+
 def combo_key(
     video_file_id: str,
     song_file_id: str,
@@ -313,6 +319,7 @@ def run_autopilot_tick(
     send_ready_post: SendReadyPost | None = None,
     fetch_post_metrics: FetchPostMetrics | None = None,
     fetch_post_status: FetchPostStatus | None = None,
+    fetch_graph_metrics: FetchGraphMetrics | None = None,
     now: datetime | None = None,
 ) -> AutopilotState:
     with STATE_LOCK:
@@ -348,6 +355,7 @@ def run_autopilot_tick(
         repo,
         user_id=user_id,
         fetch_post_metrics=fetch_post_metrics,
+        fetch_graph_metrics=fetch_graph_metrics,
         now=now or datetime.now(timezone.utc),
     )
     return state
@@ -878,15 +886,18 @@ def _refresh_post_metrics(
     *,
     user_id: str,
     fetch_post_metrics: FetchPostMetrics | None,
+    fetch_graph_metrics: FetchGraphMetrics | None = None,
     now: datetime,
 ) -> None:
     """Pull per-post performance for published posts on a slow cadence.
 
-    Runs outside STATE_LOCK and regardless of the autonomy flags — metrics
-    are wanted in review-gated mode too. Best-effort by contract: failures
-    log and stamp the check time (so the next tick doesn't hammer) but never
-    touch last_error (it drives the auto-send backoff) or the halt."""
-    if fetch_post_metrics is None:
+    Buffer-published posts read through Buffer's metrics; graph-published
+    posts read first-party Graph insights. Runs outside STATE_LOCK and
+    regardless of the autonomy flags — metrics are wanted in review-gated
+    mode too. Best-effort by contract: failures log and stamp the check time
+    (so the next tick doesn't hammer) but never touch last_error (it drives
+    the auto-send backoff) or the halt."""
+    if fetch_post_metrics is None and fetch_graph_metrics is None:
         return
     if not METRICS_LOCK.acquire(blocking=False):
         return
@@ -896,7 +907,11 @@ def _refresh_post_metrics(
         for post in repo.list_publishing_posts(user_id, status="published"):
             if refreshed >= METRICS_MAX_PER_PASS:
                 break
-            if not post.buffer_post_id:
+            is_graph = post.provider == "graph" and bool(post.ig_media_id)
+            if is_graph:
+                if fetch_graph_metrics is None:
+                    continue
+            elif not post.buffer_post_id or fetch_post_metrics is None:
                 continue
             if post.metrics_checked_at and not _older_than(
                 post.metrics_checked_at,
@@ -914,9 +929,14 @@ def _refresh_post_metrics(
                 continue
             refreshed += 1
             try:
-                metrics, updated_at = fetch_post_metrics(
-                    user_id, buffer_post_id=post.buffer_post_id
-                )
+                if is_graph:
+                    metrics, updated_at = fetch_graph_metrics(
+                        user_id, ig_media_id=post.ig_media_id
+                    )
+                else:
+                    metrics, updated_at = fetch_post_metrics(
+                        user_id, buffer_post_id=post.buffer_post_id
+                    )
             except Exception:  # noqa: BLE001 — metrics must never break the tick
                 logger.warning(
                     "metrics fetch failed for post %s", post.post_id, exc_info=True

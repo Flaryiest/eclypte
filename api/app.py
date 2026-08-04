@@ -29,7 +29,9 @@ from api.prototyping.edit.synthesis.system_prompt import (
     SYSTEM_PROMPT as DEFAULT_SYNTHESIS_PROMPT,
 )
 from api.instagram_graph import (
+    GRAPH_INSIGHT_METRICS,
     CopyrightBlockedError,
+    GraphApiError,
     GraphConfigError,
     GraphPublisher,
 )
@@ -906,12 +908,20 @@ def create_app(
         def fetch_post_status(uid: str, *, buffer_post_id: str) -> BufferPostResult:
             return resolve_buffer_client().get_post(post_id=buffer_post_id)
 
+        def fetch_graph_metrics(
+            uid: str, *, ig_media_id: str
+        ) -> tuple[dict[str, float], str | None]:
+            publisher = graph_publisher or GraphPublisher.from_env()
+            # Graph insights carry no ingestion stamp — updated_at stays None.
+            return publisher.get_insights(ig_media_id, metrics=GRAPH_INSIGHT_METRICS), None
+
         return (
             start_music_analysis,
             start_edit,
             send_ready_post,
             fetch_post_metrics,
             fetch_post_status,
+            fetch_graph_metrics,
         )
 
     def autopilot_status_response(state) -> AutopilotStatusResponse:
@@ -945,7 +955,7 @@ def create_app(
         resolved_store = store or get_object_store(required=False)
         if resolved_store is None:
             return
-        start_music_analysis, start_edit, send_ready_post, fetch_post_metrics, fetch_post_status = autopilot_callables(
+        start_music_analysis, start_edit, send_ready_post, fetch_post_metrics, fetch_post_status, fetch_graph_metrics = autopilot_callables(
             repo, _spawn_workflow, resolved_store
         )
         for uid in repo.list_autopilot_user_ids():
@@ -958,6 +968,7 @@ def create_app(
                     send_ready_post=send_ready_post,
                     fetch_post_metrics=fetch_post_metrics,
                     fetch_post_status=fetch_post_status,
+                    fetch_graph_metrics=fetch_graph_metrics,
                 )
             except Exception:
                 logger.exception("autopilot tick failed for user %s", uid)
@@ -1471,6 +1482,43 @@ def create_app(
         uid: str = Depends(user_id),
     ) -> PublishingPostView:
         post = publishing_post_or_404(repo, uid, post_id)
+        if post.provider == "graph" and post.ig_media_id:
+            publisher = resolve_graph_publisher()
+            saved = post
+            try:
+                media = publisher.get_media(post.ig_media_id, fields="permalink")
+                permalink = optional_str(media.get("permalink"))
+                if permalink and permalink != post.post_url:
+                    saved = repo.save_publishing_post(
+                        post.model_copy(
+                            update={"post_url": permalink, "updated_at": utc_now()}
+                        )
+                    )
+            except GraphApiError as exc:
+                logger.warning(
+                    "graph media lookup failed for post %s: %s", post.post_id, exc
+                )
+            if saved.status == "published":
+                try:
+                    metrics = publisher.get_insights(
+                        post.ig_media_id, metrics=GRAPH_INSIGHT_METRICS
+                    )
+                    saved = repo.save_publishing_post(
+                        apply_post_metrics(
+                            saved,
+                            metrics=metrics,
+                            metrics_updated_at=None,
+                            now=utc_now(),
+                        )
+                    )
+                except GraphApiError as exc:
+                    # Metrics are decoration here — never last_error, never a 5xx.
+                    logger.warning(
+                        "graph insights failed during refresh for post %s: %s",
+                        post.post_id,
+                        exc,
+                    )
+            return publishing_post_view(saved, uid, resolved_store)
         if not post.buffer_post_id:
             return publishing_post_view(post, uid, resolved_store)
         client = resolve_buffer_client()
@@ -1667,7 +1715,7 @@ def create_app(
         uid: str = Depends(user_id),
         resolved_store: ObjectStore = Depends(resolve_store),
     ) -> AutopilotStatusResponse:
-        start_music_analysis, start_edit, send_ready_post, fetch_post_metrics, fetch_post_status = autopilot_callables(
+        start_music_analysis, start_edit, send_ready_post, fetch_post_metrics, fetch_post_status, fetch_graph_metrics = autopilot_callables(
             repo, background_tasks.add_task, resolved_store
         )
         state = run_autopilot_tick(
@@ -1678,6 +1726,7 @@ def create_app(
             send_ready_post=send_ready_post,
             fetch_post_metrics=fetch_post_metrics,
             fetch_post_status=fetch_post_status,
+            fetch_graph_metrics=fetch_graph_metrics,
         )
         return autopilot_status_response(state)
 
