@@ -287,7 +287,7 @@ def test_tick_advances_completed_analysis_to_edit():
     assert len(starts.edit_calls) == 1
     _, kwargs = starts.edit_calls[0]
     options = kwargs["export_options"]
-    assert options["format"] == "reels_cinematic"
+    assert options["format"] == "reels_9_16"
     assert 20.0 <= options["audio_end_sec"] - options["audio_start_sec"] <= 30.0
     updated = state.items[0]
     assert updated.status == "editing"
@@ -515,7 +515,7 @@ def test_autopilot_endpoints_flow(monkeypatch):
     runs = client.get("/v1/runs", params={"workflow_type": "edit_pipeline"}).json()
     assert len(runs) == 1
     assert runs[0]["inputs"]["creative_brief"] == "go hard"
-    assert runs[0]["inputs"]["export_format"] == "reels_cinematic"
+    assert runs[0]["inputs"]["export_format"] == "reels_9_16"
 
     in_flight_delete = client.delete(f"/v1/autopilot/queue/{item_id}")
     assert in_flight_delete.status_code == 400

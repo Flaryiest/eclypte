@@ -432,7 +432,9 @@ def _run_tick_locked(
             )
 
         export_options: dict[str, object] = {
-            "format": "reels_cinematic",
+            # Fill-frame: letterboxed reels sit on Instagram's official
+            # "shown less often" list and leave ~24% picture for a 2.39:1 film.
+            "format": "reels_9_16",
             "audio_start_sec": window[0],
             "audio_end_sec": window[1],
         }
