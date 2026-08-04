@@ -34,9 +34,10 @@ logger = logging.getLogger("eclypte.autopilot")
 TRIM_TARGET_SEC = 25.0
 TRIM_MIN_SEC = 20.0
 TRIM_MAX_SEC = 30.0
-# Begin a section-anchored window this many seconds before the section starts, so a
-# chorus-anchored reel captures the build-in rather than cutting in on the downbeat.
-CHORUS_LEAD_IN_SEC = 5.0
+# Begin a section-anchored window this many seconds before the section starts.
+# Kept short deliberately: the first ~2s decide stay-or-scroll, so the reel
+# must not open on a long pre-chorus build.
+CHORUS_LEAD_IN_SEC = 1.5
 COMBO_WINDOW_BUCKET_SEC = 5
 MAX_CONSECUTIVE_FAILURES = 3
 MAX_FINISHED_ITEMS = 50

@@ -142,9 +142,10 @@ def test_select_trim_windows_prefers_high_energy_chorus():
 
     assert windows
     start, end = windows[0]
-    # Begins ~CHORUS_LEAD_IN_SEC (5s) before the chorus so the reel captures the build-in.
+    # Begins CHORUS_LEAD_IN_SEC (1.5s) before the chorus: enough for the hook
+    # shot to register before the drop, without opening on 5s of build-up.
     assert start < 60.0
-    assert 54.0 <= start <= 56.5
+    assert 58.0 <= start <= 59.0
     assert 20.0 <= end - start <= 30.0
     assert end <= 120.0
 
