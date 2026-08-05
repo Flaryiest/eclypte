@@ -311,6 +311,41 @@ def build_buffer_channel_payload(*, channel_id: str) -> dict[str, Any]:
     }
 
 
+# How many of the account's latest captions the generator must avoid echoing.
+# Identical hooks across posts read as templated spam — the account shipped
+# "ok this one ate" three times in one week because the model copied a prompt
+# example verbatim.
+RECENT_CAPTION_WINDOW = 8
+
+
+def _normalize_caption_hook(text: str) -> str:
+    """The caption's first line, lowercased, emoji/punctuation stripped."""
+    stripped = (text or "").strip()
+    first = stripped.splitlines()[0] if stripped else ""
+    cleaned = re.sub(r"[^a-z0-9\s]", "", first.lower())
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def caption_repeats_recent(caption: str, recent_captions: list[str]) -> bool:
+    hook = _normalize_caption_hook(caption)
+    if not hook:
+        return False
+    return hook in {_normalize_caption_hook(prev) for prev in recent_captions}
+
+
+def recent_account_captions(
+    repo: StorageRepository, *, user_id: str, limit: int = RECENT_CAPTION_WINDOW
+) -> list[str]:
+    """Latest non-empty captions on the account, newest first (skips canceled)."""
+    posts = [
+        post
+        for post in repo.list_publishing_posts(user_id)
+        if post.status != "canceled" and post.caption.strip()
+    ]
+    posts.sort(key=lambda post: post.created_at, reverse=True)
+    return [post.caption for post in posts[:limit]]
+
+
 def generate_caption_draft(
     *,
     collection_slug: str = "",
@@ -318,26 +353,42 @@ def generate_caption_draft(
     song_name: str = "",
     openai_client: Any | None = None,
     model: str | None = None,
+    recent_captions: list[str] | None = None,
 ) -> CaptionDraft:
+    recents = recent_captions or []
     fallback = _fallback_caption_draft(
         collection_slug=collection_slug,
         source_name=source_name,
         song_name=song_name,
+        recent_captions=recents,
     )
     try:
         client = openai_client or _openai_client_from_env()
         if client is None:
             return fallback
-        payload = _openai_caption_draft(
-            client=client,
-            collection_slug=collection_slug,
-            source_name=source_name,
-            song_name=song_name,
-            model=model or os.environ.get("ECLYPTE_CAPTION_MODEL", "gpt-5.4-mini"),
+        for attempt in range(2):
+            payload = _openai_caption_draft(
+                client=client,
+                collection_slug=collection_slug,
+                source_name=source_name,
+                song_name=song_name,
+                model=model or os.environ.get("ECLYPTE_CAPTION_MODEL", "gpt-5.4-mini"),
+                recent_captions=recents,
+                retry_after_repeat=attempt > 0,
+            )
+            if not payload.caption.strip():
+                raise ValueError("caption model returned an empty caption")
+            if not caption_repeats_recent(payload.caption, recents):
+                return payload
+        # Two attempts both echoed a recent hook — the deterministic fallback
+        # (which self-dedupes) beats shipping a templated repeat.
+        return CaptionDraft(
+            caption=fallback.caption,
+            hashtags=fallback.hashtags,
+            notes=fallback.notes,
+            caption_source="fallback",
+            caption_error="caption model repeated a recent hook twice",
         )
-        if not payload.caption.strip():
-            raise ValueError("caption model returned an empty caption")
-        return payload
     except Exception as exc:
         return CaptionDraft(
             caption=fallback.caption,
@@ -353,9 +404,19 @@ def _fallback_caption_draft(
     collection_slug: str = "",
     source_name: str = "",
     song_name: str = "",
+    recent_captions: list[str] | None = None,
 ) -> CaptionDraft:
+    recents = recent_captions or []
     label = source_name or _humanize(collection_slug)
-    hook = f"{label} edit" if label else "new edit"
+    candidates = [f"{label} edit" if label else "new edit"]
+    if label and song_name:
+        candidates.append(f"{label} x {song_name}")
+    if label:
+        candidates.append(f"back with more {label}")
+    hook = next(
+        (c for c in candidates if not caption_repeats_recent(c, recents)),
+        candidates[-1],
+    )
     credit_parts = []
     if source_name:
         credit_parts.append(f"anime: {source_name.lower()}")
@@ -385,8 +446,15 @@ def _openai_caption_draft(
     source_name: str,
     song_name: str,
     model: str,
+    recent_captions: list[str] | None = None,
+    retry_after_repeat: bool = False,
 ) -> CaptionDraft:
     collection_label = collection_slug or "uncategorized"
+    recent_hooks = [
+        prev.strip().splitlines()[0][:80]
+        for prev in (recent_captions or [])
+        if prev.strip()
+    ]
     response = client.responses.create(
         model=model,
         instructions=(
@@ -407,9 +475,11 @@ def _openai_caption_draft(
             "energy; the phrases 'hits different', 'quick thoughts', 'if you're into', "
             "'worth the watch', 'drop a rating', 'the vibe', 'let that sink in'; em "
             "dashes; any corporate/marketing tone; claiming rights or official status.\n"
-            "Vary the hook every time. Vibe examples (DO NOT copy, just match the "
-            "energy): 'ok this one ate'; 'no bc why did this go so hard'; 'they really "
-            "said cinema'; 'this is my roman empire fr'; 'lowkey cooked'.\n"
+            "Vary the hook every time — never reuse a hook this account has posted "
+            "before. BANNED HOOKS (burned out on this account, never output these or "
+            "close variants): 'ok this one ate', 'no bc why did this go so hard', "
+            "'they really said cinema', 'this is my roman empire', 'lowkey cooked', "
+            "'pov: you cant stop rewatching', 'hi yes one ticket to this please'.\n"
             "hashtags = 3-5 lowercase tags, at most 5, ALL specific to this reel: the "
             "source (e.g. #jujutsukaisen), the song or artist, a main character or the "
             "fandom's own tag, plus #animeedit or #amv. NEVER generic discovery tags — "
@@ -423,6 +493,18 @@ def _openai_caption_draft(
             f"Loose collection label (optional): {collection_label}.\n"
             "Write ONE caption a real creator would actually post. You may "
             "reference the anime or song naturally if it fits, but never force it."
+            + (
+                "\nRecent captions on this account — do NOT repeat or closely echo "
+                "any of these hooks:\n" + "\n".join(f"- {hook}" for hook in recent_hooks)
+                if recent_hooks
+                else ""
+            )
+            + (
+                "\nYour previous attempt repeated one of the hooks above. Write "
+                "something COMPLETELY different this time."
+                if retry_after_repeat
+                else ""
+            )
         ),
         text={
             "format": {
@@ -600,6 +682,7 @@ def create_publish_post_for_render(
         collection_slug=resolved_collection,
         source_name=source_name,
         song_name=song_name,
+        recent_captions=recent_account_captions(repo, user_id=user_id),
     )
     now = _utc_now()
     record = PublishingPostRecord(
