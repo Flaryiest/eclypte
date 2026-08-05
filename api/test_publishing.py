@@ -1634,3 +1634,128 @@ def test_refresh_status_route_reads_graph_post_via_insights(monkeypatch):
     assert body["post_url"] == "https://instagram.com/reel/late"
     assert body["metrics"] == {"views": 321.0, "likes": 12.0}
     assert body["metrics_checked_at"] is not None
+
+
+# --- caption repetition guard -------------------------------------------------
+
+
+def test_caption_repeats_recent_normalizes_case_emoji_and_lines():
+    from api.publishing import caption_repeats_recent
+
+    recent = [
+        "ok this one ate 😭\nanime: x · song: y",
+        "Bro really said pain with style 🕷️",
+    ]
+    assert caption_repeats_recent("ok this one ATE 😴", recent) is True
+    assert caption_repeats_recent("bro really said pain with style", recent) is True
+    assert caption_repeats_recent("the animation here is unfair", recent) is False
+    assert caption_repeats_recent("", recent) is False
+
+
+def test_recent_account_captions_orders_limits_and_skips():
+    from api.publishing import recent_account_captions
+
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+
+    def put(post_id, caption, created_at, status="ready"):
+        repo.save_publishing_post(
+            PublishingPostRecord(
+                post_id=post_id,
+                owner_user_id=USER,
+                status=status,
+                render_file_id="rf",
+                render_version_id=f"rv_{post_id}",
+                render_display_name="r.mp4",
+                caption=caption,
+                created_at=created_at,
+                updated_at=created_at,
+            )
+        )
+
+    put("p1", "oldest hook", "2026-08-01T00:00:00Z")
+    put("p2", "newest hook", "2026-08-03T00:00:00Z")
+    put("p3", "", "2026-08-04T00:00:00Z")  # empty caption skipped
+    put("p4", "canceled hook", "2026-08-04T01:00:00Z", status="canceled")
+
+    captions = recent_account_captions(repo, user_id=USER)
+    assert captions == ["newest hook", "oldest hook"]
+    assert recent_account_captions(repo, user_id=USER, limit=1) == ["newest hook"]
+
+
+def test_openai_caption_input_carries_recent_captions_block():
+    client = FakeOpenAIClient()
+    generate_caption_draft(
+        source_name="Jujutsu Kaisen",
+        song_name="Tek It",
+        openai_client=client,
+        recent_captions=["ok this one ate 😭\nanime: jjk · song: x"],
+    )
+    sent = client.calls[0]["input"]
+    assert "ok this one ate" in sent  # the model sees what it must avoid
+    assert "do NOT repeat" in sent
+    instructions = client.calls[0]["instructions"]
+    assert "BANNED HOOKS" in instructions
+    # The old copyable vibe-examples block is gone — examples leaked verbatim
+    # into real captions three times in one week.
+    assert "Vibe examples" not in instructions
+
+
+def test_caption_repeat_retries_once_then_falls_back():
+    from api.publishing import caption_repeats_recent
+
+    class RepeatingResponse:
+        output_text = '{"caption":"ok this one ate 😭","hashtags":["#amv"],"notes":""}'
+
+    class RepeatingClient(FakeOpenAIClient):
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            return RepeatingResponse()
+
+    client = RepeatingClient()
+    recents = ["ok this one ate 🥱\nanime: aot · song: unravel"]
+    draft = generate_caption_draft(
+        source_name="Attack on Titan",
+        song_name="Believer",
+        openai_client=client,
+        recent_captions=recents,
+    )
+
+    assert len(client.calls) == 2  # exactly one retry
+    assert "COMPLETELY different" in client.calls[1]["input"]
+    assert draft.caption_source == "fallback"
+    assert not caption_repeats_recent(draft.caption, recents)
+
+
+def test_fallback_caption_dedupes_hook_against_recents(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    draft = generate_caption_draft(
+        source_name="Attack on Titan",
+        song_name="Believer",
+        recent_captions=["Attack on Titan edit\nanime: attack on titan · song: unravel"],
+    )
+    assert draft.caption.splitlines()[0] != "Attack on Titan edit"
+    assert "attack on titan" in draft.caption.lower()
+
+
+def test_packaging_avoids_repeating_the_previous_posts_caption(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    store = InMemoryObjectStore()
+    repo = StorageRepository(store)
+
+    first = create_publish_post_for_render(
+        repo,
+        user_id="user_123",
+        render_output=_publish_render(repo, body=b"one"),
+        collection_slug="mario",
+        auto_created=True,
+    )
+    second = create_publish_post_for_render(
+        repo,
+        user_id="user_123",
+        render_output=_publish_render(repo, body=b"two"),
+        collection_slug="mario",
+        auto_created=True,
+    )
+
+    assert first.caption.splitlines()[0] != second.caption.splitlines()[0]

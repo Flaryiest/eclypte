@@ -51,6 +51,7 @@ from api.publishing import (
     optional_bool,
     optional_str,
     performance_score,
+    recent_account_captions,
     resolve_publish_provider_env,
     send_post_to_buffer,
     send_post_via_graph,
@@ -1378,10 +1379,13 @@ def create_app(
         uid: str = Depends(user_id),
     ) -> PublishingPostView:
         post = publishing_post_or_404(repo, uid, post_id)
+        # Recents include this post's own current caption, so a regenerate
+        # always produces something different.
         draft = generate_caption_draft(
             collection_slug=post.collection_slug,
             source_name=post.source_name,
             song_name=post.song_name,
+            recent_captions=recent_account_captions(repo, user_id=uid),
         )
         saved = repo.save_publishing_post(
             post.model_copy(
