@@ -31,8 +31,10 @@ jobs:
       - name: Deploy ${{ inputs.app }}
         working-directory: api/prototyping
         env:
-          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
-          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          # Each value may live in Secrets (preferred) or Actions variables —
+          # accept either so a phone-entered variable still deploys.
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID || vars.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET || vars.MODAL_TOKEN_SECRET }}
         run: |
           case "${{ inputs.app }}" in
             render)     modal deploy edit/render_storage_modal.py ;;
