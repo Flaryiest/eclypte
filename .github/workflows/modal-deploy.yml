@@ -1,0 +1,43 @@
+name: Deploy Modal app
+
+# Manually triggered: Modal deploys snapshot local code at deploy time, so
+# they must be run deliberately, in lockstep with the repo (see CLAUDE.md's
+# Modal Apps section). Requires MODAL_TOKEN_ID / MODAL_TOKEN_SECRET repo
+# secrets (Settings -> Secrets and variables -> Actions).
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: Which Modal app to deploy
+        type: choice
+        default: render
+        options:
+          - render
+          - video
+          - clip-index
+          - analysis
+          - lyrics
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deploy-time dependencies
+        run: pip install -r requirements.txt
+      - name: Deploy ${{ inputs.app }}
+        working-directory: api/prototyping
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          case "${{ inputs.app }}" in
+            render)     modal deploy edit/render_storage_modal.py ;;
+            video)      modal deploy video/storage_modal.py ;;
+            clip-index) modal deploy edit/index/storage_modal.py ;;
+            analysis)   modal deploy music/analysis_modal.py ;;
+            lyrics)     modal deploy music/lyrics_align_modal.py ;;
+          esac
