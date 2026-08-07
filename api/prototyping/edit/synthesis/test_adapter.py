@@ -637,7 +637,7 @@ def test_adapt_sets_loop_friendly_tail_fade_on_short_reels():
 
     tl = adapt(_three_shots_contiguous(), SONG, VIDEO, SRC_PATH, AUDIO_PATH)
     # _three_shots_contiguous totals 6.0s -> short reel: audio-only micro fade,
-    # hard video ending so the reel loops back into its opening.
+    # hard video ending (a fade-to-black reads as an ending mid-scroll).
     assert tl.output.fade_out_sec == 0.0
     assert tl.audio.fade_out_sec == SHORT_REEL_AUDIO_FADE_SEC
 
