@@ -1,6 +1,10 @@
 .container {
 	min-height: 100dvh;
 	width: 100%;
+	/* Belt-and-suspenders against stray horizontal scroll on mobile. `clip`
+	   (unlike `hidden`) creates no scroll container, so the sticky top bar
+	   keeps working. */
+	overflow-x: clip;
 	display: flex;
 	flex-direction: column;
 	background: var(--surface-base);
