@@ -342,10 +342,11 @@ SHORT_EDIT_MAX_SEC = 40.0
 
 def _format_short_edit_context(song_duration_sec: float) -> str:
     return (
-        f"This is a short-form reel ({song_duration_sec:.0f}s). Completion and rewatch "
-        f"rate decide its reach: hook instantly (strongest moment first, first cut "
-        f"within ~1.5s, no slow intro), keep every shot earning its place, and aim "
-        f"for an ending that loops cleanly back into the opening."
+        f"This is a short-form reel ({song_duration_sec:.0f}s). Completion decides "
+        f"its reach: hook instantly (strongest moment first, first cut within "
+        f"~1.5s, no slow intro), keep every shot earning its place, and end on a "
+        f"strong, conclusive closing beat. Never re-show or return to the opening "
+        f"shot at the end — a repeated opener reads as a glitch, not a loop."
     )
 
 

@@ -5,9 +5,9 @@ from pydantic import BaseModel, ConfigDict, Field
 SCHEMA_VERSION = 1
 
 TAIL_FADE_SEC = 2.5
-# Reels at or under this length are loop-optimized: replays count as views,
-# and a visible fade-to-black breaks the loop illusion. Matches the agent's
-# SHORT_EDIT_MAX_SEC threshold.
+# Reels at or under this length hard-end: a visible fade-to-black reads as
+# "it's over" mid-scroll and costs replays (which count as views). Matches the
+# agent's SHORT_EDIT_MAX_SEC threshold.
 SHORT_REEL_MAX_SEC = 40.0
 SHORT_REEL_AUDIO_FADE_SEC = 0.3
 
@@ -22,8 +22,8 @@ def tail_fades_for(duration_sec: float) -> tuple[float, float]:
     """(audio_fade_sec, video_fade_sec) for the end of the reel.
 
     Short reels get a click-prevention audio fade only — the picture hard-ends
-    so the reel loops back into its opening. Long form keeps the classic
-    audio+video tail fade, clamped to a third of the piece.
+    on the final shot. Long form keeps the classic audio+video tail fade,
+    clamped to a third of the piece.
     """
     if duration_sec <= 0:
         return 0.0, 0.0
