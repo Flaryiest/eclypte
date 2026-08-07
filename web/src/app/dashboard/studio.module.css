@@ -495,7 +495,7 @@
 .stageDetail { display: block; margin-top: 0.2rem; color: var(--text-muted); font-family: var(--font-ui); font-size: 0.82rem; }
 
 /* --- Pager --- */
-.pager { display: flex; align-items: center; justify-content: flex-end; gap: 0.9rem; padding-top: 0.9rem; }
+.pager { display: flex; align-items: center; justify-content: flex-end; gap: 0.9rem; padding-top: 0.9rem; flex-wrap: wrap; }
 
 .pagerStatus { font-family: var(--font-ui); font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; }
 
@@ -731,6 +731,10 @@ button.posterPlayIcon:focus-visible {
 	display: inline-flex;
 	align-items: center;
 	gap: 0.4rem;
+	max-width: 100%;
+	min-width: 0;
+	overflow-wrap: anywhere;
+	text-align: left;
 	padding: 0.3rem 0.6rem;
 	border: 1px solid var(--line-strong);
 	border-radius: var(--radius);
@@ -803,10 +807,12 @@ button.posterPlayIcon:focus-visible {
 .toastStack {
 	position: fixed;
 	left: 1.2rem;
+	right: 1.2rem;
 	bottom: 1.2rem;
 	z-index: 90;
 	display: flex;
 	flex-direction: column;
+	align-items: flex-start;
 	gap: 0.5rem;
 	pointer-events: none;
 }
@@ -826,6 +832,8 @@ button.posterPlayIcon:focus-visible {
 	box-shadow: var(--elev-shadow);
 	pointer-events: auto;
 	cursor: pointer; /* click to dismiss */
+	max-width: 100%;
+	overflow-wrap: anywhere;
 }
 
 .toast:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
@@ -906,7 +914,7 @@ button.posterPlayIcon:focus-visible {
 .feedSectionLink { margin-left: auto; color: var(--text-muted); font-family: var(--font-ui); font-size: 0.84rem; background: none; border: none; cursor: pointer; }
 .feedSectionLink:hover { color: var(--text-primary); }
 
-.reviewCardGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 0.9rem; }
+.reviewCardGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 0.9rem; }
 
 .reviewCard {
 	display: flex;
@@ -969,7 +977,7 @@ button.posterPlayIcon:focus-visible {
 .postedMeta { margin: 0.3rem 0 0; font-family: var(--font-ui); font-size: 0.78rem; color: var(--text-muted); line-height: 1.35; }
 
 /* ============ NEW: Library ============ */
-.tabPills { display: flex; gap: 0.4rem; align-items: center; }
+.tabPills { display: flex; gap: 0.4rem; row-gap: 0.3rem; align-items: center; flex-wrap: wrap; }
 .pill,
 .pillActive {
 	min-height: 34px;
@@ -989,10 +997,10 @@ button.posterPlayIcon:focus-visible {
 .hiddenLink { margin-left: auto; background: none; border: none; color: var(--text-faint); font-family: var(--font-ui); font-size: 0.82rem; cursor: pointer; }
 .hiddenLink:hover { color: var(--text-primary); }
 
-.mediaGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.9rem; }
+.mediaGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 0.9rem; }
 
 /* Portrait (9:16) tiles need narrower columns or they balloon into huge cards. */
-.mediaGridTall { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.mediaGridTall { grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); }
 
 .mediaThumbFrame { position: relative; display: block; min-width: 0; }
 
@@ -1102,6 +1110,11 @@ button.posterPlayIcon:focus-visible {
 	.cropPreview { width: 100%; }
 	.settingsRow { grid-template-columns: 1fr; gap: 0.35rem; }
 	.reviewCardGrid { grid-template-columns: 1fr; }
+	/* The footer's right-side cluster (Skip) stacks full-width like the
+	   send buttons — an inline-flex shrink-wrap made its 100%-width
+	   children render inconsistently. */
+	.sheetActionsRight { margin-left: 0; width: 100%; flex-direction: column; align-items: stretch; }
+	.metaRow { grid-template-columns: 1fr; gap: 0.15rem; }
 	/* Sheets become bottom sheets on mobile. */
 	.sheet {
 		top: auto;
