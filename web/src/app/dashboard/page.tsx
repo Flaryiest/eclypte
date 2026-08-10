@@ -3,7 +3,7 @@
 import { KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
 import { useUser } from "@clerk/nextjs"
 import Link from "next/link"
-import { Play, Plus, RefreshCw, Zap } from "lucide-react"
+import { Check, Play, Plus, RefreshCw, Zap } from "lucide-react"
 import {
     DashboardPage,
     FadeImg,
@@ -71,10 +71,9 @@ export default function HomePage() {
         () =>
             posts
                 .filter((post) => post.status === "ready" || post.status === "draft")
-                // Chronological (oldest first): review reels in the order they were
-                // made, and keep cards from shuffling when a caption edit bumps
-                // updated_at (the API's default sort).
-                .sort((a, b) => a.created_at.localeCompare(b.created_at)),
+                // Newest first, keyed on created_at (not updated_at) so a caption
+                // edit doesn't shuffle the cards mid-review.
+                .sort((a, b) => b.created_at.localeCompare(a.created_at)),
         [posts],
     )
     const postedPosts = useMemo(() => {
@@ -1074,7 +1073,8 @@ function ComposerSheet({
             >
             <div className={styles.fieldLabel}>
                 Film
-                <div className={styles.mediaGrid} role="radiogroup" aria-label="Film" onKeyDown={onFilmKeyDown}>
+                {videos.length === 0 && <span className={styles.mediaMeta}>No films yet — upload one in the Library first.</span>}
+                <div className={styles.pickerGrid} role="radiogroup" aria-label="Film" onKeyDown={onFilmKeyDown}>
                     {videos.map((asset, index) => {
                         const url = assetPosterUrl(asset)
                         const selected = videoId === asset.file_id
@@ -1088,14 +1088,18 @@ function ComposerSheet({
                                 ref={(node) => {
                                     filmRefs.current[index] = node
                                 }}
-                                className={styles.mediaCard}
-                                style={selected ? { borderColor: "var(--text-primary)", boxShadow: "inset 0 0 0 1px var(--text-primary)" } : undefined}
+                                className={`${styles.mediaCard} ${styles.pickerCard} ${selected ? styles.pickerCardSelected : ""}`}
                                 onClick={() => setVideoId(asset.file_id)}
                             >
                                 {url ? (
                                     <FadeImg className={styles.mediaThumb} src={url} alt="" loading="lazy" />
                                 ) : (
                                     <span className={styles.mediaThumb} aria-hidden />
+                                )}
+                                {selected && (
+                                    <span className={styles.pickerCheck} aria-hidden>
+                                        <Check size={14} />
+                                    </span>
                                 )}
                                 <span className={styles.mediaCardBody}>
                                     <span className={styles.mediaTitle}>{stripExtension(asset.display_name)}</span>

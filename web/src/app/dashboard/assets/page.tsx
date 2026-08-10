@@ -77,7 +77,12 @@ function LibraryPage() {
     const assets = useMemo(() => assetsResource.data ?? [], [assetsResource.data])
     const setAssets = assetsResource.set
     const reelsResource = useAssets(api, { kind: "render_output" })
-    const reels = useMemo(() => reelsResource.data ?? [], [reelsResource.data])
+    const reels = useMemo(
+        // Newest first, keyed on created_at — the API sorts by updated_at, which
+        // later manifest touches can bump, reshuffling the grid.
+        () => [...(reelsResource.data ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+        [reelsResource.data],
+    )
     const postsResource = usePublishingPosts(api, { status: "all" })
     const posts = useMemo(() => postsResource.data ?? [], [postsResource.data])
     const postByRender = useMemo(() => new Map(posts.map((post) => [post.render_file_id, post])), [posts])
