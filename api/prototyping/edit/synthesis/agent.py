@@ -73,12 +73,12 @@ TOOLS = [
                             },
                             "effect": {
                                 "type": "string",
-                                "enum": ["freeze", "punch_in", "speed_ramp"],
+                                "enum": ["punch_in", "speed_ramp"],
                                 "description": (
-                                    "Optional effect on this shot: freeze (hold the first "
-                                    "frame), punch_in (slow zoom over the shot), or speed_ramp "
-                                    "(the shot accelerates through its second half into the "
-                                    "next cut — use on a build-up, at most once or twice per edit)."
+                                    "Optional effect on this shot: punch_in (slow zoom over "
+                                    "the shot), or speed_ramp (the shot accelerates through "
+                                    "its second half into the next cut — use on a build-up, "
+                                    "at most once or twice per edit)."
                                 ),
                             },
                         },

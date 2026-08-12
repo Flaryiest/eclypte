@@ -230,7 +230,8 @@ steering yet.
 ### Edit — render + CLIP index — `api/prototyping/edit/render/`, `.../index/`
 - **Dual render dispatch** in `render/renderer.py` via `can_render_with_ffmpeg()` (capability-driven):
   - **Native ffmpeg** (`ffmpeg_filtergraph.py` pure builder + `ffmpeg_run.py`) covers cuts/crossfade/
-    whip/flash, freeze/punch_in/speed_ramp, and every ffmpeg-supported skill — one process, ~17×
+    whip/flash, punch_in/speed_ramp (plus legacy freeze for stored timelines — retired from
+    planning), and every ffmpeg-supported skill — one process, ~17×
     faster (frame-parity verified with MoviePy on the base montage).
   - **MoviePy fallback** only for features without a native port (now effectively legacy).
   - Both paths encode identically: **H.264 CRF 18, `-tune animation`, yuv420p, +faststart, AAC 192k**.
