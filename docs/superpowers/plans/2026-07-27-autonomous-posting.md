@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **STATUS (2026-08-12):** All tasks implemented and merged (auto_pair/auto_publish settings, auto-publish send pass, auto-pair replenish + exhaustion/recycle, deletePost veto). Checkboxes below were never ticked during execution — treat this plan as DONE. The deploy-time deletePost veto drill (queue one post, cancel it against live Buffer) remains an operator step.
+
 **Goal:** Autopilot picks film+song pairs itself and sends finished reels to Buffer's queue without manual review, with Buffer's posting schedule as the veto window.
 
 **Architecture:** Two default-off booleans on `AutopilotState` (`auto_pair`, `auto_publish`) gate two new steps inside the existing `run_autopilot_tick` state machine: a replenish step that synthesizes queue items via LRU rotation with exhaustion/recycle tracking, and an auto-send step that pushes `ready`+`auto_created` publishing posts through a shared `send_post_to_buffer` function (extracted from the send-buffer route). Veto = the existing cancel endpoint extended with a Buffer `deletePost` call.

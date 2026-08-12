@@ -215,7 +215,7 @@ export function versionRef(asset: AssetSummary) {
 
 // Turn a raw enum/identifier (snake_case, kebab-case, or lowercase) into a
 // human-readable Title Case label: "music_analysis" -> "Music Analysis",
-// "queued_scheduled" -> "Queued Scheduled", "needs setup" -> "Needs Setup".
+// "needs setup" -> "Needs Setup".
 export function humanizeLabel(value: string) {
     return value
         .replace(/[_-]+/g, " ")
@@ -346,7 +346,6 @@ const STATUS_LABELS: Record<string, string> = {
     created: "Queued",
     pending: "Queued",
     queued: "Queued",
-    queued_scheduled: "Scheduled",
     running: "Working",
     analyzing: "Analyzing",
     editing: "Editing",

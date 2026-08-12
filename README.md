@@ -101,7 +101,7 @@ Current limitations include:
 
 - uploads accept most common audio formats (auto-converted to WAV server-side) but video is still MP4 only
 - speed issues, especially on movie analysis and synthesis, can take a few hours
-- the editing vocabulary is growing but still curated: colour grades, text overlays, word-synced kinetic lyrics (karaoke color sweeps / word pops / building lines, with footage-adaptive placement, color, and a 10-font catalog), a vignette mask, camera-shake accents, flash/crossfade transitions, and freeze/punch-in/speed-ramp effects exist (agent-placed, with a deterministic "rhythm engine" keeping cuts musical) - still a ways from a full-fledged editor with arbitrary layers
+- the editing vocabulary is growing but still curated: colour grades, text overlays, word-synced kinetic lyrics (karaoke color sweeps / word pops / building lines, with footage-adaptive placement, color, and a 10-font catalog), a vignette mask, camera-shake accents, flash/crossfade transitions, and punch-in/speed-ramp effects exist (agent-placed, with a deterministic "rhythm engine" keeping cuts musical) - still a ways from a full-fledged editor with arbitrary layers
 
 ## AI Usage and Disclaimer
 

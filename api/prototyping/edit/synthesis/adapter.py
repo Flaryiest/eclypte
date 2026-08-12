@@ -27,7 +27,10 @@ SOURCE_TIMESTAMP_UNIQUENESS_SEC = 1.0
 BEAT_SNAP_TOLERANCE_SEC = 0.15
 MIN_SNAPPED_SHOT_SEC = 0.4
 AGENT_TRANSITIONS = {"cut", "flash", "crossfade"}
-AGENT_EFFECTS = {"freeze", "punch_in", "speed_ramp"}
+# freeze was removed from the plannable set (2026-08): a held frame reads as a
+# broken video — worst on the opener, bad anywhere in a short reel. The
+# renderer still supports it for previously stored timelines.
+AGENT_EFFECTS = {"punch_in", "speed_ramp"}
 
 # Head/tail anchor guard: the source's opening (logos, title cards, opening
 # credits) and tail (end credits missed by OCR) are where the agent most often
@@ -121,7 +124,6 @@ def adapt(
         return relocated
 
     shots: list[Shot] = []
-    opener_freeze_dropped = False
     for i, raw in enumerate(ordered):
         start_time = float(raw["start_time"])
         end_time = float(raw["end_time"])
@@ -139,18 +141,11 @@ def adapt(
                 f"usable source duration {effective_source_end:.3f}s"
             )
 
-        # Optional agent-chosen styling; unknown values fall back to plain cuts.
+        # Optional agent-chosen styling; unknown values (including the
+        # retired freeze effect) fall back to plain cuts / no effect.
         transition_raw = str(raw.get("transition_in") or "cut")
         effect_raw = str(raw.get("effect") or "")
         effect_type = effect_raw if effect_raw in AGENT_EFFECTS else ""
-
-        # A frozen opener reads as a broken video in the feed — the first
-        # frames must visibly move or the scroll continues. Structural ban,
-        # not just prompt guidance.
-        if effect_type == "freeze" and i == 0:
-            print("adapter: dropped freeze on the opening shot — openers must move")
-            effect_type = ""
-            opener_freeze_dropped = True
 
         # A speed_ramp consumes extra source footage (its second half plays at
         # SPEED_RAMP_END x); extend the window, or drop the effect when the
@@ -327,7 +322,6 @@ def adapt(
                     first.source.start_sec <= ts <= first.source.end_sec
                     for ts, _ in _impact_frames(video)
                 ),
-                "freeze_dropped": opener_freeze_dropped,
             }
 
     return timeline

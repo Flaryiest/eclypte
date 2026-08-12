@@ -312,8 +312,7 @@ def test_adapt_maps_agent_transitions_and_effects():
     agent = [
         {"start_time": 0.0, "end_time": 2.0, "source_timestamp": 10.0,
          "transition_in": "flash", "effect": "punch_in"},
-        {"start_time": 2.0, "end_time": 4.0, "source_timestamp": 60.0,
-         "effect": "freeze"},
+        {"start_time": 2.0, "end_time": 4.0, "source_timestamp": 60.0},
         {"start_time": 4.0, "end_time": 6.0, "source_timestamp": 120.0,
          "transition_in": "wormhole", "effect": "explode"},
     ]
@@ -322,36 +321,23 @@ def test_adapt_maps_agent_transitions_and_effects():
     assert tl.shots[0].transition_in.type == "flash"
     assert [e.type for e in tl.shots[0].effects] == ["punch_in"]
     assert tl.shots[1].transition_in.type == "cut"
-    assert [e.type for e in tl.shots[1].effects] == ["freeze"]
+    assert tl.shots[1].effects == []
     # unknown values fall back to plain cut / no effects
     assert tl.shots[2].transition_in.type == "cut"
     assert tl.shots[2].effects == []
 
 
-def test_adapt_drops_freeze_on_opening_shot():
-    # A frozen opener reads as a broken video mid-scroll — the adapter strips
-    # it (freeze stays legal on any later shot) and flags the drop in the
-    # first_shot telemetry.
+def test_adapt_ignores_retired_freeze_effect():
+    # freeze was removed from the plannable set — a held frame reads as a
+    # broken video. An agent (or a stale stored prompt) that still emits it
+    # gets plain playback on every shot, opener and interior alike.
     agent = [
         {"start_time": 0.0, "end_time": 2.0, "source_timestamp": 10.0, "effect": "freeze"},
         {"start_time": 2.0, "end_time": 4.0, "source_timestamp": 60.0, "effect": "freeze"},
     ]
-    report = {}
-    tl = adapt(agent, SONG, VIDEO, SRC_PATH, AUDIO_PATH, report_sink=report)
+    tl = adapt(agent, SONG, VIDEO, SRC_PATH, AUDIO_PATH)
 
-    assert tl.shots[0].effects == []
-    assert [e.type for e in tl.shots[1].effects] == ["freeze"]
-    assert report["first_shot"]["freeze_dropped"] is True
-
-
-def test_first_shot_report_freeze_not_dropped_by_default():
-    agent = [
-        {"start_time": 0.0, "end_time": 2.0, "source_timestamp": 10.0},
-        {"start_time": 2.0, "end_time": 4.0, "source_timestamp": 60.0},
-    ]
-    report = {}
-    adapt(agent, SONG, VIDEO, SRC_PATH, AUDIO_PATH, report_sink=report)
-    assert report["first_shot"]["freeze_dropped"] is False
+    assert all(shot.effects == [] for shot in tl.shots)
 
 
 def _shot(index, start, end, src_start):

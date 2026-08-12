@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **STATUS (2026-08-12):** All tasks implemented and merged (get_post_metrics, apply_post_metrics + performance_score, tick metrics pass, lineage ids + refresh-status pull, dashboard metrics UI). Checkboxes below were never ticked during execution — treat this plan as DONE. Task 0's live Buffer probe was not run locally (no BUFFER_API_KEY); the implementation is shape-agnostic per the plan's fallback.
+
 **Goal:** Ingest per-reel performance from Buffer's post-metrics API and surface it in the dashboard, storing it so Phase 2 (adaptive steering) needs no migration.
 
 **Architecture:** A metrics-refresh pass joins `run_autopilot_tick`'s post-lock phase (sibling of `_auto_send_ready_posts`), polling Buffer's `Post.metrics` for published posts on a 12h cadence via a new `BufferClient.get_post_metrics`, applied through pure helpers (snapshot policy, baseline-relative log-median scoring) in `api/publishing.py`. New fields ride the existing `PublishingPostRecord`/`PublishingPostView`; the Home feed renders a compact metrics line + relative chip.

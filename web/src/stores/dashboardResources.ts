@@ -40,7 +40,7 @@ export function useEditJobs(api: EclypteApiClient | null): UseResourceResult<Edi
 
 export function usePublishingPosts(
     api: EclypteApiClient | null,
-    filters: { status?: PublishingPostStatus | "queued_scheduled" | "all" } = {},
+    filters: { status?: PublishingPostStatus | "all" } = {},
 ): UseResourceResult<PublishingPost[]> {
     const status = filters.status ?? "all"
     const key = api ? `publishing-posts:${api.userId}:${status}` : null
