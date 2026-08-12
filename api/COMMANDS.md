@@ -248,7 +248,7 @@ saved library, skipping/recycling exhausted pairs — `api/autopilot.py::select_
 instead of requiring a manually queued pair; `auto_publish` sends `ready`
 auto-created packages straight to Buffer's queue on a tick (skipped while
 autopilot is paused or halted, 30-minute retry backoff on a send failure,
-paused once queued posts exceed 2x `daily_target`, send failures never count
+paused once queued posts reach 2x `daily_target`, send failures never count
 toward the 3-failure halt). With `auto_publish` on,
 `POST /v1/publishing/posts/{post_id}/cancel` on a queued/scheduled post is the
 human veto — it deletes the post from Buffer before marking it canceled.
@@ -260,11 +260,16 @@ metrics on a 12h cadence, caps itself at 20 posts/pass, stops polling a post
 after 30 days, and never fails the tick or trips the halt on a fetch error.
 Because the background loop only ticks users with `enabled=true`, pausing
 autopilot pauses this pass along with everything else — use the dashboard's
-manual "Refresh from Buffer" (`refresh-status`) to pull metrics while paused.
+manual "Re-check status" (`refresh-status`) to pull metrics while paused.
 
 Deploy the new R2-aware Modal wrappers before using video-analysis/render API
 jobs against live Modal. Run deploys from `api/prototyping/` so the shared
-`modal_s3` and `progress_events` modules resolve:
+`modal_s3` and `progress_events` modules resolve. Alternatively, deploy from
+GitHub with no local setup: the manually-dispatched "Deploy Modal app"
+workflow (`.github/workflows/modal-deploy.yml`, Actions → Run workflow → pick
+render / video / clip-index / analysis / lyrics) deploys from a checkout of
+the pushed branch; it needs `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` as repo
+secrets (preferred) or Actions variables:
 
 ```powershell
 cd api/prototyping

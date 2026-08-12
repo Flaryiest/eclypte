@@ -379,19 +379,15 @@ export class EclypteApiClient {
     }
 
     async listPublishingPosts(
-        filters: { status?: PublishingPostStatus | "queued_scheduled" | "all" } = {},
+        filters: { status?: PublishingPostStatus | "all" } = {},
         signal?: AbortSignal,
     ) {
         const params = new URLSearchParams()
-        if (filters.status && filters.status !== "all" && filters.status !== "queued_scheduled") {
+        if (filters.status && filters.status !== "all") {
             params.set("status", filters.status)
         }
         const query = params.size ? `?${params.toString()}` : ""
-        const posts = await this.request<PublishingPost[]>(`/v1/publishing/posts${query}`, { signal })
-        if (filters.status === "queued_scheduled") {
-            return posts.filter((post) => post.status === "queued" || post.status === "scheduled")
-        }
-        return posts
+        return this.request<PublishingPost[]>(`/v1/publishing/posts${query}`, { signal })
     }
 
     async createPublishingPost(

@@ -13,8 +13,10 @@ With the cache, the **second** visit to a page paints instantly from cache and r
 background, and pages that request the same data share a single fetch.
 
 > This cache holds **structural records only** (`AssetSummary`, `RunManifest`, `PublishingPost`, …).
-> It must **never** cache signed download/preview URLs — those come from separate `getDownloadUrl`
-> calls and expire.
+> Signed `poster_url`/`render_url` fields embedded in those list payloads ride along and are
+> re-signed on each revalidate (`posterUrls.ts`'s `stableMediaUrl` pins them per file+version);
+> never add a resource whose cached value is a standalone signed URL (e.g. a `getDownloadUrl`
+> result) — those expire.
 
 ## Files
 
@@ -22,7 +24,7 @@ background, and pages that request the same data share a single fetch.
 |------|----------------|
 | `dashboardStore.ts` | The zustand store: a `Record<key, ResourceEntry>` cache plus three actions (`ensureFresh`, `revalidate`, `patch`). Framework-agnostic; knows nothing about specific resources. |
 | `useResource.ts` | The generic React hook. Subscribes a component to one cache entry and triggers stale-while-revalidate on mount. Returns `{ data, status, error, isLoading, isValidating, revalidate, set }`. |
-| `dashboardResources.ts` | Typed, user-scoped wrappers — `useAssets`, `useEditJobs`, `usePublishingPosts`, `useSynthesisReferences`, `useSynthesisPrompt`, `useAutopilot`. Each builds a cache key and delegates to `useResource`. **This is the layer pages import.** |
+| `dashboardResources.ts` | Typed, user-scoped wrappers — `useAssets`, `useEditJobs`, `usePublishingPosts`, `usePublishingConfig`, `useSynthesisReferences`, `useSynthesisPrompt`, `useAutopilot`. Each builds a cache key and delegates to `useResource`. **This is the layer pages import.** |
 
 ## How it works
 
@@ -120,14 +122,14 @@ const refresh = assetsResource.revalidate  // pass to useRunStream / a Refresh b
   user can edit it, a background revalidate must not clobber unsaved edits. `synthesis` seeds the
   prompt textarea only when it still equals the last value we wrote (`lastSeededRef`).
 - **Don't re-seed editors on every poll.** The Home feed polls Buffer every ~25 s and patches
-  `posts`; it guards the caption editor and `<video>` with `syncedPostIdRef`/`previewKeyRef` so a
+  `posts`; it guards the caption editor and `<video>` with `syncedPostIdRef` (the `<video>` src stays stable via `posterUrls.ts`'s `stableMediaUrl` pin) so a
   replaced post object (same `post_id`) doesn't reset them.
 
 ## Page → resource map
 
 | Page | Resources |
 |------|-----------|
-| `/dashboard` (Home) | `useAutopilot`, `usePublishingPosts({ status: "all" })`, `useEditJobs`, `useAssets({ includeArchived: true })` (videos/songs filtered client-side — shares the library cache) |
+| `/dashboard` (Home) | `useAutopilot`, `usePublishingPosts({ status: "all" })`, `usePublishingConfig`, `useEditJobs`, `useAssets({ includeArchived: true })` (videos/songs filtered client-side — shares the library cache) |
 | `/assets` (Library) | `useAssets({ includeArchived: true })`, `useAssets({ kind: "render_output" })` (Reels tab), `usePublishingPosts({ status: "all" })` |
 | `/new-edit` | `useAssets({ includeArchived: true })`, `useEditJobs` |
 | `/synthesis` | `useSynthesisReferences`, `useSynthesisPrompt` |

@@ -172,9 +172,9 @@ git commit -m "feat(publishing): Instagram Graph API client - containers, canary
 - Modify: `api/storage/models.py` (`PublishingPostRecord` additive fields), `api/publishing.py`, `api/app.py` (send route + autopilot `send_ready_post` closure), `api/autopilot.py` (protocol untouched — dispatch stays in app.py)
 - Test: `api/storage/test_models.py`, `api/test_publishing.py`, `api/test_api_v1.py`
 
-**Interfaces:** `PublishingPostRecord.publish_provider: str | None`, `.ig_container_id: str | None`, `.ig_media_id: str | None`, `.copyright_status: str | None`; `resolve_publish_provider_env() -> str` (`"buffer"` default, `"graph"` allowed, anything else raises); `send_ready_post_for_provider(repo, user_id, post, ...)` dispatching to `send_post_to_buffer` or `send_post_via_graph`.
+**Interfaces:** `PublishingPostRecord.provider: str = "buffer"` (as built: the pre-existing field, stamped `"graph"` at graph-send time), `.ig_container_id: str | None`, `.ig_media_id: str | None`, `.copyright_status: str | None`; `resolve_publish_provider_env() -> str` (`"buffer"` default, `"graph"` allowed, anything else raises); inline provider dispatch (send route + autopilot send closure, keyed on `resolve_publish_provider_env()`) between `send_post_to_buffer` and `send_post_via_graph` (as built — no separate dispatch helper).
 
-- [x] **Step 1: Failing tests** — model round-trip for the new fields; provider resolution default/invalid; `send_post_via_graph` happy path with a fake `GraphPublisher` (public copies prepared, container created with caption+hashtags via `format_post_text` and `cover_url`, polled to `FINISHED`, published, record stamped `status="published"`, `posted_at`, `publish_provider="graph"`, `ig_media_id`, permalink from `get_media`); copyright-match path (a `matches_found` outcome with a MUTE/BLOCK action raises `CopyrightBlockedError`; the record keeps `status="ready"` and stamps `copyright_status` — the veto stays human-visible, NOT `last_error`-driven auto-retry).
+- [x] **Step 1: Failing tests** — model round-trip for the new fields; provider resolution default/invalid; `send_post_via_graph` happy path with a fake `GraphPublisher` (public copies prepared, container created with caption+hashtags via `format_post_text` and `cover_url`, polled to `FINISHED`, published, record stamped `status="published"`, `posted_at`, `provider="graph"`, `ig_media_id`, permalink from `get_media`); copyright-match path (a `matches_found` outcome with a MUTE/BLOCK action raises `CopyrightBlockedError`; the record keeps `status="ready"` and stamps `copyright_status` — the veto stays human-visible, NOT `last_error`-driven auto-retry).
 
 - [x] **Step 2: Run to verify failure**
 
@@ -226,7 +226,7 @@ Commit: `feat(publishing): attach licensed library audio to graph-published reel
 
 - [x] **Step 2: Run to verify failure**
 
-- [x] **Step 3: Implement** — provider dispatch inside the metrics pass keyed on `publish_provider`/`ig_media_id`; insight metric names normalized to the same lowercase keys the Buffer path stores (probe-verified list, e.g. `views, reach, likes, comments, shares, saved`) so `performance_score`'s views→impressions fallback keeps working across providers.
+- [x] **Step 3: Implement** — provider dispatch inside the metrics pass keyed on `provider`/`ig_media_id`; insight metric names normalized to the same lowercase keys the Buffer path stores (probe-verified list, e.g. `views, reach, likes, comments, shares, saved`) so `performance_score`'s views→impressions fallback keeps working across providers.
 
 - [x] **Step 4: Run** — `.venv/bin/python -m pytest api/test_autopilot.py api/test_publishing.py -v` → PASS
 

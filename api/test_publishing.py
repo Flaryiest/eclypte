@@ -839,7 +839,7 @@ def save_queued_post(repo: StorageRepository, *, buffer_post_id: str, body: byte
 
 
 def test_create_post_resolves_movie_and_song_names_from_render_lineage():
-    from api.storage.refs import FileRef, RunRef
+    from api.storage.refs import FileRef
 
     store = InMemoryObjectStore()
     repo = StorageRepository(store)
@@ -970,7 +970,7 @@ def test_create_post_captures_render_poster_ref_from_source_run():
 
 
 def test_send_post_to_buffer_queue_mode_shared_function(monkeypatch):
-    from api.publishing import SendToBufferError, send_post_to_buffer
+    from api.publishing import send_post_to_buffer
 
     monkeypatch.setenv("BUFFER_INSTAGRAM_CHANNEL_ID", "chan_1")
     monkeypatch.setenv("ECLYPTE_R2_PUBLIC_BASE_URL", "https://media.example.com")
@@ -1581,7 +1581,7 @@ def test_send_route_graph_copyright_veto_returns_409(monkeypatch):
 
     assert sent.status_code == 409
     fresh = client.get(
-        f"/v1/publishing/posts?status=ready", headers={"X-User-Id": "user_123"}
+        "/v1/publishing/posts?status=ready", headers={"X-User-Id": "user_123"}
     ).json()
     assert fresh[0]["copyright_status"] == "matches_found"
 

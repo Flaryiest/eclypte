@@ -22,8 +22,8 @@ It is deliberately **quality-over-speed**: every scene/frame of video and every 
 analyzed before an edit is composed, so a single finished video can take **hours** (movie analysis
 dominates). It began as a personal/portfolio project (see [`README.md`](README.md)).
 
-**Scale (post the July 2026 de-bloat):** ~14k lines of application Python across `api/` including
-the `api/prototyping/` workers, plus ~10k lines of tests; ~6.9k lines of TS/TSX and ~3.6k of CSS
+**Scale (post the July 2026 de-bloat):** ~16.5k lines of application Python across `api/` including
+the `api/prototyping/` workers, plus ~13k lines of tests; ~6.9k lines of TS/TSX and ~3.6k of CSS
 in `web/src`. Tracked repo is ~200 MB, dominated by the served demo videos under `web/public/demo/`.
 
 ---
@@ -106,7 +106,7 @@ steering yet.
 
 ### Control plane — `api/`
 - **`main.py`** — ASGI entrypoint (`app = create_app()`, uvicorn on `$PORT`).
-- **`app.py`** (~1980 lines) — `create_app()` factory: CORS, dependency injection, all routes,
+- **`app.py`** (~2200 lines) — `create_app()` factory: CORS, dependency injection, all routes,
   background scheduling.
   - **Temp auth:** `user_id()` trusts the `X-User-Id` header verbatim (falling back to
     `ECLYPTE_DEFAULT_USER_ID`). There is **no verification yet** — so no real tenant isolation; the
@@ -121,9 +121,9 @@ steering yet.
 - **`workflows.py`** (~1900 lines) — `WorkflowRunner` protocol + `DefaultWorkflowRunner`; every
   `run_*` workflow. Version-gates CLIP-index reuse via `CLIP_INDEX_BUILD_STEP`; caps usable source
   at `credits.content_end_sec`; fails a run if the timeline is >0.75s shorter than the trimmed song.
-- **`autopilot.py`** (~760 lines) — `run_autopilot_tick` state machine
+- **`autopilot.py`** (~1040 lines) — `run_autopilot_tick` state machine
   (`pending → analyzing → editing → packaged`). Ranks ~20–30s (≈25s) trim windows by
-  energy (chorus bonus + 5s lead-in), dedupes `(video, song, window)`, always uses
+  energy (chorus bonus + 1.5s lead-in), dedupes `(video, song, window)`, always uses
   `reels_9_16` (fill-frame, `edit_focus="moment"`), **halts after 3 consecutive failures**, and auto-creates `ready` review
   packages (`auto_created=true`) — review-gated by default. Two per-user opt-in flags extend it:
   **`auto_pair`** adds a replenish step that LRU-rotates saved films × songs (`select_next_pair`),
@@ -140,11 +140,14 @@ steering yet.
   users with an enabled marker, pausing autopilot pauses this metrics pass too (the manual
   `refresh-status` route still works). `STATE_LOCK` (single-replica only) still guards the state
   read-modify-write. Loop runs when `ECLYPTE_AUTOPILOT=1`.
-- **`publishing.py`** (~890 lines) — `BufferClient` (GraphQL, Instagram `reel`, plus `deletePost` and
+- **`publishing.py`** (~1220 lines) — `BufferClient` (GraphQL, Instagram `reel`, plus `deletePost` and
   `get_post_metrics` mutations/queries), OpenAI caption generation (`ECLYPTE_CAPTION_MODEL`, default
   `gpt-5.4-mini`; deterministic fallback), public R2 media copy, a shared `send_post_to_buffer` (used
   by both the `send-buffer` route and autopilot's `auto_publish` pass), and Buffer status
-  reconciliation. `now` posts via a near-future `dueAt` (Buffer has no instant publish); `cancel` on
+  reconciliation. Under `ECLYPTE_PUBLISH_PROVIDER=graph`, both send paths dispatch via
+  `resolve_publish_provider_env()` to `send_post_via_graph` (immediate Graph publish with a
+  copyright canary; the auto-send pass becomes the slot-spaced scheduler and metrics come from
+  Graph insights). `now` posts via a near-future `dueAt` (Buffer has no instant publish); `cancel` on
   a queued/scheduled post now deletes it from Buffer first — the veto for anything sent, manually or
   by `auto_publish`. **Performance feedback loop (Phase 1):** `apply_post_metrics` (pure fold —
   a `PostMetricsSnapshot` lands in `metrics_history` only when the reading changed, capped at the
@@ -300,20 +303,24 @@ Breaking any of these silently breaks another layer:
 - **Frontend:** from `web/` — `npm run lint`, `npm run build`. Dev runs via `scripts/dev.mjs`
   (`next dev --webpack`).
 - **Deploy:** Railway/Railpack uses the root `requirements.txt` + `python -m api.main` (Python 3.13);
-  Modal apps deploy separately (`modal deploy`; prefix `PYTHONUTF8=1` on Windows); Vercel hosts
+  Modal apps deploy separately — locally (`modal deploy`; prefix `PYTHONUTF8=1` on Windows) or via the manual GitHub Actions workflow (`.github/workflows/modal-deploy.yml`, per-app `workflow_dispatch`); Vercel hosts
   `web/`.
 
 ---
 
 ## Current focus & known gaps
 
-- **Active push:** edit quality. All four phases of the July 2026 roadmap are implemented: the
+- **Active push:** reach hygiene + direct Graph publishing (Aug 2026): Phase A ships `reels_9_16`
+  fill-frame, single-scene `edit_focus="moment"` plans, hard endings, a 1.5s chorus lead-in, and
+  niche captions with a repetition guard; Phase B (`ECLYPTE_PUBLISH_PROVIDER=graph` via
+  `api/instagram_graph.py`) awaits the operator's Meta app/token setup. The prior edit-quality
+  push is fully implemented underneath: the
   rhythm engine (downbeat-preferred early snapping, impact→downbeat registration, section pacing),
   the ffmpeg polish foundation (skill kinds + capability-driven dispatch), the polish catalog
   (grades, impact.shake + auto-accents, real speed_ramp), and plan-time reference-derived style
   profiles — plus **kinetic lyrics** on top (word-synced ASS/libass lyric text with
   footage-adaptive layout and a curated font catalog). Autopilot Reels growth continues underneath
-  (`reels_cinematic`, ~25s energy windows, review-gated Buffer publishing, AI captions) — now with
+  (`reels_9_16` fill-frame, single-scene `edit_focus="moment"` plans, ~25s energy windows, review-gated Buffer publishing, AI captions) — now with
   opt-in autonomy: `auto_pair` (LRU-rotates the saved library, with exhaustion + recycle) and
   `auto_publish` (drains ready packages into Buffer's queue, trading manual review for a
   Buffer-schedule-driven veto window via the extended `cancel` route). On top of that, a
@@ -323,7 +330,7 @@ Breaking any of these silently breaks another layer:
   posted-reel cards and review sheet — ingestion + visibility only, no adaptive steering yet.
 - **Deferred:** text-behind-subject masking for kinetic lyrics (needs a GPU segmentation matte);
   `whip` transition and `hold` effect (cut/no-op); a YouTube publishing path (16:9 renders exist,
-  no upload integration); a single-scene vs. full-source-montage retention experiment; per-shot
+  no upload integration); per-shot
   crop focus for fill-mode reels; performance feedback loop Phase 2 (adaptive pairing/window
   steering from `performance_score`); Buffer post metrics are licensed for personal
   workflows/automations only — a known multi-tenant blocker (upgrade path: direct Meta "Instagram
