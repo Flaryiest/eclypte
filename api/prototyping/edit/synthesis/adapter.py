@@ -121,6 +121,7 @@ def adapt(
         return relocated
 
     shots: list[Shot] = []
+    opener_freeze_dropped = False
     for i, raw in enumerate(ordered):
         start_time = float(raw["start_time"])
         end_time = float(raw["end_time"])
@@ -142,6 +143,14 @@ def adapt(
         transition_raw = str(raw.get("transition_in") or "cut")
         effect_raw = str(raw.get("effect") or "")
         effect_type = effect_raw if effect_raw in AGENT_EFFECTS else ""
+
+        # A frozen opener reads as a broken video in the feed — the first
+        # frames must visibly move or the scroll continues. Structural ban,
+        # not just prompt guidance.
+        if effect_type == "freeze" and i == 0:
+            print("adapter: dropped freeze on the opening shot — openers must move")
+            effect_type = ""
+            opener_freeze_dropped = True
 
         # A speed_ramp consumes extra source footage (its second half plays at
         # SPEED_RAMP_END x); extend the window, or drop the effect when the
@@ -318,6 +327,7 @@ def adapt(
                     first.source.start_sec <= ts <= first.source.end_sec
                     for ts, _ in _impact_frames(video)
                 ),
+                "freeze_dropped": opener_freeze_dropped,
             }
 
     return timeline
